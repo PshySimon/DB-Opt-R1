@@ -75,6 +75,18 @@ python3 -c "import psycopg2, yaml" 2>/dev/null || {
     exit 1
 }
 
+# 检查 PG 是否在运行，没有则自动启动
+if ! pg_isready -q -p $PG_PORT 2>/dev/null; then
+    echo "PostgreSQL 未运行，尝试自动启动..."
+    pg_ctlcluster 16 main start 2>/dev/null || {
+        echo "错误: PostgreSQL 启动失败，请手动检查"
+        exit 1
+    }
+    echo "  ✓ PostgreSQL 已启动"
+else
+    echo "  ✓ PostgreSQL 运行中"
+fi
+
 # 自动创建数据库（如果不存在）
 echo "检查数据库 ${PG_DATABASE}..."
 psql -U $PG_USER -p $PG_PORT -tc "SELECT 1 FROM pg_database WHERE datname = '$PG_DATABASE'" | grep -q 1 || {
