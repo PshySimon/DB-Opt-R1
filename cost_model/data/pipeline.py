@@ -118,6 +118,12 @@ class Pipeline:
 
         signal.signal(signal.SIGTERM, _signal_handler)
         signal.signal(signal.SIGINT, _signal_handler)
+
+        # 开始前先重置 PG 到默认配置
+        logger.info("重置 PG 到默认配置...")
+        self.pg_ctl.reset_to_default()
+        self.pg_ctl.restart()
+
         n = num_rounds or self.num_rounds
 
         # 生成所有 knob 配置
