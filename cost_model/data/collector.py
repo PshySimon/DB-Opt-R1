@@ -378,12 +378,14 @@ class DataCollector:
             flat[f"knob_{k}"] = v
 
         # 全局 metrics: metric_pg_stat_bgwriter_buffers_alloc, ...
-        for view, data in snapshot["metrics"].get("global", {}).items():
+        # 兼容 collect_snapshot (metrics) 和 collect_diff (metrics_diff)
+        metrics_data = snapshot.get("metrics") or snapshot.get("metrics_diff", {})
+        for view, data in metrics_data.get("global", {}).items():
             for k, v in data.items():
                 flat[f"metric_{view}_{k}"] = v
 
         # 本地 metrics: 聚合（求和）所有表/索引的数值
-        for view, tables in snapshot["metrics"].get("local", {}).items():
+        for view, tables in metrics_data.get("local", {}).items():
             agg = {}
             for table_name, data in tables.items():
                 for k, v in data.items():
