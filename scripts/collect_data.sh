@@ -64,10 +64,18 @@ echo "采样策略:  ${SAMPLING}"
 echo ""
 
 # 检查依赖
-python -c "import psycopg2, yaml" 2>/dev/null || {
+python3 -c "import psycopg2, yaml" 2>/dev/null || {
     echo "错误: 缺少依赖，请运行: pip install -r requirements.txt"
     exit 1
 }
+
+# 自动创建数据库（如果不存在）
+echo "检查数据库 ${PG_DATABASE}..."
+psql -U $PG_USER -h $PG_HOST -p $PG_PORT -tc "SELECT 1 FROM pg_database WHERE datname = '$PG_DATABASE'" | grep -q 1 || {
+    echo "  → 创建数据库 ${PG_DATABASE}..."
+    psql -U $PG_USER -h $PG_HOST -p $PG_PORT -c "CREATE DATABASE $PG_DATABASE;"
+}
+echo "  ✓ 数据库 ${PG_DATABASE} 就绪"
 
 # 构建命令
 CMD="python -m cost_model.data.pipeline \
