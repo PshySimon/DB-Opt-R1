@@ -13,11 +13,33 @@ logger = logging.getLogger(__name__)
 class BenchmarkRunner:
     """运行 benchmark 并返回性能指标"""
 
+    # 预定义负载类型
+    WORKLOADS = {
+        "mixed": {
+            "desc": "TPC-B 读写混合（默认）",
+            "pgbench_flags": "",
+        },
+        "read_only": {
+            "desc": "只读查询",
+            "pgbench_flags": "-S",
+        },
+        "high_concurrency": {
+            "desc": "高并发（64连接）",
+            "pgbench_flags": "",
+            "clients": 64,
+            "threads": 8,
+        },
+        "write_heavy": {
+            "desc": "写密集（仅 INSERT/UPDATE）",
+            "pgbench_flags": "-N",
+        },
+    }
+
     def __init__(self, tool: str = "pgbench",
                  pg_host: str = "127.0.0.1", pg_port: int = 5432,
                  pg_user: str = "postgres", pg_database: str = "postgres",
                  duration: int = 60, clients: int = 8, threads: int = 4,
-                 scale_factor: int = 10):
+                 scale_factor: int = 10, workload: str = "mixed"):
         self.tool = tool
         self.pg_host = pg_host
         self.pg_port = pg_port
@@ -27,6 +49,7 @@ class BenchmarkRunner:
         self.clients = clients
         self.threads = threads
         self.scale_factor = scale_factor
+        self.workload = workload
 
     def init_benchmark(self):
         """初始化 benchmark 数据（只需运行一次）"""
@@ -70,12 +93,17 @@ class BenchmarkRunner:
         logger.info("pgbench 初始化完成")
 
     def _run_pgbench(self) -> dict:
+        wl = self.WORKLOADS.get(self.workload, self.WORKLOADS["mixed"])
+        clients = wl.get("clients", self.clients)
+        threads = wl.get("threads", self.threads)
+        flags = wl.get("pgbench_flags", "")
+
         cmd = (
-            f"pgbench -c {self.clients} -j {self.threads} -T {self.duration} "
+            f"pgbench {flags} -c {clients} -j {threads} -T {self.duration} "
             f"-h {self.pg_host} -p {self.pg_port} "
             f"-U {self.pg_user} {self.pg_database}"
         )
-        logger.info(f"运行 pgbench: {cmd}")
+        logger.info(f"运行 pgbench [{self.workload}]: {cmd}")
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True,
                                 timeout=self.duration + 60)
         if result.returncode != 0:

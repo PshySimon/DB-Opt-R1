@@ -22,7 +22,7 @@ class Pipeline:
                  pg_user: str = "postgres", pg_password: str = "",
                  pg_database: str = "postgres", pg_data_dir: str = None,
                  output_dir: str = "./cost_model/data/raw",
-                 seed: int = None):
+                 seed: int = None, workload: str = "mixed"):
 
         # 加载配置
         self.knob_space = KnobSpace(config_path)
@@ -46,7 +46,9 @@ class Pipeline:
             clients=bench_cfg.get("clients", 8),
             threads=bench_cfg.get("threads", 4),
             scale_factor=bench_cfg.get("scale_factor", 10),
+            workload=workload,
         )
+        self.workload = workload
 
         self.output_dir = output_dir
         self.num_rounds = coll_cfg.get("num_rounds", 100)
@@ -148,7 +150,8 @@ class Pipeline:
         diff_data = collector.collect_diff(snapshot_before, snapshot_after)
         flat = collector.flatten_snapshot(diff_data)
 
-        # 追加性能指标作为 label
+        # 追加性能指标和负载类型作为 label
+        flat["workload"] = self.workload
         flat["tps"] = perf["tps"]
         flat["latency_avg"] = perf["latency_avg"]
         flat["latency_p95"] = perf.get("latency_p95")
@@ -175,6 +178,9 @@ if __name__ == "__main__":
     parser.add_argument("--init", action="store_true",
                         help="初始化 benchmark 数据")
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--workload", default="mixed",
+                        choices=["mixed", "read_only", "high_concurrency", "write_heavy", "all"],
+                        help="负载类型，all=每轮随机选一种")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -182,15 +188,36 @@ if __name__ == "__main__":
         format="%(asctime)s [%(levelname)s] %(message)s"
     )
 
-    pipeline = Pipeline(
-        config_path=args.config,
-        pg_host=args.host, pg_port=args.port,
-        pg_user=args.user, pg_password=args.password,
-        pg_database=args.database, pg_data_dir=args.pg_data_dir,
-        output_dir=args.output, seed=args.seed,
-    )
+    if args.workload == "all":
+        # 每种负载各跑 rounds/4 轮
+        import random
+        workloads = ["mixed", "read_only", "high_concurrency", "write_heavy"]
+        rounds_per = max(1, (args.rounds or 100) // len(workloads))
+        for wl in workloads:
+            logger.info(f"\n{'#'*50}")
+            logger.info(f"  负载类型: {wl} ({rounds_per} 轮)")
+            logger.info(f"{'#'*50}")
+            p = Pipeline(
+                config_path=args.config,
+                pg_host=args.host, pg_port=args.port,
+                pg_user=args.user, pg_password=args.password,
+                pg_database=args.database, pg_data_dir=args.pg_data_dir,
+                output_dir=args.output, seed=args.seed, workload=wl,
+            )
+            if args.init:
+                p.init()
+                args.init = False  # 只初始化一次
+            p.run(num_rounds=rounds_per, sampling=args.sampling)
+    else:
+        pipeline = Pipeline(
+            config_path=args.config,
+            pg_host=args.host, pg_port=args.port,
+            pg_user=args.user, pg_password=args.password,
+            pg_database=args.database, pg_data_dir=args.pg_data_dir,
+            output_dir=args.output, seed=args.seed, workload=args.workload,
+        )
 
-    if args.init:
-        pipeline.init()
+        if args.init:
+            pipeline.init()
 
-    pipeline.run(num_rounds=args.rounds, sampling=args.sampling)
+        pipeline.run(num_rounds=args.rounds, sampling=args.sampling)
