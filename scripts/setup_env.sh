@@ -97,9 +97,10 @@ else
     $SUDO sed -i "s/#log_checkpoints = off/log_checkpoints = on/" $PG_CONF
 
     echo "  → 配置本地免密登录"
-    # 允许本地免密登录
+    # 允许本地免密登录（postgres 用户和 all 用户两行都改）
     if [ -n "$PG_HBA" ]; then
-        $SUDO sed -i "s/local\s\+all\s\+all\s\+peer/local   all             all                                     trust/" $PG_HBA
+        sed -i 's/local\s\+all\s\+postgres\s\+peer/local   all             postgres                                trust/' $PG_HBA
+        sed -i 's/local\s\+all\s\+all\s\+peer/local   all             all                                     trust/' $PG_HBA
     fi
     echo "  ✓ 配置修改完成"
 fi
