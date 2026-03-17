@@ -78,15 +78,18 @@ psql -U $PG_USER -p $PG_PORT -tc "SELECT 1 FROM pg_database WHERE datname = '$PG
 echo "  ✓ 数据库 ${PG_DATABASE} 就绪"
 
 # 构建命令
-CMD="python -m cost_model.data.pipeline \
+CMD="python3 -m cost_model.data.pipeline \
     --config configs/knob_space.yaml \
     --host $PG_HOST --port $PG_PORT \
-    --user $PG_USER --password $PG_PASSWORD \
+    --user $PG_USER \
     --database $PG_DATABASE \
     --output $OUTPUT_DIR \
     --rounds $ROUNDS \
     --sampling $SAMPLING"
 
+if [ -n "$PG_PASSWORD" ]; then
+    CMD="$CMD --password $PG_PASSWORD"
+fi
 if [ -n "$PG_DATA_DIR" ]; then
     CMD="$CMD --pg-data-dir $PG_DATA_DIR"
 fi
