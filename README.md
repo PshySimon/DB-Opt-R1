@@ -64,16 +64,21 @@ bash scripts/setup_env.sh
 
 ## 数据采集
 
+**首次使用**必须加 `--init` 初始化 pgbench 测试表（只需一次）：
+
 ```bash
-# 基础用法：初始化 + 采集 200 轮
-bash scripts/collect_data.sh --init --rounds 200 --database benchmark
+# 第一次：初始化 + 采集
+bash scripts/collect_data.sh --init --rounds 1500 --database benchmark --workload all --background
+```
 
-# 多负载类型（推荐）：4 种负载各跑 N/4 轮
-bash scripts/collect_data.sh --rounds 1500 --database benchmark --workload all
+之后再跑**无需** `--init`：
 
-# 后台运行
+```bash
+# 后续：直接采集
 bash scripts/collect_data.sh --rounds 1500 --database benchmark --workload all --background
 ```
+
+> ⚠️ 重建数据库或重装 PG 后需重新 `--init`
 
 **负载类型**：
 
