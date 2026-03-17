@@ -3,6 +3,8 @@
 """
 
 import logging
+import signal
+import subprocess
 import time
 from pathlib import Path
 
@@ -12,6 +14,33 @@ from .pg_configurator import PGConfigurator
 from .benchmark_runner import BenchmarkRunner
 
 logger = logging.getLogger(__name__)
+
+
+def _cleanup_on_exit(pg_ctl: PGConfigurator):
+    """进程退出时清理：杀 pgbench、恢复 PG 配置"""
+    logger.info("收到终止信号，正在清理...")
+
+    # 1. 杀掉所有 pgbench 进程
+    try:
+        subprocess.run(["pkill", "-f", "pgbench"], capture_output=True, timeout=5)
+        logger.info("  已停止 pgbench")
+    except Exception:
+        pass
+
+    # 2. 重置 PG 配置
+    try:
+        pg_ctl.reset_to_default()
+        pg_ctl.restart()
+        logger.info("  已恢复 PG 默认配置并重启")
+    except Exception:
+        try:
+            pg_ctl.force_reset()
+            pg_ctl.restart()
+            logger.info("  已强制恢复 PG 并重启")
+        except Exception as e:
+            logger.error(f"  PG 恢复失败: {e}")
+
+    logger.info("清理完成，退出")
 
 
 class Pipeline:
@@ -82,6 +111,13 @@ class Pipeline:
             num_rounds: 采集轮数，默认使用配置文件中的值
             sampling: 采样策略，"random" 或 "lhs"
         """
+        # 注册退出清理信号
+        def _signal_handler(sig, frame):
+            _cleanup_on_exit(self.pg_ctl)
+            exit(0)
+
+        signal.signal(signal.SIGTERM, _signal_handler)
+        signal.signal(signal.SIGINT, _signal_handler)
         n = num_rounds or self.num_rounds
 
         # 生成所有 knob 配置
