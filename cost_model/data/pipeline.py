@@ -138,9 +138,17 @@ class Pipeline:
                 try:
                     self.pg_ctl.reset_to_default()
                     self.pg_ctl.restart()
+                    logger.info("  ✓ 已恢复默认配置")
                 except Exception:
-                    logger.error("恢复默认配置失败，请手动检查 PG 状态")
-                    break
+                    # PG 挂了，强制清文件重启
+                    try:
+                        logger.warning("  SQL 恢复失败，强制清配置文件重启...")
+                        self.pg_ctl.force_reset()
+                        self.pg_ctl.restart()
+                        logger.info("  ✓ 强制恢复成功")
+                    except Exception as re:
+                        logger.error(f"  强制恢复也失败: {re}，跳过本轮继续")
+                        continue
 
         logger.info(f"采集完成: 成功 {success_count} 轮，失败 {fail_count} 轮")
         logger.info(f"数据保存在: {self.output_dir}/dataset.csv")

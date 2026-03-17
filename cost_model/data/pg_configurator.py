@@ -90,8 +90,30 @@ class PGConfigurator:
             conn.close()
             logger.info("已重置所有 knob 到默认值")
         except Exception as e:
-            logger.error(f"重置失败: {e}")
-            raise
+            logger.warning(f"SQL 重置失败: {e}，尝试直接清除配置文件")
+            self.force_reset()
+
+    def force_reset(self):
+        """强制重置：直接清空 postgresql.auto.conf（PG 挂掉时用）"""
+        import glob
+        auto_conf_patterns = [
+            "/var/lib/postgresql/*/main/postgresql.auto.conf",
+            f"{self.pg_data_dir}/postgresql.auto.conf" if self.pg_data_dir else "",
+        ]
+        for pattern in auto_conf_patterns:
+            if not pattern:
+                continue
+            for path in glob.glob(pattern):
+                try:
+                    with open(path, 'w') as f:
+                        f.write('# auto-generated - cleared by force_reset\n')
+                    # 修复权限
+                    import subprocess
+                    subprocess.run(['chown', 'postgres:postgres', path],
+                                   capture_output=True, timeout=5)
+                    logger.info(f"已清空 {path}")
+                except Exception as e:
+                    logger.error(f"清空 {path} 失败: {e}")
 
     def verify_config(self, knob_config: dict) -> dict:
         """验证配置是否已生效，返回实际值"""
