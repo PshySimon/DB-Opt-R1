@@ -417,19 +417,34 @@ class DataCollector:
 
     def save_csv(self, flat_row: dict, output_dir: str,
                  filename: str = "dataset.csv"):
-        """追加一行到 CSV 文件"""
+        """追加一行到 CSV 文件（自动对齐列）"""
         import csv
 
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         filepath = output_path / filename
 
-        file_exists = filepath.exists()
+        file_exists = filepath.exists() and filepath.stat().st_size > 0
+
+        if file_exists:
+            # 读取已有 header
+            with open(filepath, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                existing_columns = next(reader)
+            # 合并：已有列 + 新列（如果有的话）
+            new_cols = [k for k in flat_row.keys() if k not in existing_columns]
+            all_columns = existing_columns + new_cols
+        else:
+            all_columns = list(flat_row.keys())
+
+        # 缺失列补空值
+        aligned_row = {col: flat_row.get(col, "") for col in all_columns}
+
         with open(filepath, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=flat_row.keys())
+            writer = csv.DictWriter(f, fieldnames=all_columns)
             if not file_exists:
                 writer.writeheader()
-            writer.writerow(flat_row)
+            writer.writerow(aligned_row)
 
         logger.info(f"CSV 已追加到 {filepath}")
         return str(filepath)
