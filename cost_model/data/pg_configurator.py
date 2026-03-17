@@ -68,11 +68,14 @@ class PGConfigurator:
         logger.info("正在重启 PostgreSQL...")
 
         if self.pg_data_dir:
-            # 使用 pg_ctl
             self._run_cmd(f"pg_ctl -D {self.pg_data_dir} restart -w -t {RESTART_TIMEOUT}")
         else:
-            # 使用 systemctl (Linux)
-            self._run_cmd("sudo systemctl restart postgresql")
+            # 优先 pg_ctlcluster（Debian/Ubuntu 容器），其次 systemctl
+            import shutil
+            if shutil.which("pg_ctlcluster"):
+                self._run_cmd("pg_ctlcluster 16 main restart")
+            else:
+                self._run_cmd("sudo systemctl restart postgresql")
 
         # 等待 PG 就绪
         self._wait_ready()
@@ -106,11 +109,13 @@ class PGConfigurator:
 
     def _get_connection(self):
         import psycopg2
-        return psycopg2.connect(
+        conn = psycopg2.connect(
             host=self.pg_host, port=self.pg_port,
             user=self.pg_user, password=self.pg_password,
             database=self.pg_database
         )
+        conn.autocommit = True  # ALTER SYSTEM 不能在事务里执行
+        return conn
 
     def _wait_ready(self):
         """轮询等待 PG 就绪"""
