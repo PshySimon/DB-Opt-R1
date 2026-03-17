@@ -38,20 +38,18 @@ echo "  ✓ 系统依赖安装完成"
 echo ""
 echo "[2/5] 安装 PostgreSQL $PG_VERSION..."
 
-# 添加 PG APT 源（清华镜像）
-if ! dpkg -l postgresql-$PG_VERSION 2>/dev/null | grep -q "^ii"; then
-    echo "  → 添加清华 PG APT 源..."
-    $SUDO sh -c "echo 'deb https://mirrors.tuna.tsinghua.edu.cn/postgresql/repos/apt $(lsb_release -cs)-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
+# 安装 PostgreSQL（优先系统源，无需额外添加源）
+echo "  → 尝试从系统源安装 postgresql-$PG_VERSION..."
+if ! $SUDO apt-get install -y postgresql-$PG_VERSION postgresql-contrib-$PG_VERSION 2>/dev/null; then
+    echo "  → 系统源无 PG $PG_VERSION，尝试添加官方 PG 源..."
+    $SUDO sh -c "echo 'deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
     echo "  → 导入 PG GPG Key..."
     wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO apt-key add - 2>/dev/null
     echo "  → apt-get update..."
     $SUDO apt-get update
+    echo "  → 安装 postgresql-$PG_VERSION..."
+    $SUDO apt-get install -y postgresql-$PG_VERSION postgresql-contrib-$PG_VERSION
 fi
-
-echo "  → 安装 postgresql-$PG_VERSION..."
-$SUDO apt-get install -y \
-    postgresql-$PG_VERSION \
-    postgresql-contrib-$PG_VERSION
 echo "  ✓ PostgreSQL 安装完成"
 
 # 确认安装
