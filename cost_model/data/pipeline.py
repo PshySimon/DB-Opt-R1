@@ -103,6 +103,7 @@ class Pipeline:
             try:
                 row = self._run_one_round(knob_config)
                 if row:
+                    row["status"] = "success"
                     collector = self._get_collector()
                     collector.save_csv(row, self.output_dir)
                     collector.pg_conn.close()
@@ -114,7 +115,25 @@ class Pipeline:
 
             except Exception as e:
                 fail_count += 1
-                logger.error(f"第 {i+1} 轮失败: {e}")
+                error_msg = str(e)
+                logger.error(f"第 {i+1} 轮失败: {error_msg}")
+
+                # 判断失败类型
+                if "restart" in error_msg.lower() or "start" in error_msg.lower():
+                    status = "restart_failed"
+                else:
+                    status = "benchmark_failed"
+
+                # 保存失败数据（只有 knob 配置 + 状态，tps=0）
+                try:
+                    fail_row = self._build_fail_row(knob_config, status, error_msg)
+                    collector = self._get_collector()
+                    collector.save_csv(fail_row, self.output_dir)
+                    collector.pg_conn.close()
+                    logger.info(f"  失败数据已保存 (status={status})")
+                except Exception:
+                    logger.warning("  保存失败数据也失败，跳过")
+
                 # 尝试恢复默认配置
                 try:
                     self.pg_ctl.reset_to_default()
@@ -151,10 +170,37 @@ class Pipeline:
         flat = collector.flatten_snapshot(diff_data)
 
         # 追加性能指标和负载类型作为 label
+        flat["status"] = "success"
         flat["workload"] = self.workload
         flat["tps"] = perf["tps"]
         flat["latency_avg"] = perf["latency_avg"]
         flat["latency_p95"] = perf.get("latency_p95")
+
+        return flat
+
+    def _build_fail_row(self, knob_config: dict, status: str, error_msg: str) -> dict:
+        """构造失败数据行：保留 knob 配置 + 硬件信息 + 失败标记"""
+        from .collector import HardwareCollector
+
+        flat = {}
+        flat["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+        # 硬件特征（不依赖 PG 连接）
+        hw = HardwareCollector().collect()
+        for k, v in hw.items():
+            flat[f"hw_{k}"] = v
+
+        # 记录本轮设置的 knob（只记我们调的参数）
+        for k, v in knob_config.items():
+            flat[f"knob_{k}"] = v
+
+        # 标记
+        flat["status"] = status
+        flat["error"] = error_msg[:200]  # 截断过长的错误信息
+        flat["workload"] = self.workload
+        flat["tps"] = 0
+        flat["latency_avg"] = 0
+        flat["latency_p95"] = None
 
         return flat
 
