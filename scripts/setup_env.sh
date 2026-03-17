@@ -25,26 +25,34 @@ echo "=========================================="
 # ==================== 1. 系统依赖 ====================
 echo ""
 echo "[1/5] 安装系统依赖..."
-$SUDO apt-get update -qq
-$SUDO apt-get install -y -qq \
+echo "  → apt-get update..."
+$SUDO apt-get update
+echo "  → 安装 wget, curl, gnupg2, lsb-release, python3, sysstat..."
+$SUDO apt-get install -y \
     wget curl gnupg2 lsb-release \
     python3 python3-pip python3-venv \
     sysstat 2>/dev/null || true
+echo "  ✓ 系统依赖安装完成"
 
 # ==================== 2. PostgreSQL ====================
 echo ""
 echo "[2/5] 安装 PostgreSQL $PG_VERSION..."
 
-# 添加官方 APT 源
+# 添加 PG APT 源（清华镜像）
 if ! dpkg -l postgresql-$PG_VERSION 2>/dev/null | grep -q "^ii"; then
-    $SUDO sh -c "echo 'deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
+    echo "  → 添加清华 PG APT 源..."
+    $SUDO sh -c "echo 'deb https://mirrors.tuna.tsinghua.edu.cn/postgresql/repos/apt $(lsb_release -cs)-pgdg main' > /etc/apt/sources.list.d/pgdg.list"
+    echo "  → 导入 PG GPG Key..."
     wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO apt-key add - 2>/dev/null
-    $SUDO apt-get update -qq
+    echo "  → apt-get update..."
+    $SUDO apt-get update
 fi
 
-$SUDO apt-get install -y -qq \
+echo "  → 安装 postgresql-$PG_VERSION..."
+$SUDO apt-get install -y \
     postgresql-$PG_VERSION \
     postgresql-contrib-$PG_VERSION
+echo "  ✓ PostgreSQL 安装完成"
 
 # 确认安装
 pg_config --version
@@ -67,35 +75,40 @@ if [ ! -f "$PG_CONF" ]; then
 fi
 
 if [ -z "$PG_CONF" ]; then
-    echo "警告: 未找到 postgresql.conf，跳过配置修改"
+    echo "  ⚠ 未找到 postgresql.conf，跳过配置修改"
 else
+    echo "  → 配置文件: $PG_CONF"
+    echo "  → HBA 文件: $PG_HBA"
+    echo "  → 数据目录: $PG_DATA"
+    echo "  → 开启 track_activities, track_counts, track_io_timing"
     # 开启统计收集
     $SUDO sed -i "s/#track_activities = on/track_activities = on/" $PG_CONF
     $SUDO sed -i "s/#track_counts = on/track_counts = on/" $PG_CONF
     $SUDO sed -i "s/#track_io_timing = off/track_io_timing = on/" $PG_CONF
 
+    echo "  → 配置慢查询日志、临时文件日志、锁等待日志"
     # 日志配置
     $SUDO sed -i "s/#log_min_duration_statement = -1/log_min_duration_statement = 1000/" $PG_CONF
     $SUDO sed -i "s/#log_temp_files = -1/log_temp_files = 0/" $PG_CONF
     $SUDO sed -i "s/#log_lock_waits = off/log_lock_waits = on/" $PG_CONF
     $SUDO sed -i "s/#log_checkpoints = off/log_checkpoints = on/" $PG_CONF
 
+    echo "  → 配置本地免密登录"
     # 允许本地免密登录
     if [ -n "$PG_HBA" ]; then
         $SUDO sed -i "s/local\s\+all\s\+all\s\+peer/local   all             all                                     trust/" $PG_HBA
     fi
+    echo "  ✓ 配置修改完成"
 fi
 
 # 启动 PostgreSQL（兼容 systemd 和 pg_ctl）
-echo "启动 PostgreSQL..."
+echo "  → 启动 PostgreSQL..."
 if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
-    # 有 systemd（物理机/VM）
+    echo "  → systemd 模式"
     $SUDO systemctl restart postgresql
     $SUDO systemctl enable postgresql
 else
-    # 无 systemd（容器）
-    echo "容器模式：使用 pg_ctl 启动"
-    # 先停现有进程
+    echo "  → 容器模式（pg_ctl）"
     su - postgres -c "pg_ctl -D $PG_DATA stop" 2>/dev/null || true
     su - postgres -c "pg_ctl -D $PG_DATA start -l /var/log/postgresql/startup.log"
 fi
@@ -130,7 +143,9 @@ echo "[5/5] 安装 Python 依赖..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+echo "  → pip install -r requirements.txt..."
 pip3 install -r "$PROJECT_DIR/requirements.txt"
+echo "  ✓ Python 依赖安装完成"
 
 # ==================== 完成 ====================
 echo ""
