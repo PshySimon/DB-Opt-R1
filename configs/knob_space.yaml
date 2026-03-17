@@ -1,0 +1,342 @@
+# Knob 搜索空间定义
+# 参考 OtterTune / CDBTune / QTune / AgentTune 的 knob 选择
+# 共 45 个 knob，覆盖内存、优化器、并行、WAL、后台写入、连接、锁、VACUUM 等
+
+knobs:
+  # ========== 内存类参数 (8) ==========
+  shared_buffers:
+    type: memory
+    min: 32MB
+    max: 8GB
+    default: 128MB
+    restart: true
+
+  work_mem:
+    type: memory
+    min: 1MB
+    max: 1GB
+    default: 4MB
+    restart: false
+
+  effective_cache_size:
+    type: memory
+    min: 128MB
+    max: 32GB
+    default: 4GB
+    restart: false
+
+  maintenance_work_mem:
+    type: memory
+    min: 16MB
+    max: 2GB
+    default: 64MB
+    restart: false
+
+  wal_buffers:
+    type: memory
+    min: 1MB
+    max: 256MB
+    default: 4MB
+    restart: true
+
+  temp_buffers:
+    type: memory
+    min: 1MB
+    max: 256MB
+    default: 8MB
+    restart: false
+
+  huge_pages:
+    type: enum
+    values: ["off", "on", "try"]
+    default: "try"
+    restart: true
+
+  max_stack_depth:
+    type: memory
+    min: 1MB
+    max: 8MB
+    default: 2MB
+    restart: false
+
+  # ========== 优化器参数 (9) ==========
+  random_page_cost:
+    type: float
+    min: 0.5
+    max: 10.0
+    default: 4.0
+    restart: false
+
+  seq_page_cost:
+    type: float
+    min: 0.5
+    max: 5.0
+    default: 1.0
+    restart: false
+
+  cpu_tuple_cost:
+    type: float
+    min: 0.001
+    max: 0.1
+    default: 0.01
+    restart: false
+
+  cpu_index_tuple_cost:
+    type: float
+    min: 0.001
+    max: 0.05
+    default: 0.005
+    restart: false
+
+  cpu_operator_cost:
+    type: float
+    min: 0.0005
+    max: 0.05
+    default: 0.0025
+    restart: false
+
+  default_statistics_target:
+    type: integer
+    min: 10
+    max: 1000
+    default: 100
+    restart: false
+
+  from_collapse_limit:
+    type: integer
+    min: 1
+    max: 20
+    default: 8
+    restart: false
+
+  join_collapse_limit:
+    type: integer
+    min: 1
+    max: 20
+    default: 8
+    restart: false
+
+  geqo_threshold:
+    type: integer
+    min: 2
+    max: 20
+    default: 12
+    restart: false
+
+  # ========== 并行参数 (4) ==========
+  effective_io_concurrency:
+    type: integer
+    min: 0
+    max: 200
+    default: 0
+    restart: false
+
+  max_parallel_workers_per_gather:
+    type: integer
+    min: 0
+    max: 8
+    default: 2
+    restart: false
+
+  max_parallel_workers:
+    type: integer
+    min: 0
+    max: 16
+    default: 8
+    restart: false
+
+  max_parallel_maintenance_workers:
+    type: integer
+    min: 0
+    max: 8
+    default: 2
+    restart: false
+
+  # ========== WAL / Checkpoint 参数 (7) ==========
+  checkpoint_completion_target:
+    type: float
+    min: 0.1
+    max: 0.9
+    default: 0.5
+    restart: false
+
+  max_wal_size:
+    type: memory
+    min: 128MB
+    max: 4GB
+    default: 1GB
+    restart: false
+
+  min_wal_size:
+    type: memory
+    min: 32MB
+    max: 1GB
+    default: 80MB
+    restart: false
+
+  checkpoint_timeout:
+    type: integer
+    min: 30
+    max: 3600
+    default: 300
+    unit: s
+    restart: false
+
+  wal_compression:
+    type: enum
+    values: ["off", "on"]
+    default: "off"
+    restart: false
+
+  synchronous_commit:
+    type: enum
+    values: ["on", "off", "local", "remote_write"]
+    default: "on"
+    restart: false
+
+  commit_delay:
+    type: integer
+    min: 0
+    max: 100000
+    default: 0
+    unit: us
+    restart: false
+
+  # ========== 后台写入参数 (3) ==========
+  bgwriter_delay:
+    type: integer
+    min: 10
+    max: 2000
+    default: 200
+    unit: ms
+    restart: false
+
+  bgwriter_lru_maxpages:
+    type: integer
+    min: 0
+    max: 1000
+    default: 100
+    restart: false
+
+  bgwriter_lru_multiplier:
+    type: float
+    min: 0.5
+    max: 10.0
+    default: 2.0
+    restart: false
+
+  # ========== 连接参数 (3) ==========
+  max_connections:
+    type: integer
+    min: 10
+    max: 1000
+    default: 100
+    restart: true
+
+  superuser_reserved_connections:
+    type: integer
+    min: 1
+    max: 10
+    default: 3
+    restart: true
+
+  idle_in_transaction_session_timeout:
+    type: integer
+    min: 0
+    max: 600000
+    default: 0
+    unit: ms
+    restart: false
+
+  # ========== VACUUM 参数 (7) ==========
+  autovacuum:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    restart: false
+
+  autovacuum_max_workers:
+    type: integer
+    min: 1
+    max: 10
+    default: 3
+    restart: true
+
+  autovacuum_naptime:
+    type: integer
+    min: 1
+    max: 600
+    default: 60
+    unit: s
+    restart: false
+
+  autovacuum_vacuum_threshold:
+    type: integer
+    min: 10
+    max: 5000
+    default: 50
+    restart: false
+
+  autovacuum_vacuum_scale_factor:
+    type: float
+    min: 0.01
+    max: 0.5
+    default: 0.2
+    restart: false
+
+  autovacuum_analyze_threshold:
+    type: integer
+    min: 10
+    max: 5000
+    default: 50
+    restart: false
+
+  autovacuum_analyze_scale_factor:
+    type: float
+    min: 0.01
+    max: 0.5
+    default: 0.1
+    restart: false
+
+  # ========== 锁 / 死锁参数 (2) ==========
+  deadlock_timeout:
+    type: integer
+    min: 100
+    max: 10000
+    default: 1000
+    unit: ms
+    restart: false
+
+  lock_timeout:
+    type: integer
+    min: 0
+    max: 60000
+    default: 0
+    unit: ms
+    restart: false
+
+  # ========== 统计收集 (2) ==========
+  track_activities:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    restart: false
+
+  track_counts:
+    type: enum
+    values: ["on", "off"]
+    default: "on"
+    restart: false
+
+# Benchmark 配置
+benchmark:
+  tool: pgbench
+  duration: 60          # 秒
+  clients: 8
+  threads: 4
+  scale_factor: 10      # pgbench -i -s 10
+
+# 采集配置
+collection:
+  num_rounds: 100
+  output_dir: ./cost_model/data/raw

@@ -1,0 +1,111 @@
+# ============================================================
+#  db-opt-r1 配置文件
+# ============================================================
+
+# ==================== 通用配置 ====================
+general:
+  project_name: db-opt-r1
+  seed: 42
+  log_level: INFO
+  log_dir: ./logs
+  log_format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+# ==================== 工具配置 ====================
+tools:
+  # --- 数据库连接（所有工具共用） ---
+  database:
+    host: 127.0.0.1
+    port: 5432
+    user: postgres
+    password: ""
+    database: postgres
+    data_dir: /var/lib/postgresql/16/main
+    log_path: /var/log/postgresql/postgresql-16-main.log
+
+  # --- get_recent_logs ---
+  recent_logs:
+    default_lines: 50
+    default_level: WARNING
+
+  # --- get_db_metrics ---
+  db_metrics:
+    views:
+      - pg_stat_bgwriter
+      - pg_stat_archiver
+      - pg_stat_database
+      - pg_stat_database_conflicts
+      - pg_stat_user_tables
+      - pg_statio_user_tables
+      - pg_stat_user_indexes
+      - pg_statio_user_indexes
+
+  # --- set_knob ---
+  set_knob:
+    knob_space: ./configs/knob_space.yaml
+    safety_check: true
+    backup_before_change: true
+
+  # --- restart_pg / reload_pg ---
+  pg_control:
+    restart_timeout: 30
+    ready_check_interval: 1
+    use_pg_ctl: true
+
+  # --- predict_performance ---
+  predict_performance:
+    model_path: ./outputs/cost_model/best_model.pkl
+    feature_config: ./configs/knob_space.yaml
+
+  # --- run_benchmark ---
+  benchmark:
+    tool: pgbench
+    duration: 60
+    clients: 8
+    threads: 4
+    scale_factor: 10
+
+# ==================== Cost Model 配置 ====================
+cost_model:
+  model_type: xgboost
+  training:
+    data_dir: ./cost_model/data/raw
+    output_dir: ./outputs/cost_model
+    train_ratio: 0.8
+    xgboost:
+      n_estimators: 500
+      max_depth: 8
+      learning_rate: 0.05
+    gp:
+      kernel: rbf
+      n_restarts: 5
+
+# ==================== Agent 训练配置 ====================
+training:
+  mode: grpo
+  model:
+    name: Qwen/Qwen2.5-Coder-7B
+    max_length: 4096
+  grpo:
+    num_episodes: 1000
+    batch_size: 8
+    group_size: 4
+    learning_rate: 1e-5
+    kl_coef: 0.1
+  reward:
+    use_cost_model: true
+    baseline: default
+  sft:
+    data_path: ./data/sft_data.json
+    epochs: 3
+  checkpoint:
+    save_dir: ./checkpoints
+    save_interval: 100
+
+# ==================== 评估配置 ====================
+evaluation:
+  use_real_benchmark: true
+  benchmark_rounds: 3
+  baselines:
+    - default
+    - ottertune
+  output_dir: ./outputs/eval
