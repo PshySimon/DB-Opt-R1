@@ -25,6 +25,11 @@ echo "=========================================="
 # ==================== 1. 系统依赖 ====================
 echo ""
 echo "[1/5] 安装系统依赖..."
+# 清理可能残留的失效 PG 源
+if [ -f /etc/apt/sources.list.d/pgdg.list ]; then
+    echo "  → 清理旧的 pgdg 源文件..."
+    $SUDO rm -f /etc/apt/sources.list.d/pgdg.list
+fi
 echo "  → apt-get update..."
 $SUDO apt-get update
 echo "  → 安装 wget, curl, gnupg2, lsb-release, python3, sysstat..."
