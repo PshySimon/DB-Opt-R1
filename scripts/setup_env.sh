@@ -111,11 +111,10 @@ if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2
     $SUDO systemctl restart postgresql
     $SUDO systemctl enable postgresql
 else
-    echo "  → 容器模式（pg_ctl）"
-    PG_CTL="/usr/lib/postgresql/$PG_VERSION/bin/pg_ctl"
+    echo "  → 容器模式（pg_ctlcluster）"
     $SUDO mkdir -p /var/log/postgresql
-    su - postgres -c "$PG_CTL -D $PG_DATA stop" 2>/dev/null || true
-    su - postgres -c "$PG_CTL -D $PG_DATA start -l /var/log/postgresql/startup.log"
+    pg_ctlcluster $PG_VERSION main stop 2>/dev/null || true
+    pg_ctlcluster $PG_VERSION main start
 fi
 
 # 等待就绪
