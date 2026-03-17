@@ -71,9 +71,9 @@ python3 -c "import psycopg2, yaml" 2>/dev/null || {
 
 # 自动创建数据库（如果不存在）
 echo "检查数据库 ${PG_DATABASE}..."
-psql -U $PG_USER -h $PG_HOST -p $PG_PORT -tc "SELECT 1 FROM pg_database WHERE datname = '$PG_DATABASE'" | grep -q 1 || {
+psql -U $PG_USER -p $PG_PORT -tc "SELECT 1 FROM pg_database WHERE datname = '$PG_DATABASE'" | grep -q 1 || {
     echo "  → 创建数据库 ${PG_DATABASE}..."
-    psql -U $PG_USER -h $PG_HOST -p $PG_PORT -c "CREATE DATABASE $PG_DATABASE;"
+    psql -U $PG_USER -p $PG_PORT -c "CREATE DATABASE $PG_DATABASE;"
 }
 echo "  ✓ 数据库 ${PG_DATABASE} 就绪"
 
