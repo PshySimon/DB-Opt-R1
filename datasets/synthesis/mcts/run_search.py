@@ -1,0 +1,195 @@
+"""
+MCTS 轨迹合成主流程
+"""
+
+import json
+import argparse
+import logging
+import os
+import sys
+
+# 添加项目根目录到 path（datasets/synthesis/mcts/ → 回到项目根）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+
+from datasets.synthesis.mcts.search import MCTSSearch
+from datasets.synthesis.mcts.extract import (
+    extract_best_trajectory,
+    extract_top_k_trajectories,
+    extract_contrastive_pairs,
+    format_trajectory_as_messages,
+    format_contrastive_as_dpo,
+    save_jsonl,
+)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+
+SYSTEM_PROMPT = """你是 PostgreSQL 数据库调优专家。你的目标是通过调整数据库配置参数来最大化性能（TPS）。
+
+工作流程：
+1. 先用观察工具了解硬件环境和当前状态
+2. 分析指标，找出性能瓶颈
+3. 用 set_knob 设置合理的参数
+4. 如果有需要重启的参数，调用 restart_pg
+5. 用 predict_performance 验证效果
+
+注意：
+- shared_buffers 建议设为总内存的 25%
+- work_mem 要根据并发连接数合理分配
+- 修改 shared_buffers 等 static 参数后需要 restart_pg"""
+
+
+def create_llm_client(model: str, api_key: str = None, api_base: str = None):
+    """创建 LLM 调用函数"""
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=api_base)
+
+        def generate(prompt: str, temperature: float = 0.7) -> str:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+                max_tokens=512,
+            )
+            return response.choices[0].message.content
+
+        return generate
+    except ImportError:
+        logger.error("需要安装 openai: pip install openai")
+        sys.exit(1)
+
+
+def run_mcts(args):
+    """主流程"""
+    from environment.tools import DBToolEnv
+
+    logger.info(f"加载数据集: {args.dataset}")
+    logger.info(f"模型: {args.model}")
+    logger.info(f"搜索参数: simulations={args.simulations}, children={args.children}, depth={args.depth}")
+
+    # LLM 客户端
+    llm_generate = create_llm_client(
+        model=args.model,
+        api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
+        api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
+    )
+
+    # 搜索配置
+    search_config = {
+        "num_simulations": args.simulations,
+        "max_children": args.children,
+        "max_depth": args.depth,
+        "ucb_c": args.ucb_c,
+        "expand_temperature": args.expand_temp,
+        "rollout_temperature": args.rollout_temp,
+        "system_prompt": SYSTEM_PROMPT,
+    }
+
+    # 加载 cost model（占位）
+    cost_model = None
+    if args.cost_model:
+        logger.info(f"加载 Cost Model: {args.cost_model}")
+        # TODO: 加载真实 cost model
+        # cost_model = load_cost_model(args.cost_model)
+
+    sft_data = []
+    contrastive_data = []
+
+    # 对每个环境样本搜索
+    import pandas as pd
+    dataset = pd.read_csv(args.dataset)
+    num_samples = min(args.num_envs, len(dataset))
+
+    for i in range(num_samples):
+        logger.info(f"\n{'='*50}")
+        logger.info(f"环境 {i+1}/{num_samples} (sample_idx={i})")
+        logger.info(f"{'='*50}")
+
+        # 创建环境
+        env = DBToolEnv(
+            mode="train",
+            dataset_path=args.dataset,
+            cost_model=cost_model,
+            max_turns=args.depth,
+        )
+
+        # MCTS 搜索
+        searcher = MCTSSearch(env=env, llm_generate=llm_generate, config=search_config)
+        root = searcher.search(sample_idx=i)
+
+        # 提取轨迹
+        if root.children:
+            # Best-in-tree
+            best_traj = extract_best_trajectory(root)
+            best_reward = root.best_child_by_reward().avg_reward
+
+            sft_item = format_trajectory_as_messages(
+                trajectory=best_traj,
+                system_prompt=SYSTEM_PROMPT,
+                reward=best_reward,
+                sample_idx=i,
+            )
+            sft_data.append(sft_item)
+            logger.info(f"  最优轨迹: {len(best_traj)} 步, reward={best_reward:.3f}")
+
+            # Top-k 轨迹
+            top_k = extract_top_k_trajectories(root, k=3)
+            for k, traj in enumerate(top_k[1:], 2):  # 跳过第一条（和 best 重复）
+                sft_item = format_trajectory_as_messages(
+                    trajectory=traj,
+                    system_prompt=SYSTEM_PROMPT,
+                    sample_idx=i,
+                )
+                sft_data.append(sft_item)
+
+            # 对比数据
+            pairs = extract_contrastive_pairs(root)
+            for pair in pairs:
+                dpo_item = format_contrastive_as_dpo(pair, SYSTEM_PROMPT)
+                contrastive_data.append(dpo_item)
+            logger.info(f"  对比数据: {len(pairs)} 对")
+        else:
+            logger.warning(f"  搜索未展开任何节点，跳过")
+
+    # 保存
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    sft_path = os.path.join(args.output_dir, "sft_trajectories.jsonl")
+    save_jsonl(sft_data, sft_path)
+    logger.info(f"\nSFT 数据: {len(sft_data)} 条 → {sft_path}")
+
+    contrastive_path = os.path.join(args.output_dir, "contrastive_pairs.jsonl")
+    save_jsonl(contrastive_data, contrastive_path)
+    logger.info(f"对比数据: {len(contrastive_data)} 对 → {contrastive_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="MCTS 轨迹合成")
+
+    # 数据
+    parser.add_argument("--dataset", required=True, help="CSV 数据集路径")
+    parser.add_argument("--cost-model", default=None, help="Cost Model 路径")
+    parser.add_argument("--output-dir", default="datasets/data", help="输出目录（datasets/data/）")
+    parser.add_argument("--num-envs", type=int, default=100, help="搜索的环境数")
+
+    # LLM
+    parser.add_argument("--model", default="gpt-4", help="LLM 模型名称")
+    parser.add_argument("--api-key", default=None, help="API Key")
+    parser.add_argument("--api-base", default=None, help="API Base URL")
+
+    # MCTS
+    parser.add_argument("--simulations", type=int, default=50, help="每棵树 MCTS 迭代次数")
+    parser.add_argument("--children", type=int, default=3, help="最大子节点数")
+    parser.add_argument("--depth", type=int, default=10, help="最大深度")
+    parser.add_argument("--ucb-c", type=float, default=1.414, help="UCB1 探索系数")
+    parser.add_argument("--expand-temp", type=float, default=0.8, help="展开温度")
+    parser.add_argument("--rollout-temp", type=float, default=0.3, help="Rollout 温度")
+
+    args = parser.parse_args()
+    run_mcts(args)
+
+
+if __name__ == "__main__":
+    main()
