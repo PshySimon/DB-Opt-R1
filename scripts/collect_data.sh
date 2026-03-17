@@ -119,12 +119,15 @@ fi
 
 if [ "$BACKGROUND" = true ]; then
     LOG_FILE="${OUTPUT_DIR}/collect_$(date +%Y%m%d_%H%M%S).log"
+    PID_FILE="${OUTPUT_DIR}/collect.pid"
     mkdir -p "$OUTPUT_DIR"
     echo "后台运行，日志: $LOG_FILE"
     echo "命令: $CMD"
     nohup bash -c "$CMD" > "$LOG_FILE" 2>&1 &
-    echo "PID: $!"
+    echo $! > "$PID_FILE"
+    echo "PID: $! (已保存到 $PID_FILE)"
     echo "查看进度: tail -f $LOG_FILE"
+    echo "停止采集: kill \$(cat $PID_FILE)"
 else
     eval $CMD
 fi
