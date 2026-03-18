@@ -437,14 +437,20 @@ class DataCollector:
         else:
             all_columns = list(flat_row.keys())
 
-        # 缺失列补空值
-        aligned_row = {col: flat_row.get(col, "") for col in all_columns}
+        # 值中的逗号和引号需要正确转义
+        cleaned_row = {}
+        for col in all_columns:
+            val = flat_row.get(col, "")
+            if val is None:
+                val = ""
+            cleaned_row[col] = str(val)
 
         with open(filepath, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=all_columns)
+            writer = csv.DictWriter(f, fieldnames=all_columns,
+                                    quoting=csv.QUOTE_ALL)
             if not file_exists:
                 writer.writeheader()
-            writer.writerow(aligned_row)
+            writer.writerow(cleaned_row)
 
         logger.info(f"CSV 已追加到 {filepath}")
         return str(filepath)
