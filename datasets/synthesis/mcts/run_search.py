@@ -121,12 +121,13 @@ def run_mcts(args):
 
     # 对每个环境样本搜索
     if args.scenarios:
-        # 新模式：场景目录
-        scenario_files = sorted([
-            f for f in os.listdir(args.scenarios)
-            if f.endswith(".json")
-        ])
-        num_samples = min(args.num_envs, len(scenario_files))
+        # 新模式：单文件或目录
+        env_tmp = DBToolEnv(
+            mode="train", scenario_dir=args.scenarios,
+            max_turns=args.depth, knob_space_path=args.knob_space,
+        )
+        num_samples = min(args.num_envs, env_tmp.num_samples)
+        del env_tmp
     else:
         # 旧模式：CSV
         import pandas as pd

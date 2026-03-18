@@ -3,6 +3,7 @@ DB 工具环境
 """
 
 import os
+import json
 import random
 import logging
 
@@ -39,7 +40,7 @@ class DBToolEnv(ToolEnv):
             mode: "train"（模拟环境）或 "real"（真实 PG）
             config: Config 对象（real 模式必须）
             dataset_path: CSV 数据集路径（train 模式，旧模式）
-            scenario_dir: YAML 场景目录（train 模式，新模式，优先于 dataset_path）
+            scenario_dir: 场景数据源（JSON 文件或目录，train 模式，优先于 dataset_path）
             cost_model: Cost Model 对象（train 模式必须）
             max_turns: 最大交互轮数
             knob_space_path: knob_space.yaml 路径
@@ -47,19 +48,13 @@ class DBToolEnv(ToolEnv):
         self.mode = mode
         self.env_state = {}
         self.dataset = None
-        self.scenario_dir = scenario_dir
-        self.scenario_files = []
+        self.scenarios = []  # ScenarioState 列表
         self._original_knobs = {}
 
         if mode == "train":
-            if scenario_dir and os.path.isdir(scenario_dir):
-                # 新模式：扫描 YAML 场景
-                self.scenario_files = sorted([
-                    os.path.join(scenario_dir, f)
-                    for f in os.listdir(scenario_dir)
-                    if f.endswith(".json")
-                ])
-                logger.info(f"加载 {len(self.scenario_files)} 个场景文件 from {scenario_dir}")
+            if scenario_dir:
+                self.scenarios = self._load_scenarios(scenario_dir)
+                logger.info(f"加载 {len(self.scenarios)} 个场景")
             elif dataset_path:
                 # 旧模式：CSV
                 self.dataset = pd.read_csv(dataset_path, on_bad_lines="skip")
@@ -94,11 +89,32 @@ class DBToolEnv(ToolEnv):
 
         super().__init__(tools=tools, max_turns=max_turns)
 
+    @staticmethod
+    def _load_scenarios(source: str) -> list:
+        """加载场景：支持单个 JSON 文件（数组）或目录"""
+        from datasets.synthesis.scenarios.schema import ScenarioState
+
+        if os.path.isfile(source):
+            # 单文件（JSON 数组）
+            with open(source, "r", encoding="utf-8") as f:
+                items = json.load(f)
+            return [ScenarioState(**{k: v for k, v in item.items()
+                    if k in ScenarioState.__dataclass_fields__})
+                    for item in items]
+        elif os.path.isdir(source):
+            # 目录（每个 .json 一个场景）
+            scenarios = []
+            for fname in sorted(os.listdir(source)):
+                if fname.endswith(".json"):
+                    scenarios.append(ScenarioState.from_json(os.path.join(source, fname)))
+            return scenarios
+        return []
+
     @property
     def num_samples(self):
         """返回可用样本数"""
-        if self.scenario_files:
-            return len(self.scenario_files)
+        if self.scenarios:
+            return len(self.scenarios)
         elif self.dataset is not None:
             return len(self.dataset)
         return 0
@@ -108,22 +124,17 @@ class DBToolEnv(ToolEnv):
         super().reset()
 
         if self.mode == "train":
-            if self.scenario_files:
-                # 新模式：加载 YAML 场景
+            if self.scenarios:
                 self._reset_from_scenario(sample_idx)
             elif self.dataset is not None:
-                # 旧模式：从 CSV 加载
                 self._reset_from_csv(sample_idx)
 
     def _reset_from_scenario(self, sample_idx=None):
-        """从 YAML 场景文件加载"""
-        from datasets.synthesis.scenarios.schema import ScenarioState
-
+        """从场景列表加载"""
         if sample_idx is None:
-            sample_idx = random.randint(0, len(self.scenario_files) - 1)
+            sample_idx = random.randint(0, len(self.scenarios) - 1)
 
-        json_path = self.scenario_files[sample_idx]
-        scenario = ScenarioState.from_json(json_path)
+        scenario = self.scenarios[sample_idx]
 
         # 注入 scenario 到所有工具
         for tool in self.tools:
