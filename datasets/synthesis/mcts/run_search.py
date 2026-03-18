@@ -27,17 +27,69 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """你是 PostgreSQL 数据库调优专家。你的目标是通过调整数据库配置参数来最大化性能（TPS）。
 
-工作流程：
-1. 先用观察工具了解硬件环境和当前状态
-2. 分析指标，找出性能瓶颈
-3. 用 set_knob 设置合理的参数
-4. 如果有需要重启的参数，调用 restart_pg
+## 输出格式
+
+每次回复必须严格遵循以下格式：先用 <think>...</think> 分析推理，再用 <tool_call>...</tool_call> 调用一个工具。
+
+重要规则：
+1. 每次只能调用一个工具
+2. 必须先 <think> 分析，再 <tool_call> 调用
+3. <think> 中要解释你观察到了什么、为什么这样做
+
+## 工作流程
+
+1. 先观察硬件环境（get_hardware_info）
+2. 查看关键配置（get_current_config）和运行指标（get_db_metrics）
+3. 分析瓶颈，用 set_knob 设置合理的参数
+4. 如果修改了 shared_buffers 等 static 参数，调用 restart_pg
 5. 用 predict_performance 验证效果
 
-注意：
-- shared_buffers 建议设为总内存的 25%
-- work_mem 要根据并发连接数合理分配
-- 修改 shared_buffers 等 static 参数后需要 restart_pg"""
+## 调优知识
+
+- shared_buffers：总内存的 25%
+- effective_cache_size：总内存的 50%-75%
+- work_mem：根据并发连接数分配，一般 64MB-256MB
+- random_page_cost：SSD 设 1.1，HDD 设 4.0
+- 修改 shared_buffers 等 postmaster 参数后需要 restart_pg"""
+
+
+EXAMPLE_TRAJECTORY = (
+    "以下是一个调优示例：\n\n"
+    "User: 请优化这个数据库的性能。\n\n"
+    "Assistant: <think>\n"
+    "首先需要了解硬件环境，才能确定合理的参数配置范围。\n"
+    "</think>\n"
+    '<tool_call>\n{"name": "get_hardware_info", "arguments": {}}\n</tool_call>\n\n'
+    'Observation: {"cpu_count": 8, "total_memory_gb": 32, "disk_type": "SSD"}\n\n'
+    "Assistant: <think>\n"
+    "8核32G内存，SSD磁盘。先看看当前关键配置是否合理。\n"
+    "shared_buffers 建议设为总内存的 25%，即 8GB。\n"
+    "</think>\n"
+    '<tool_call>\n{"name": "get_current_config", "arguments": {"knob_names": "shared_buffers,work_mem,effective_cache_size,random_page_cost"}}\n</tool_call>\n\n'
+    'Observation: {"shared_buffers": "128MB", "work_mem": "4MB", "effective_cache_size": "4GB", "random_page_cost": "4"}\n\n'
+    "Assistant: <think>\n"
+    "发现几个明显的问题：\n"
+    "1. shared_buffers=128MB，远低于建议的 8GB（32G 的 25%）\n"
+    "2. work_mem=4MB，太小，会产生大量临时文件\n"
+    "3. effective_cache_size=4GB，应设为 16-24GB\n"
+    "4. random_page_cost=4，这是 HDD 的默认值，SSD 应设为 1.1\n"
+    "先调整这些核心参数。\n"
+    "</think>\n"
+    '<tool_call>\n{"name": "set_knob", "arguments": {"knobs": "{\\"shared_buffers\\": \\"8GB\\", \\"work_mem\\": \\"256MB\\", \\"effective_cache_size\\": \\"24GB\\", \\"random_page_cost\\": \\"1.1\\"}"}}\n</tool_call>\n\n'
+    'Observation: {"success": ["work_mem", "effective_cache_size", "random_page_cost"], "pending_restart": ["shared_buffers"], "failed": []}\n\n'
+    "Assistant: <think>\n"
+    "shared_buffers 需要重启才能生效，调用 restart_pg。\n"
+    "</think>\n"
+    '<tool_call>\n{"name": "restart_pg", "arguments": {}}\n</tool_call>\n\n'
+    'Observation: {"success": true, "duration_seconds": 2.1}\n\n'
+    "Assistant: <think>\n"
+    "参数已生效，现在验证性能变化。\n"
+    "</think>\n"
+    '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>\n\n'
+    'Observation: {"predicted_tps": 2875, "baseline_tps": 2500, "improvement_pct": 15.0}\n'
+)
+
+
 
 
 def create_llm_client(model: str, api_key: str = None, api_base: str = None):
@@ -117,6 +169,7 @@ def run_mcts(args):
 
         # MCTS 搜索
         searcher = MCTSSearch(env=env, llm_generate=llm_generate, config=search_config)
+        searcher._example_trajectory = EXAMPLE_TRAJECTORY
         root = searcher.search(sample_idx=i)
 
         # 提取轨迹

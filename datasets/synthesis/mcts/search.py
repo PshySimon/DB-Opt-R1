@@ -138,7 +138,12 @@ class MCTSSearch:
     def _build_prompt(self, trajectory: list) -> str:
         """构建 LLM prompt"""
         tools_desc = self.env.tools_format_func() if hasattr(self.env, 'tools_format_func') else ""
-        messages = [f"System: {self.system_prompt}\n\nAvailable tools:\n{tools_desc}\n"]
+        messages = [f"System: {self.system_prompt}\n\n{tools_desc}\n"]
+
+        # few-shot 示例
+        if hasattr(self, '_example_trajectory') and self._example_trajectory:
+            messages.append(f"{self._example_trajectory}\n\n---\n现在请你完成以下任务：\n")
+
         messages.append("User: 请优化这个数据库的性能。\n")
 
         for step in trajectory:
