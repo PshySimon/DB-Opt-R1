@@ -117,12 +117,12 @@ def run_mcts(args):
     dataset = pd.read_csv(args.dataset, on_bad_lines="skip")
     num_samples = min(args.num_envs, len(dataset))
 
-    for i in range(num_samples):
+    def search_one_env(i):
+        """搜索单个环境，返回 (sft_items, contrastive_items)"""
         logger.info(f"\n{'='*50}")
         logger.info(f"环境 {i+1}/{num_samples} (sample_idx={i})")
         logger.info(f"{'='*50}")
 
-        # 创建环境
         env = DBToolEnv(
             mode="train",
             dataset_path=args.dataset,
@@ -131,43 +131,58 @@ def run_mcts(args):
             knob_space_path=args.knob_space,
         )
 
-        # MCTS 搜索
         searcher = MCTSSearch(env=env, llm_generate=llm_generate, config=search_config)
         root = searcher.search(sample_idx=i)
 
-        # 提取轨迹
+        sft_items, contrastive_items = [], []
         if root.children:
-            # Best-in-tree
             best_traj = extract_best_trajectory(root)
             best_reward = root.best_child_by_reward().avg_reward
 
-            sft_item = format_trajectory_as_messages(
+            sft_items.append(format_trajectory_as_messages(
                 trajectory=best_traj,
                 system_prompt=SYSTEM_PROMPT,
                 reward=best_reward,
                 sample_idx=i,
-            )
-            sft_data.append(sft_item)
+            ))
             logger.info(f"  最优轨迹: {len(best_traj)} 步, reward={best_reward:.3f}")
 
-            # Top-k 轨迹
             top_k = extract_top_k_trajectories(root, k=3)
-            for k, traj in enumerate(top_k[1:], 2):  # 跳过第一条（和 best 重复）
-                sft_item = format_trajectory_as_messages(
+            for traj in top_k[1:]:
+                sft_items.append(format_trajectory_as_messages(
                     trajectory=traj,
                     system_prompt=SYSTEM_PROMPT,
                     sample_idx=i,
-                )
-                sft_data.append(sft_item)
+                ))
 
-            # 对比数据
             pairs = extract_contrastive_pairs(root)
             for pair in pairs:
-                dpo_item = format_contrastive_as_dpo(pair, SYSTEM_PROMPT)
-                contrastive_data.append(dpo_item)
+                contrastive_items.append(format_contrastive_as_dpo(pair, SYSTEM_PROMPT))
             logger.info(f"  对比数据: {len(pairs)} 对")
         else:
             logger.warning(f"  搜索未展开任何节点，跳过")
+
+        return sft_items, contrastive_items
+
+    # 并行 or 串行
+    num_workers = getattr(args, 'num_workers', 1)
+    if num_workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        logger.info(f"并行模式: {num_workers} workers")
+        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            futures = {pool.submit(search_one_env, i): i for i in range(num_samples)}
+            for future in as_completed(futures):
+                try:
+                    sft_items, contrastive_items = future.result()
+                    sft_data.extend(sft_items)
+                    contrastive_data.extend(contrastive_items)
+                except Exception as e:
+                    logger.error(f"环境 {futures[future]} 搜索失败: {e}")
+    else:
+        for i in range(num_samples):
+            sft_items, contrastive_items = search_one_env(i)
+            sft_data.extend(sft_items)
+            contrastive_data.extend(contrastive_items)
 
     # 保存
     os.makedirs(args.output_dir, exist_ok=True)
@@ -190,6 +205,7 @@ def main():
     parser.add_argument("--knob-space", default="configs/knob_space.yaml", help="knob_space.yaml 路径")
     parser.add_argument("--output-dir", default="datasets/data", help="输出目录（datasets/data/）")
     parser.add_argument("--num-envs", type=int, default=100, help="搜索的环境数")
+    parser.add_argument("--num-workers", type=int, default=1, help="并行 worker 数（1=串行）")
 
     # LLM
     parser.add_argument("--model", default="gpt-4", help="LLM 模型名称")
