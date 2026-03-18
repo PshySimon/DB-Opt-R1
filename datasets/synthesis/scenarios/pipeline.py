@@ -205,7 +205,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="故障场景采集")
     parser.add_argument("--config", default="configs/knob_space.yaml")
-    parser.add_argument("--faults", default="datasets/synthesis/scenarios/fault_descriptions/faults.json")
+    parser.add_argument("--seeds", default="datasets/data/scenario_seeds/seeds.json")
     parser.add_argument("--output", default="datasets/data/scenarios")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5432)
@@ -233,4 +233,4 @@ if __name__ == "__main__":
         llm_generate=llm_fn,
     )
 
-    pipeline.run_all(args.faults, variants_per_fault=args.variants)
+    pipeline.run_all(args.seeds, variants_per_fault=args.variants)
