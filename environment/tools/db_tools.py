@@ -76,35 +76,44 @@ class GetHardwareInfoTool(DBTool):
 
 
 class GetCurrentConfigTool(DBTool):
-    def __init__(self, **kwargs):
+    def __init__(self, tunable_knobs=None, **kwargs):
         super().__init__(
             name="get_current_config",
-            description="获取当前 PostgreSQL 的 knob 配置",
+            description="获取当前 PostgreSQL 的 knob 配置。不传参数时返回所有可调 knob，传 knob_names 可查询指定 knob。",
             parameters={
                 "type": "object",
                 "properties": {
-                    "knob_names": {"type": "string", "description": "要查询的 knob 名称，逗号分隔。留空返回所有"}
+                    "knob_names": {"type": "string", "description": "要查询的 knob 名称，逗号分隔。留空返回所有可调 knob"}
                 },
                 "required": []
             },
             **kwargs
         )
+        self.tunable_knobs = tunable_knobs or []
 
     def execute_real(self, args):
         conn = self._get_conn()
         cursor = conn.cursor()
         names = args.get("knob_names", "")
         if names:
-            config = {}
-            for name in [n.strip() for n in names.split(",")]:
-                try:
-                    cursor.execute(f"SHOW {name}")
-                    config[name] = cursor.fetchone()[0]
-                except Exception:
-                    config[name] = "unknown"
+            name_list = [n.strip() for n in names.split(",")]
+        elif self.tunable_knobs:
+            name_list = self.tunable_knobs
         else:
+            # fallback：全量
             cursor.execute("SHOW ALL")
             config = {row[0]: row[1] for row in cursor.fetchall()}
+            cursor.close()
+            conn.close()
+            return json.dumps(config, ensure_ascii=False, indent=2)
+
+        config = {}
+        for name in name_list:
+            try:
+                cursor.execute(f"SHOW {name}")
+                config[name] = cursor.fetchone()[0]
+            except Exception:
+                config[name] = "unknown"
         cursor.close()
         conn.close()
         return json.dumps(config, ensure_ascii=False, indent=2)
@@ -115,6 +124,8 @@ class GetCurrentConfigTool(DBTool):
         if names:
             name_list = [n.strip() for n in names.split(",")]
             knobs = {k: knobs.get(k, "unknown") for k in name_list}
+        elif self.tunable_knobs:
+            knobs = {k: knobs.get(k, "unknown") for k in self.tunable_knobs if k in knobs}
         return json.dumps(knobs, ensure_ascii=False, indent=2)
 
 

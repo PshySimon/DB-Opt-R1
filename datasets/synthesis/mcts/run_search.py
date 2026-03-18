@@ -128,6 +128,7 @@ def run_mcts(args):
             dataset_path=args.dataset,
             cost_model=cost_model,
             max_turns=args.depth,
+            knob_space_path=args.knob_space,
         )
 
         # MCTS 搜索
@@ -186,6 +187,7 @@ def main():
     # 数据
     parser.add_argument("--dataset", required=True, help="CSV 数据集路径")
     parser.add_argument("--cost-model", default=None, help="Cost Model 路径")
+    parser.add_argument("--knob-space", default="configs/knob_space.yaml", help="knob_space.yaml 路径")
     parser.add_argument("--output-dir", default="datasets/data", help="输出目录（datasets/data/）")
     parser.add_argument("--num-envs", type=int, default=100, help="搜索的环境数")
 

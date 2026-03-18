@@ -29,7 +29,8 @@ class DBToolEnv(ToolEnv):
     """DB 调优工具环境"""
 
     def __init__(self, mode="train", config=None,
-                 dataset_path=None, cost_model=None, max_turns=10):
+                 dataset_path=None, cost_model=None, max_turns=10,
+                 knob_space_path=None):
         """
         Args:
             mode: "train"（模拟环境）或 "real"（真实 PG）
@@ -37,6 +38,7 @@ class DBToolEnv(ToolEnv):
             dataset_path: CSV 数据集路径（train 模式必须）
             cost_model: Cost Model 对象（train 模式必须）
             max_turns: 最大交互轮数
+            knob_space_path: knob_space.yaml 路径
         """
         self.mode = mode
         self.env_state = {}
@@ -46,11 +48,19 @@ class DBToolEnv(ToolEnv):
         if mode == "train" and dataset_path:
             self.dataset = pd.read_csv(dataset_path, on_bad_lines="skip")
 
+        # 加载可调 knob 列表
+        tunable_knobs = []
+        if knob_space_path:
+            import yaml
+            with open(knob_space_path) as f:
+                ks = yaml.safe_load(f)
+            tunable_knobs = list(ks.get("knobs", {}).keys())
+
         common = {"mode": mode, "config": config, "env_state": self.env_state}
 
         tools = [
             GetHardwareInfoTool(**common),
-            GetCurrentConfigTool(**common),
+            GetCurrentConfigTool(tunable_knobs=tunable_knobs, **common),
             GetDBMetricsTool(**common),
             GetWorkloadInfoTool(**common),
             GetRecentLogsTool(**common),
