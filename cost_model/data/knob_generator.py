@@ -4,75 +4,13 @@ Knob 生成器：在搜索空间内生成合法的 knob 配置
 
 import random
 import math
-import yaml
 import logging
-from pathlib import Path
 from typing import Optional
+
+from core.db.knob_space import KnobSpace, parse_memory, format_memory
 
 logger = logging.getLogger(__name__)
 
-# 内存单位换算表（统一到 kB）
-MEMORY_UNITS = {
-    "kB": 1,
-    "KB": 1,
-    "MB": 1024,
-    "GB": 1024 * 1024,
-    "TB": 1024 * 1024 * 1024,
-}
-
-
-def parse_memory(value: str) -> int:
-    """将内存字符串解析为 kB"""
-    value = value.strip()
-    for unit, multiplier in MEMORY_UNITS.items():
-        if value.upper().endswith(unit.upper()):
-            num = value[:-len(unit)]
-            return int(float(num) * multiplier)
-    return int(value)
-
-
-def format_memory(value_kb: int) -> str:
-    """将 kB 值格式化为人类可读的内存字符串"""
-    if value_kb >= MEMORY_UNITS["GB"]:
-        return f"{value_kb // MEMORY_UNITS['GB']}GB"
-    elif value_kb >= MEMORY_UNITS["MB"]:
-        return f"{value_kb // MEMORY_UNITS['MB']}MB"
-    else:
-        return f"{value_kb}kB"
-
-
-class KnobSpace:
-    """Knob 搜索空间"""
-
-    def __init__(self, config_path: str):
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-        self.knobs = config["knobs"]
-        self.benchmark = config.get("benchmark", {})
-        self.collection = config.get("collection", {})
-
-    def get_knob_names(self) -> list:
-        return list(self.knobs.keys())
-
-    def get_knob_info(self, name: str) -> dict:
-        return self.knobs[name]
-
-    def get_default_config(self) -> dict:
-        """返回所有 knob 的默认值"""
-        config = {}
-        for name, info in self.knobs.items():
-            config[name] = info["default"]
-        return config
-
-    def needs_restart(self, knob_config: dict) -> bool:
-        """检查是否有需要重启的 knob 被修改"""
-        for name, value in knob_config.items():
-            info = self.knobs.get(name, {})
-            if info.get("restart", False):
-                default = info.get("default")
-                if str(value) != str(default):
-                    return True
-        return False
 
 
 class KnobGenerator:

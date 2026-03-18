@@ -8,10 +8,11 @@ import subprocess
 import time
 from pathlib import Path
 
-from .collector import DataCollector
-from .knob_generator import KnobSpace, KnobGenerator
-from .pg_configurator import PGConfigurator
-from .benchmark_runner import BenchmarkRunner
+from core.db.collector import DataCollector, HardwareCollector
+from core.db.knob_space import KnobSpace
+from core.db.pg_configurator import PGConfigurator
+from core.db.benchmark_runner import BenchmarkRunner
+from .knob_generator import KnobGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class Pipeline:
                  pg_host: str = "127.0.0.1", pg_port: int = 5432,
                  pg_user: str = "postgres", pg_password: str = "",
                  pg_database: str = "postgres", pg_data_dir: str = None,
-                 output_dir: str = "./cost_model/data/raw",
+                 output_dir: str = "./datasets/data/cost_model",
                  seed: int = None, workload: str = "mixed"):
 
         # 加载配置
@@ -230,7 +231,7 @@ class Pipeline:
 
     def _build_fail_row(self, knob_config: dict, status: str, error_msg: str) -> dict:
         """构造失败数据行：保留 knob 配置 + 硬件信息 + 失败标记"""
-        from .collector import HardwareCollector
+        from core.db.collector import HardwareCollector
 
         flat = {}
         flat["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -268,7 +269,7 @@ if __name__ == "__main__":
     parser.add_argument("--database", default="postgres")
     parser.add_argument("--pg-data-dir", default=None,
                         help="PG 数据目录（用于 pg_ctl restart）")
-    parser.add_argument("--output", default="./cost_model/data/raw")
+    parser.add_argument("--output", default="./datasets/data/cost_model")
     parser.add_argument("--rounds", type=int, default=None)
     parser.add_argument("--sampling", choices=["random", "lhs"], default="random")
     parser.add_argument("--init", action="store_true",

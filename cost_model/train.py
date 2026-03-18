@@ -1,6 +1,6 @@
 """
 Cost Model 训练脚本
-用法: python3 -m cost_model.train --data cost_model/data/raw/dataset.csv
+用法: python3 -m cost_model.train --data datasets/data/cost_model/dataset.csv
 """
 
 import argparse
@@ -80,7 +80,6 @@ def train(data_path: str, knob_space_path: str, output_dir: str,
     prep = KnobPreprocessor(knob_space_path)
     X, y, meta = prep.fit_transform(data_path)
 
-    X_np = X.values
     y_np = y.values
     status_np = meta["status"].values
     workload_np = meta["workload"].values
@@ -91,14 +90,14 @@ def train(data_path: str, knob_space_path: str, output_dir: str,
         # 尝试按 workload 分层
         strat_key = np.array([f"{w}_{s}" for w, s in zip(workload_np, status_np)])
         X_train, X_test, y_train, y_test, s_train, s_test = train_test_split(
-            X_np, y_np, status_np,
+            X, y_np, status_np,
             test_size=test_size, random_state=seed, stratify=strat_key,
         )
     except ValueError:
         # 某类样本太少，退回普通随机划分
         logger.warning("  分层采样失败（某类样本不足），使用随机划分")
         X_train, X_test, y_train, y_test, s_train, s_test = train_test_split(
-            X_np, y_np, status_np,
+            X, y_np, status_np,
             test_size=test_size, random_state=seed,
         )
     logger.info(f"  训练集: {X_train.shape[0]}, 测试集: {X_test.shape[0]}")
@@ -138,14 +137,14 @@ def train(data_path: str, knob_space_path: str, output_dir: str,
     logger.info("=== 5-Fold 交叉验证 ===")
     kf = KFold(n_splits=5, shuffle=True, random_state=seed)
     cv_mapes = []
-    for fold, (tr_idx, val_idx) in enumerate(kf.split(X_np)):
+    for fold, (tr_idx, val_idx) in enumerate(kf.split(X)):
         m = lgb.LGBMRegressor(
             n_estimators=n_estimators, max_depth=max_depth,
             learning_rate=learning_rate, subsample=0.8,
             colsample_bytree=0.8, random_state=seed, verbosity=-1,
         )
-        m.fit(X_np[tr_idx], y_np[tr_idx])
-        pred = m.predict(X_np[val_idx])
+        m.fit(X.iloc[tr_idx], y_np[tr_idx])
+        pred = m.predict(X.iloc[val_idx])
         fold_metrics = evaluate(y_np[val_idx], pred, status_np[val_idx])
         cv_mapes.append(fold_metrics["mape"])
 
@@ -182,7 +181,7 @@ def train(data_path: str, knob_space_path: str, output_dir: str,
     metrics_save["feature_importance"] = importance_list
     metrics_save["n_train"] = int(X_train.shape[0])
     metrics_save["n_test"] = int(X_test.shape[0])
-    metrics_save["n_features"] = int(X_np.shape[1])
+    metrics_save["n_features"] = int(X.shape[1])
 
     with open(output_path / "metrics.json", "w") as f:
         json.dump(metrics_save, f, indent=2, ensure_ascii=False)

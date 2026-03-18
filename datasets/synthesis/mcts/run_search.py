@@ -83,7 +83,8 @@ def run_mcts(args):
     from environment.tools import DBToolEnv
     t0 = time.time()
 
-    logger.info(f"加载数据集: {args.dataset}")
+    data_source = args.scenarios if args.scenarios else args.dataset
+    logger.info(f"数据源: {data_source}")
     logger.info(f"模型: {args.model}")
     logger.info(f"搜索参数: simulations={args.simulations}, children={args.children}, depth={args.depth}, num_workers={getattr(args, 'num_workers', 1)}")
 
@@ -119,9 +120,18 @@ def run_mcts(args):
     contrastive_data = []
 
     # 对每个环境样本搜索
-    import pandas as pd
-    dataset = pd.read_csv(args.dataset, on_bad_lines="skip")
-    num_samples = min(args.num_envs, len(dataset))
+    if args.scenarios:
+        # 新模式：场景目录
+        scenario_files = sorted([
+            f for f in os.listdir(args.scenarios)
+            if f.endswith(".json")
+        ])
+        num_samples = min(args.num_envs, len(scenario_files))
+    else:
+        # 旧模式：CSV
+        import pandas as pd
+        dataset = pd.read_csv(args.dataset, on_bad_lines="skip")
+        num_samples = min(args.num_envs, len(dataset))
 
     def search_one_env(i):
         """搜索单个环境，返回 (sft_items, contrastive_items)"""
@@ -132,7 +142,8 @@ def run_mcts(args):
         def env_factory():
             return DBToolEnv(
                 mode="train",
-                dataset_path=args.dataset,
+                dataset_path=args.dataset if not args.scenarios else None,
+                scenario_dir=args.scenarios,
                 cost_model=cost_model,
                 max_turns=args.depth,
                 knob_space_path=args.knob_space,
@@ -238,7 +249,8 @@ def main():
     parser = argparse.ArgumentParser(description="MCTS 轨迹合成")
 
     # 数据
-    parser.add_argument("--dataset", required=True, help="CSV 数据集路径")
+    parser.add_argument("--dataset", default=None, help="CSV 数据集路径（旧模式）")
+    parser.add_argument("--scenarios", default=None, help="YAML 场景目录（新模式，优先于 --dataset）")
     parser.add_argument("--cost-model", default=None, help="Cost Model 路径")
     parser.add_argument("--knob-space", default="configs/knob_space.yaml", help="knob_space.yaml 路径")
     parser.add_argument("--output-dir", default="datasets/data", help="输出目录（datasets/data/）")

@@ -25,6 +25,7 @@ class DBTool(Tool):
         self.mode = mode
         self.config = config
         self.env_state = env_state
+        self.scenario = None  # ScenarioState，由 DBToolEnv 注入
 
     def execute(self, args):
         if self.mode == "real":
@@ -65,7 +66,11 @@ class GetHardwareInfoTool(DBTool):
         return json.dumps(info, ensure_ascii=False, indent=2)
 
     def execute_simulated(self, args):
-        info = {k.replace("hw_", ""): v for k, v in self.env_state.items() if k.startswith("hw_")}
+        if self.scenario and self.scenario.hardware:
+            info = {k: v for k, v in self.scenario.hardware.items() if v is not None and str(v) != 'nan'}
+        else:
+            info = {k.replace("hw_", ""): v for k, v in self.env_state.items()
+                    if k.startswith("hw_") and v is not None and str(v) != 'nan'}
         return json.dumps(info, ensure_ascii=False, indent=2)
 
     def _cmd(self, cmd):
@@ -120,7 +125,15 @@ class GetCurrentConfigTool(DBTool):
 
     def execute_simulated(self, args):
         names = args.get("knob_names", "")
-        knobs = {k.replace("knob_", ""): v for k, v in self.env_state.items() if k.startswith("knob_")}
+        if self.scenario and self.scenario.knobs:
+            knobs = dict(self.scenario.knobs)
+            # 未在 scenario 中列出的 knob 使用 knob_space 默认值
+            if self.tunable_knobs and hasattr(self, 'knob_defaults'):
+                for k in self.tunable_knobs:
+                    if k not in knobs:
+                        knobs[k] = self.knob_defaults.get(k, "unknown")
+        else:
+            knobs = {k.replace("knob_", ""): v for k, v in self.env_state.items() if k.startswith("knob_")}
         if names:
             name_list = [n.strip() for n in names.split(",")]
             knobs = {k: knobs.get(k, "unknown") for k in name_list}
@@ -177,37 +190,39 @@ class GetDBMetricsTool(DBTool):
         return json.dumps(metrics, ensure_ascii=False, indent=2)
 
     def execute_simulated(self, args):
-        # 只返回对调优有用的关键指标
+        if self.scenario and self.scenario.db_metrics:
+            m = self.scenario.db_metrics
+            result = {
+                "buffer_hit_rate": m.get("buffer_hit_rate"),
+                "temp_files_count": m.get("temp_files_count", 0),
+                "temp_bytes_mb": m.get("temp_bytes_mb", 0),
+                "dead_tuple_ratio": m.get("dead_tuple_ratio", 0),
+                "seq_scan_ratio": m.get("seq_scan_ratio"),
+                "connections": {
+                    "active": m.get("active_connections", 0),
+                    "idle": m.get("idle_connections", 0),
+                    "idle_in_transaction": m.get("idle_in_transaction", 0),
+                    "waiting": m.get("waiting_connections", 0),
+                },
+                "deadlocks": m.get("deadlocks", 0),
+                "checkpoints_per_hour": m.get("checkpoints_per_hour"),
+            }
+            if self.scenario.wait_events:
+                result["top_wait_events"] = self.scenario.wait_events[:5]
+            # 过滤 None
+            result = {k: v for k, v in result.items() if v is not None}
+            return json.dumps(result, ensure_ascii=False, indent=2)
+
+        # 兼容旧 CSV 模式
         raw = {k.replace("metric_", ""): v for k, v in self.env_state.items() if k.startswith("metric_")}
         metrics = {}
-
-        # 缓冲命中率
         blks_hit = float(raw.get("pg_stat_database_sum_blks_hit", 0) or 0)
         blks_read = float(raw.get("pg_stat_database_sum_blks_read", 0) or 0)
         total = blks_hit + blks_read
-        metrics["buffer_hit_rate"] = round(blks_hit / total, 4) if total > 0 else "N/A"
-
-        # 临时文件
+        if total > 0:
+            metrics["buffer_hit_rate"] = round(blks_hit / total, 4)
         metrics["temp_files_count"] = int(float(raw.get("pg_stat_database_sum_temp_files", 0) or 0))
-        metrics["temp_bytes_mb"] = round(float(raw.get("pg_stat_database_sum_temp_bytes", 0) or 0) / 1024 / 1024, 2)
-
-        # 死元组
-        live = float(raw.get("pg_stat_user_tables_sum_n_live_tup", 0) or 0)
-        dead = float(raw.get("pg_stat_user_tables_sum_n_dead_tup", 0) or 0)
-        metrics["dead_tuple_ratio"] = round(dead / (live + dead), 4) if (live + dead) > 0 else "N/A"
-
-        # 全表扫描 vs 索引扫描
-        seq = float(raw.get("pg_stat_user_tables_sum_seq_scan", 0) or 0)
-        idx = float(raw.get("pg_stat_user_tables_sum_idx_scan", 0) or 0)
-        metrics["seq_scan_ratio"] = round(seq / (seq + idx), 4) if (seq + idx) > 0 else "N/A"
-
-        # 检查点
-        metrics["checkpoints_timed"] = int(float(raw.get("pg_stat_bgwriter_checkpoints_timed", 0) or 0))
-        metrics["checkpoints_requested"] = int(float(raw.get("pg_stat_bgwriter_checkpoints_req", 0) or 0))
-
-        # 死锁
         metrics["deadlocks"] = int(float(raw.get("pg_stat_database_sum_deadlocks", 0) or 0))
-
         return json.dumps(metrics, ensure_ascii=False, indent=2)
 
 
@@ -244,6 +259,21 @@ class GetWorkloadInfoTool(DBTool):
         return json.dumps(info, ensure_ascii=False, indent=2)
 
     def execute_simulated(self, args):
+        if self.scenario and self.scenario.workload:
+            w = self.scenario.workload
+            result = {
+                "workload_type": w.get("type"),
+                "tps_current": w.get("tps_current"),
+                "latency_avg_ms": w.get("latency_avg_ms"),
+                "benchmark": w.get("benchmark"),
+                "clients": w.get("clients"),
+            }
+            if self.scenario.slow_queries:
+                result["slow_queries_top3"] = self.scenario.slow_queries[:3]
+            result = {k: v for k, v in result.items() if v is not None}
+            return json.dumps(result, ensure_ascii=False, indent=2)
+
+        # 兼容旧模式
         info = {k.replace("sw_", ""): v for k, v in self.env_state.items() if k.startswith("sw_")}
         return json.dumps(info, ensure_ascii=False, indent=2)
 
@@ -282,6 +312,18 @@ class GetRecentLogsTool(DBTool):
             return f"Error reading logs: {e}"
 
     def execute_simulated(self, args):
+        if self.scenario and self.scenario.logs:
+            level = args.get("level", "WARNING").upper()
+            level_pri = {"LOG": 0, "WARNING": 1, "ERROR": 2, "FATAL": 3}
+            min_pri = level_pri.get(level, 1)
+            logs = [
+                f"{entry['level']}: {entry['message']}"
+                for entry in self.scenario.logs
+                if level_pri.get(entry.get('level', 'LOG'), 0) >= min_pri
+            ]
+            return "\n".join(logs) if logs else "No matching log entries."
+
+        # 兼容旧模式
         logs = []
         for k, v in self.env_state.items():
             if k.startswith("metric_") and isinstance(v, (int, float)):
@@ -289,8 +331,6 @@ class GetRecentLogsTool(DBTool):
                     logs.append("WARNING: buffer hit rate low, consider increasing shared_buffers")
                 if "temp_files" in k and v > 100:
                     logs.append(f"WARNING: {int(v)} temporary files, consider increasing work_mem")
-                if "dead_tuple" in k and v > 0.1:
-                    logs.append("WARNING: high dead tuple ratio, check autovacuum settings")
         return "\n".join(logs) if logs else "No warnings detected."
 
 
@@ -336,8 +376,12 @@ class SetKnobTool(DBTool):
 
     def execute_simulated(self, args):
         knobs = json.loads(args["knobs"])
+        # 更新 env_state（兼容）
         for k, v in knobs.items():
             self.env_state[f"knob_{k}"] = v
+        # 更新 scenario 并联动指标
+        if self.scenario:
+            self.scenario.apply_knob_change(knobs)
         return json.dumps({"success": list(knobs.keys()), "pending_restart": [], "failed": []}, indent=2)
 
 
@@ -437,25 +481,26 @@ class PredictPerformanceTool(DBTool):
         if self.cost_model is None:
             return json.dumps({"error": "cost model not loaded"})
 
-        # 从 env_state 构造 knob 配置 dict
-        knob_config = {}
-        for k, v in self.env_state.items():
-            if k.startswith("knob_"):
-                knob_config[k.replace("knob_", "")] = v
-        knob_config["workload"] = self.env_state.get("workload", "mixed")
-
-        # 构造硬件信息
-        hw_info = {}
-        for k, v in self.env_state.items():
-            if k.startswith("hw_"):
-                hw_info[k.replace("hw_", "")] = v
+        # 优先从 scenario 读取
+        if self.scenario and self.scenario.knobs:
+            knob_config = dict(self.scenario.knobs)
+            knob_config["workload"] = self.scenario.workload.get("type", "mixed")
+            hw_info = dict(self.scenario.hardware)
+            baseline = float(self.scenario.workload.get("tps_current", 0) or 0)
+        else:
+            knob_config = {}
+            for k, v in self.env_state.items():
+                if k.startswith("knob_"):
+                    knob_config[k.replace("knob_", "")] = v
+            knob_config["workload"] = self.env_state.get("workload", "mixed")
+            hw_info = {k.replace("hw_", ""): v for k, v in self.env_state.items() if k.startswith("hw_")}
+            baseline = float(self.env_state.get("tps", 0) or 0)
 
         try:
             pred_tps = self.cost_model.predict(knob_config, hw_info)
         except Exception as e:
             return json.dumps({"error": f"prediction failed: {str(e)}"})
 
-        baseline = float(self.env_state.get("tps", 0) or 0)
         return json.dumps({
             "predicted_tps": round(pred_tps, 1),
             "baseline_tps": round(baseline, 1),
@@ -479,7 +524,7 @@ class RunBenchmarkTool(DBTool):
         )
 
     def execute_real(self, args):
-        from cost_model.data.benchmark_runner import BenchmarkRunner
+        from core.db.benchmark_runner import BenchmarkRunner
         db = self.config.database
         bench_cfg = self.config.get("tools.benchmark", {})
         runner = BenchmarkRunner(
@@ -498,6 +543,50 @@ class RunBenchmarkTool(DBTool):
         return json.dumps({"error": "run_benchmark only available in eval mode"})
 
 
+class GetSystemStatsTool(DBTool):
+    """获取系统级资源使用情况（CPU、内存、IO、swap）"""
+    def __init__(self, **kwargs):
+        super().__init__(
+            name="get_system_stats",
+            description="获取系统级资源使用情况（CPU 使用率、内存使用率、磁盘 IO、swap 等）",
+            parameters={"type": "object", "properties": {}, "required": []},
+            **kwargs
+        )
+
+    def execute_real(self, args):
+        stats = {}
+        try:
+            output = subprocess.check_output(
+                "top -bn1 | grep 'Cpu(s)' | awk '{print $2}'",
+                shell=True, text=True, timeout=5
+            )
+            stats["cpu_usage_pct"] = round(float(output.strip()), 1)
+        except Exception:
+            pass
+        try:
+            output = subprocess.check_output(
+                "free -m | grep Mem | awk '{printf \"%.1f\", $3/$2*100}'",
+                shell=True, text=True, timeout=5
+            )
+            stats["memory_usage_pct"] = float(output.strip())
+        except Exception:
+            pass
+        try:
+            output = subprocess.check_output(
+                "free -m | grep Swap | awk '{print $3}'",
+                shell=True, text=True, timeout=5
+            )
+            stats["swap_usage_mb"] = int(output.strip() or 0)
+        except Exception:
+            pass
+        return json.dumps(stats, ensure_ascii=False, indent=2)
+
+    def execute_simulated(self, args):
+        if self.scenario and self.scenario.system:
+            return json.dumps(self.scenario.system, ensure_ascii=False, indent=2)
+        return json.dumps({}, ensure_ascii=False, indent=2)
+
+
 # 所有工具类列表
 ALL_TOOL_CLASSES = [
     GetHardwareInfoTool,
@@ -505,6 +594,7 @@ ALL_TOOL_CLASSES = [
     GetDBMetricsTool,
     GetWorkloadInfoTool,
     GetRecentLogsTool,
+    GetSystemStatsTool,
     SetKnobTool,
     RestartPGTool,
     ReloadPGTool,
