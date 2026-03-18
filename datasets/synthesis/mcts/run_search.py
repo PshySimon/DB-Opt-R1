@@ -66,7 +66,7 @@ def create_llm_client(model: str, api_key: str = None, api_base: str = None):
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                max_tokens=512,
+                max_tokens=2048,
             )
             return response.choices[0].message.content
 

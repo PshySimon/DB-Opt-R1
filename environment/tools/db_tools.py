@@ -177,7 +177,37 @@ class GetDBMetricsTool(DBTool):
         return json.dumps(metrics, ensure_ascii=False, indent=2)
 
     def execute_simulated(self, args):
-        metrics = {k.replace("metric_", ""): v for k, v in self.env_state.items() if k.startswith("metric_")}
+        # 只返回对调优有用的关键指标
+        raw = {k.replace("metric_", ""): v for k, v in self.env_state.items() if k.startswith("metric_")}
+        metrics = {}
+
+        # 缓冲命中率
+        blks_hit = float(raw.get("pg_stat_database_sum_blks_hit", 0) or 0)
+        blks_read = float(raw.get("pg_stat_database_sum_blks_read", 0) or 0)
+        total = blks_hit + blks_read
+        metrics["buffer_hit_rate"] = round(blks_hit / total, 4) if total > 0 else "N/A"
+
+        # 临时文件
+        metrics["temp_files_count"] = int(float(raw.get("pg_stat_database_sum_temp_files", 0) or 0))
+        metrics["temp_bytes_mb"] = round(float(raw.get("pg_stat_database_sum_temp_bytes", 0) or 0) / 1024 / 1024, 2)
+
+        # 死元组
+        live = float(raw.get("pg_stat_user_tables_sum_n_live_tup", 0) or 0)
+        dead = float(raw.get("pg_stat_user_tables_sum_n_dead_tup", 0) or 0)
+        metrics["dead_tuple_ratio"] = round(dead / (live + dead), 4) if (live + dead) > 0 else "N/A"
+
+        # 全表扫描 vs 索引扫描
+        seq = float(raw.get("pg_stat_user_tables_sum_seq_scan", 0) or 0)
+        idx = float(raw.get("pg_stat_user_tables_sum_idx_scan", 0) or 0)
+        metrics["seq_scan_ratio"] = round(seq / (seq + idx), 4) if (seq + idx) > 0 else "N/A"
+
+        # 检查点
+        metrics["checkpoints_timed"] = int(float(raw.get("pg_stat_bgwriter_checkpoints_timed", 0) or 0))
+        metrics["checkpoints_requested"] = int(float(raw.get("pg_stat_bgwriter_checkpoints_req", 0) or 0))
+
+        # 死锁
+        metrics["deadlocks"] = int(float(raw.get("pg_stat_database_sum_deadlocks", 0) or 0))
+
         return json.dumps(metrics, ensure_ascii=False, indent=2)
 
 
