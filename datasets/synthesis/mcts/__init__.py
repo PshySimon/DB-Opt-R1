@@ -1,5 +1,6 @@
 from .node import MCTSNode
 from .search import MCTSSearch
+from .async_search import AsyncMCTSSearch
 from .extract import (
     extract_best_trajectory,
     extract_top_k_trajectories,
@@ -10,7 +11,7 @@ from .extract import (
 )
 
 __all__ = [
-    'MCTSNode', 'MCTSSearch',
+    'MCTSNode', 'MCTSSearch', 'AsyncMCTSSearch',
     'extract_best_trajectory', 'extract_top_k_trajectories',
     'extract_contrastive_pairs',
     'format_trajectory_as_messages', 'format_contrastive_as_dpo',

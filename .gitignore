@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+
+# 模型权重 & 训练产物
+cost_model/checkpoints/
+outputs/
+
+# 合成数据（可重新生成）
+datasets/data/sft_trajectories.jsonl
+datasets/data/contrastive_pairs.jsonl
+datasets/data/mcts_trees/
+
+# 原始数据（太大，不入库）
+cost_model/data/raw/*.csv
+
+# 日志
+logs/
+*.log
+
+# 环境
+.env
+.venv/

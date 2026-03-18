@@ -7,11 +7,13 @@ import argparse
 import logging
 import os
 import sys
+import time
 
 # 添加项目根目录到 path（datasets/synthesis/mcts/ → 回到项目根）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from datasets.synthesis.mcts.search import MCTSSearch
+from datasets.synthesis.mcts.async_search import AsyncMCTSSearch
 from datasets.synthesis.mcts.extract import (
     extract_best_trajectory,
     extract_top_k_trajectories,
@@ -79,10 +81,11 @@ def create_llm_client(model: str, api_key: str = None, api_base: str = None):
 def run_mcts(args):
     """主流程"""
     from environment.tools import DBToolEnv
+    t0 = time.time()
 
     logger.info(f"加载数据集: {args.dataset}")
     logger.info(f"模型: {args.model}")
-    logger.info(f"搜索参数: simulations={args.simulations}, children={args.children}, depth={args.depth}")
+    logger.info(f"搜索参数: simulations={args.simulations}, children={args.children}, depth={args.depth}, num_workers={getattr(args, 'num_workers', 1)}")
 
     # LLM 客户端
     llm_generate = create_llm_client(
@@ -92,6 +95,8 @@ def run_mcts(args):
     )
 
     # 搜索配置
+    num_workers = getattr(args, 'num_workers', 1)
+
     search_config = {
         "num_simulations": args.simulations,
         "max_children": args.children,
@@ -100,6 +105,7 @@ def run_mcts(args):
         "expand_temperature": args.expand_temp,
         "rollout_temperature": args.rollout_temp,
         "system_prompt": SYSTEM_PROMPT,
+        "num_workers": num_workers,
     }
 
     # 加载 cost model
@@ -123,16 +129,34 @@ def run_mcts(args):
         logger.info(f"环境 {i+1}/{num_samples} (sample_idx={i})")
         logger.info(f"{'='*50}")
 
-        env = DBToolEnv(
-            mode="train",
-            dataset_path=args.dataset,
-            cost_model=cost_model,
-            max_turns=args.depth,
-            knob_space_path=args.knob_space,
-        )
+        def env_factory():
+            return DBToolEnv(
+                mode="train",
+                dataset_path=args.dataset,
+                cost_model=cost_model,
+                max_turns=args.depth,
+                knob_space_path=args.knob_space,
+            )
 
-        searcher = MCTSSearch(env=env, llm_generate=llm_generate, config=search_config)
+        if num_workers > 1:
+            searcher = AsyncMCTSSearch(
+                env_factory=env_factory,
+                llm_generate=llm_generate,
+                config=search_config,
+            )
+        else:
+            env = env_factory()
+            searcher = MCTSSearch(env=env, llm_generate=llm_generate, config=search_config)
+
         root = searcher.search(sample_idx=i)
+
+        # 保存搜索树用于 debug
+        tree_dir = os.path.join(args.output_dir, "mcts_trees")
+        os.makedirs(tree_dir, exist_ok=True)
+        tree_path = os.path.join(tree_dir, f"tree_env_{i}.json")
+        with open(tree_path, "w", encoding="utf-8") as f:
+            json.dump(root.to_dict(), f, ensure_ascii=False, indent=2)
+        logger.info(f"  搜索树已保存: {tree_path}")
 
         sft_items, contrastive_items = [], []
         if root.children:
@@ -164,12 +188,12 @@ def run_mcts(args):
 
         return sft_items, contrastive_items
 
-    # 并行 or 串行
-    num_workers = getattr(args, 'num_workers', 1)
-    if num_workers > 1:
+    # 多环境并行 or 串行
+    parallel = getattr(args, 'parallel', 1)
+    if parallel > 1:
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        logger.info(f"并行模式: {num_workers} workers")
-        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+        logger.info(f"多环境并行: {parallel} parallel")
+        with ThreadPoolExecutor(max_workers=parallel) as pool:
             futures = {pool.submit(search_one_env, i): i for i in range(num_samples)}
             for future in as_completed(futures):
                 try:
@@ -195,6 +219,20 @@ def run_mcts(args):
     save_jsonl(contrastive_data, contrastive_path)
     logger.info(f"对比数据: {len(contrastive_data)} 对 → {contrastive_path}")
 
+    elapsed = time.time() - t0
+    minutes, seconds = divmod(int(elapsed), 60)
+    logger.info(f"\n总耗时: {minutes}m {seconds}s")
+
+    # 预览命令提示
+    logger.info(f"\n预览数据:")
+    logger.info(f"  python3 -m datasets.synthesis.mcts.preview {sft_path}")
+    logger.info(f"  python3 -m datasets.synthesis.mcts.preview {contrastive_path}")
+    tree_dir = os.path.join(args.output_dir, "mcts_trees")
+    if os.path.isdir(tree_dir):
+        trees = [f for f in os.listdir(tree_dir) if f.endswith('.json')]
+        if trees:
+            logger.info(f"  python3 -m datasets.synthesis.mcts.preview {os.path.join(tree_dir, trees[0])}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="MCTS 轨迹合成")
@@ -205,7 +243,8 @@ def main():
     parser.add_argument("--knob-space", default="configs/knob_space.yaml", help="knob_space.yaml 路径")
     parser.add_argument("--output-dir", default="datasets/data", help="输出目录（datasets/data/）")
     parser.add_argument("--num-envs", type=int, default=100, help="搜索的环境数")
-    parser.add_argument("--num-workers", type=int, default=1, help="并行 worker 数（1=串行）")
+    parser.add_argument("--parallel", type=int, default=1, help="多环境并行数（1=串行）")
+    parser.add_argument("--num-workers", type=int, default=1, help="单棵树内并发 simulation 线程数（1=串行）")
 
     # LLM
     parser.add_argument("--model", default="gpt-4", help="LLM 模型名称")

@@ -9,7 +9,7 @@ from .node import MCTSNode
 
 
 def extract_best_trajectory(root: MCTSNode) -> List[dict]:
-    """提取最优路径（沿 avg_reward 最高的路径）"""
+    """提取最优路径（沿 avg_reward 最高的路径 + 叶节点 rollout）"""
     path = []
     node = root
     while node.children:
@@ -18,6 +18,9 @@ def extract_best_trajectory(root: MCTSNode) -> List[dict]:
             "action": node.action,
             "observation": node.observation,
         })
+    # 拼接叶节点的 rollout 步骤
+    if node.rollout_trajectory:
+        path.extend(node.rollout_trajectory)
     return path
 
 
@@ -33,10 +36,10 @@ def extract_top_k_trajectories(root: MCTSNode, k: int = 3) -> List[List[dict]]:
 
 
 def _collect_leaf_trajectories(node: MCTSNode, results: list):
-    """递归收集所有叶节点的轨迹"""
+    """递归收集所有叶节点的轨迹（含 rollout）"""
     if node.is_leaf() and node.visit_count > 0:
         results.append({
-            "trajectory": node.trajectory,
+            "trajectory": node.full_trajectory,
             "reward": node.avg_reward,
         })
     for child in node.children:
@@ -86,6 +89,13 @@ def format_trajectory_as_messages(trajectory: List[dict],
         messages.append({"role": "assistant", "content": step["action"]})
         if step.get("observation"):
             messages.append({"role": "tool", "content": step["observation"]})
+
+    # 确保以 assistant 结尾
+    if messages and messages[-1]["role"] == "tool":
+        messages.append({
+            "role": "assistant",
+            "content": "<think>调优流程已完成，以上为全部操作步骤。</think>"
+        })
 
     result = {"messages": messages}
     if reward is not None:

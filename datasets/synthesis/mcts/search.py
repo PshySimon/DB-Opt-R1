@@ -108,11 +108,12 @@ class MCTSSearch:
         self.env.reset(sample_idx=root.sample_idx)
 
         # 回放已有轨迹
-        trajectory = node.trajectory
+        trajectory = list(node.trajectory)  # 复制，避免污染节点属性
         for step in trajectory:
             self._replay_step(step["action"])
 
         # 继续 rollout
+        rollout_steps = []
         remaining = self.max_depth - node.depth
         for _ in range(remaining):
             prompt = self._build_prompt(trajectory)
@@ -120,13 +121,21 @@ class MCTSSearch:
             action = action.strip()
 
             obs = self._execute_in_env(action)
-            trajectory.append({"action": action, "observation": obs})
+            step = {"action": action, "observation": obs}
+            trajectory.append(step)
+            rollout_steps.append(step)
 
             # 如果调了 predict_performance 就结束
             if "predict_performance" in action:
                 break
 
-        return self._compute_reward()
+        reward = self._compute_reward()
+
+        # 保留最优 rollout（一个叶节点可能被多次 simulate）
+        if not node.rollout_trajectory or reward > node.avg_reward:
+            node.rollout_trajectory = rollout_steps
+
+        return reward
 
     def _backpropagate(self, node: MCTSNode, reward: float):
         """回传 reward"""

@@ -26,6 +26,9 @@ class MCTSNode:
         self.total_reward = 0.0
         self.depth = parent.depth + 1 if parent else 0
 
+        # rollout 阶段的续写步骤（仅叶节点有值）
+        self.rollout_trajectory: List[dict] = []
+
         # 搜索元数据
         self.sample_idx: Optional[int] = None  # 根节点记录环境样本索引
 
@@ -35,7 +38,7 @@ class MCTSNode:
 
     @property
     def trajectory(self) -> List[dict]:
-        """从根到当前节点的完整轨迹"""
+        """从根到当前节点的轨迹（不含 rollout）"""
         path = []
         node = self
         while node.parent is not None:
@@ -45,6 +48,11 @@ class MCTSNode:
             })
             node = node.parent
         return list(reversed(path))
+
+    @property
+    def full_trajectory(self) -> List[dict]:
+        """从根到当前节点的完整轨迹（含 rollout 续写）"""
+        return self.trajectory + self.rollout_trajectory
 
     def is_leaf(self) -> bool:
         return len(self.children) == 0
@@ -72,6 +80,35 @@ class MCTSNode:
         child = MCTSNode(action=action, observation=observation, parent=self)
         self.children.append(child)
         return child
+
+    def to_dict(self) -> dict:
+        """递归序列化为字典（用于保存为 JSON debug）"""
+        d = {
+            "action": self.action,
+            "observation": self.observation,
+            "depth": self.depth,
+            "visit_count": self.visit_count,
+            "total_reward": round(self.total_reward, 4),
+            "avg_reward": round(self.avg_reward, 4),
+            "rollout_trajectory": self.rollout_trajectory,
+            "children": [c.to_dict() for c in self.children],
+        }
+        if self.sample_idx is not None:
+            d["sample_idx"] = self.sample_idx
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict, parent: 'MCTSNode' = None) -> 'MCTSNode':
+        """从字典反序列化为 MCTSNode 树"""
+        node = cls(action=d.get("action"), observation=d.get("observation"), parent=parent)
+        node.visit_count = d.get("visit_count", 0)
+        node.total_reward = d.get("total_reward", 0.0)
+        node.rollout_trajectory = d.get("rollout_trajectory", [])
+        node.sample_idx = d.get("sample_idx")
+        for child_d in d.get("children", []):
+            child = cls.from_dict(child_d, parent=node)
+            node.children.append(child)
+        return node
 
     def __repr__(self):
         action_str = (self.action[:50] + "...") if self.action and len(self.action) > 50 else self.action
