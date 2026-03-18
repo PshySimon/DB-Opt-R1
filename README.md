@@ -28,23 +28,34 @@
 ## 项目结构
 
 ```
-├── core/                       # 核心框架
-│   ├── config.py               # 统一配置管理
-│   └── tool/                   # 工具框架（Tool 基类、ToolEnv、装饰器）
+├── core/                               # 核心框架
+│   ├── config.py                       # 统一配置管理
+│   ├── tool/                           # 工具框架（Tool 基类、ToolEnv、装饰器）
+│   └── db/                             # PG 公共基础设施
+│       ├── knob_space.py               # Knob 搜索空间 + 校验
+│       ├── collector.py                # 数据采集器
+│       ├── pg_configurator.py          # PG 配置管理
+│       └── benchmark_runner.py         # Benchmark 运行器
 ├── environment/
-│   └── tools/                  # 11 个 DB 调优工具（real/simulated 双模式）
+│   └── tools/                          # 12 个 DB 调优工具（real/simulated 双模式）
 ├── cost_model/
-│   └── data/                   # 数据采集 pipeline
+│   ├── data/                           # Cost Model 数据采集 pipeline
+│   ├── train.py                        # 训练脚本
+│   └── preprocess.py                   # 特征工程
 ├── datasets/
-│   ├── synthesis/mcts/         # MCTS 轨迹数据合成
-│   └── data/                   # 生成的数据集
+│   ├── data/                           # 所有数据集统一存放
+│   │   ├── cost_model/                 # Cost Model 采集数据
+│   │   ├── scenario_seeds/             # 场景种子描述
+│   │   └── scenarios/                  # 场景 knob 配置 + 采集结果
+│   └── synthesis/
+│       ├── scenarios/                  # 场景生成 pipeline
+│       └── mcts/                       # MCTS 轨迹合成
 ├── configs/
-│   ├── config.yaml             # 全局配置
-│   └── knob_space.yaml         # 45 个可调 knob 定义
-├── scripts/
-│   ├── setup_env.sh            # 环境准备（支持容器/VM）
-│   └── collect_data.sh         # 数据采集
-└── docs/                       # 设计文档
+│   ├── config.yaml                     # 全局配置
+│   └── knob_space.yaml                 # 45 个可调 knob 定义
+└── scripts/
+    ├── setup_env.sh                    # 环境准备
+    └── collect_data.sh                 # 数据采集
 ```
 
 ## 环境准备
@@ -62,20 +73,30 @@ bash scripts/setup_env.sh
 - 配置本地免密登录（Unix socket + TCP 127.0.0.1）
 - 安装 Python 依赖
 
-## 数据采集
+---
 
-**首次使用**必须加 `--init` 初始化 pgbench 测试表（只需一次）：
+## 使用流程
+
+### 1. Cost Model 数据采集
+
+在真机上随机采样 knob 配置 → pgbench → 采集指标，输出 CSV。
 
 ```bash
-# 第一次：初始化 + 采集
+# 首次：初始化 pgbench 测试表 + 采集
 bash scripts/collect_data.sh --init --rounds 1500 --database benchmark --workload all --background
+
+# 后续：直接采集（无需 --init）
+bash scripts/collect_data.sh --rounds 1500 --database benchmark --workload all --background
 ```
 
-之后再跑**无需** `--init`：
+或直接调用 Python pipeline：
 
 ```bash
-# 后续：直接采集
-bash scripts/collect_data.sh --rounds 1500 --database benchmark --workload all --background
+python3 -m cost_model.data.pipeline \
+    --config configs/knob_space.yaml \
+    --output datasets/data/cost_model \
+    --rounds 1500 --sampling lhs \
+    --database benchmark
 ```
 
 > ⚠️ 重建数据库或重装 PG 后需重新 `--init`
@@ -90,14 +111,80 @@ bash scripts/collect_data.sh --rounds 1500 --database benchmark --workload all -
 | `write_heavy` | 写密集 |
 | `all` | 每种各跑一批（推荐） |
 
-**后台运行**会输出日志路径和 PID：
-```
-PID: 12345 (已保存到 ./cost_model/data/raw/collect.pid)
-查看进度: tail -f ./cost_model/data/raw/collect_*.log
-停止采集: kill $(cat ./cost_model/data/raw/collect.pid)
+### 2. Cost Model 训练
+
+```bash
+python3 -m cost_model.train \
+    --data datasets/data/cost_model/dataset.csv \
+    --save-dir cost_model/saved
 ```
 
-**全部参数**：`bash scripts/collect_data.sh --help`
+### 3. SFT 数据合成（场景驱动）
+
+三步流程，每步独立，支持断点续跑：
+
+#### Step 0: 生成种子场景描述（可选，扩充种子库）
+
+LLM 根据 knob_space 自动生成多样化的故障/调优场景描述。
+
+```bash
+python3 -m datasets.synthesis.scenarios.pipeline seeds \
+    --config configs/knob_space.yaml \
+    --output datasets/data/scenario_seeds/seeds.json \
+    --count 50 \
+    --model gpt-4 \
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE
+```
+
+#### Step 1: 生成 knob 配置（不需要 PG）
+
+LLM 根据种子描述生成对应的 knob 配置，经 `KnobSpace.validate()` 校验。
+
+```bash
+python3 -m datasets.synthesis.scenarios.pipeline generate \
+    --seeds datasets/data/scenario_seeds/seeds.json \
+    --output datasets/data/scenarios/knob_configs.json \
+    --config configs/knob_space.yaml \
+    --model gpt-4 --variants 3 --workers 5
+```
+
+#### Step 2: 真机采集（需要 PG）
+
+将 knob 配置应用到 PG → pgbench → 采集完整指标（CPU/IO/等待事件/慢查询/日志）。
+
+```bash
+python3 -m datasets.synthesis.scenarios.pipeline collect \
+    --input datasets/data/scenarios/knob_configs.json \
+    --output datasets/data/scenarios/collected.json \
+    --host 127.0.0.1 --port 5432 \
+    --user postgres --database benchmark
+```
+
+#### Step 3: MCTS 轨迹合成
+
+基于采集的场景数据，MCTS 搜索最优调优轨迹，生成 SFT + 对比对数据。
+
+```bash
+# 使用场景数据（新模式）
+python3 -m datasets.synthesis.mcts.run_search \
+    --scenarios datasets/data/scenarios/collected.json \
+    --knob-space configs/knob_space.yaml \
+    --cost-model cost_model/saved/model.pkl \
+    --output-dir datasets/data
+
+# 使用 CSV 数据（旧模式，仍兼容）
+python3 -m datasets.synthesis.mcts.run_search \
+    --dataset datasets/data/cost_model/dataset.csv \
+    --knob-space configs/knob_space.yaml \
+    --cost-model cost_model/saved/model.pkl
+```
+
+输出：
+- `datasets/data/sft_data.jsonl` — SFT 训练数据
+- `datasets/data/contrastive_pairs.jsonl` — DPO/对比学习数据
+
+---
 
 ## 配置
 
