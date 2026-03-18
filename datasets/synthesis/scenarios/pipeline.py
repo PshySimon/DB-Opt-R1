@@ -1,7 +1,22 @@
 """
-故障场景采集 Pipeline
+故障场景采集 Pipeline（两步流程）
 
-流程: 读故障描述 → LLM 生成 knob → 校验 → 真机执行 → benchmark → 采集 → 存 JSON
+Step 1: generate_knobs — LLM 根据种子描述生成 knob 配置（不需要 PG）
+Step 2: collect_scenarios — 真机执行 + 采集完整指标（需要 PG）
+
+用法:
+    # Step 1: 生成 knob 配置
+    python3 -m datasets.synthesis.scenarios.pipeline generate \
+        --seeds datasets/data/scenario_seeds/seeds.json \
+        --output datasets/data/scenarios/knob_configs \
+        --config configs/knob_space.yaml \
+        --model gpt-4 --variants 3
+
+    # Step 2: 真机采集
+    python3 -m datasets.synthesis.scenarios.pipeline collect \
+        --input datasets/data/scenarios/knob_configs \
+        --output datasets/data/scenarios/collected \
+        --host 127.0.0.1 --port 5432
 """
 
 import json
@@ -18,12 +33,12 @@ from .schema import ScenarioState
 logger = logging.getLogger(__name__)
 
 
-def create_fault_prompt(fault_desc: dict, hardware: dict, knob_space: KnobSpace) -> str:
+def create_scenario_prompt(seed: dict, hardware: dict, knob_space: KnobSpace) -> str:
     """构造让 LLM 生成故障 knob 配置的 prompt"""
-    return f"""你是 PostgreSQL 故障模拟专家。请根据以下故障描述，从可用 knob 列表中选择需要修改的参数并给出值，使数据库表现出该故障的典型症状。
+    return f"""你是 PostgreSQL 故障模拟专家。请根据以下场景描述，从可用 knob 列表中选择需要修改的参数并给出值，使数据库表现出该场景的典型症状。
 
-## 故障描述
-{fault_desc['description']}
+## 场景描述
+{seed['description']}
 
 ## 当前硬件环境
 - CPU: {hardware.get('cpu_count', 8)} 核
@@ -42,195 +57,241 @@ def create_fault_prompt(fault_desc: dict, hardware: dict, knob_space: KnobSpace)
 {{"shared_buffers": "32MB", "work_mem": "1MB"}}"""
 
 
-class ScenarioPipeline:
-    """故障场景采集流水线"""
+# ==================== Step 1: 生成 knob 配置 ====================
 
-    def __init__(self, knob_space_path: str,
-                 pg_host: str = "127.0.0.1", pg_port: int = 5432,
-                 pg_user: str = "postgres", pg_password: str = "",
-                 pg_database: str = "postgres", pg_data_dir: str = None,
-                 output_dir: str = "./datasets/data/scenarios",
-                 llm_generate=None):
-        """
-        Args:
-            knob_space_path: knob_space.yaml 路径
-            llm_generate: LLM 调用函数 (prompt) -> str
-        """
-        self.knob_space = KnobSpace(knob_space_path)
-        self.pg_ctl = PGConfigurator(
-            pg_host=pg_host, pg_port=pg_port,
-            pg_user=pg_user, pg_password=pg_password,
-            pg_database=pg_database, pg_data_dir=pg_data_dir,
-        )
-        self.output_dir = output_dir
-        self.llm_generate = llm_generate
+def generate_knobs(seeds_path: str, output_dir: str, knob_space_path: str,
+                   llm_generate, variants: int = 1, hardware: dict = None):
+    """读取种子描述，调用 LLM 生成 knob 配置，保存为 JSON"""
+    knob_space = KnobSpace(knob_space_path)
 
-        self._pg_host = pg_host
-        self._pg_port = pg_port
-        self._pg_user = pg_user
-        self._pg_password = pg_password
-        self._pg_database = pg_database
+    with open(seeds_path, "r", encoding="utf-8") as f:
+        seeds = json.load(f)
 
-    def _get_collector(self) -> ScenarioCollector:
-        import psycopg2
-        conn = psycopg2.connect(
-            host=self._pg_host, port=self._pg_port,
-            user=self._pg_user, password=self._pg_password,
-            database=self._pg_database
-        )
-        return ScenarioCollector(conn, database=self._pg_database)
+    if hardware is None:
+        hardware = {"cpu_count": 8, "total_memory_gb": 16, "disk_type": "SSD"}
 
-    def _get_benchmark(self, workload: str = "mixed") -> BenchmarkRunner:
-        return BenchmarkRunner(
-            pg_host=self._pg_host, pg_port=self._pg_port,
-            pg_user=self._pg_user, pg_database=self._pg_database,
-            workload=workload,
-        )
+    os.makedirs(output_dir, exist_ok=True)
+    total = len(seeds) * variants
+    logger.info(f"共 {len(seeds)} 个种子 × {variants} 变体 = {total} 个配置待生成")
 
-    def run_one(self, fault_desc: dict, variant_id: int = 0) -> str:
-        """对一个故障描述执行完整流程，返回 JSON 路径"""
-        name = fault_desc["name"]
-        logger.info(f"===== 场景: {name} (variant {variant_id}) =====")
+    generated = 0
+    for seed in seeds:
+        for v in range(variants):
+            name = seed["name"]
+            out_path = os.path.join(output_dir, f"{name}_v{v}.json")
 
-        # 1. 采集当前硬件
-        collector = self._get_collector()
-        from core.db.collector import HardwareCollector
-        hardware = HardwareCollector().collect()
-        collector.pg_conn.close()
+            # 跳过已生成的
+            if os.path.exists(out_path):
+                logger.info(f"跳过已存在: {out_path}")
+                generated += 1
+                continue
 
-        # 2. LLM 生成 knob 配置
-        prompt = create_fault_prompt(fault_desc, hardware, self.knob_space)
-        logger.info("调用 LLM 生成故障 knob 配置...")
-        raw_response = self.llm_generate(prompt)
+            logger.info(f"[{generated+1}/{total}] 生成 {name}_v{v} ...")
 
-        # 解析 JSON
+            prompt = create_scenario_prompt(seed, hardware, knob_space)
+            raw = llm_generate(prompt)
+
+            # 解析
+            try:
+                text = raw.strip()
+                if text.startswith("```"):
+                    text = "\n".join(text.split("\n")[1:-1])
+                knob_config = json.loads(text)
+            except json.JSONDecodeError as e:
+                logger.error(f"  LLM 输出非法 JSON: {e}")
+                continue
+
+            # 校验
+            valid = knob_space.validate(knob_config)
+            if not valid:
+                logger.error(f"  所有 knob 校验失败，跳过")
+                continue
+
+            # 保存
+            result = {
+                "name": name,
+                "variant": v,
+                "difficulty": seed.get("difficulty", 1),
+                "description": seed["description"],
+                "category": seed.get("category", ""),
+                "knobs": valid,
+                "hardware_hint": hardware,
+            }
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"  ✅ {len(valid)} 个 knob → {out_path}")
+            generated += 1
+
+    logger.info(f"生成完成: {generated}/{total}")
+
+
+# ==================== Step 2: 真机采集 ====================
+
+def collect_scenarios(input_dir: str, output_dir: str,
+                      pg_host: str = "127.0.0.1", pg_port: int = 5432,
+                      pg_user: str = "postgres", pg_password: str = "",
+                      pg_database: str = "postgres", pg_data_dir: str = None):
+    """读取 knob 配置 JSON，逐个应用到 PG，跑 benchmark，采集完整指标"""
+    pg_ctl = PGConfigurator(
+        pg_host=pg_host, pg_port=pg_port,
+        pg_user=pg_user, pg_password=pg_password,
+        pg_database=pg_database, pg_data_dir=pg_data_dir,
+    )
+
+    knob_space_path = "configs/knob_space.yaml"
+    knob_space = KnobSpace(knob_space_path)
+
+    config_files = sorted([
+        f for f in os.listdir(input_dir) if f.endswith(".json")
+    ])
+    os.makedirs(output_dir, exist_ok=True)
+
+    logger.info(f"共 {len(config_files)} 个配置待采集")
+    t0 = time.time()
+
+    for i, fname in enumerate(config_files):
+        out_path = os.path.join(output_dir, fname)
+
+        # 跳过已采集的
+        if os.path.exists(out_path):
+            logger.info(f"跳过已采集: {fname}")
+            continue
+
+        config_path = os.path.join(input_dir, fname)
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        knobs = config["knobs"]
+        logger.info(f"[{i+1}/{len(config_files)}] 采集 {config['name']}_v{config.get('variant', 0)} ...")
+
         try:
-            # 兼容 markdown code block
-            text = raw_response.strip()
-            if text.startswith("```"):
-                text = "\n".join(text.split("\n")[1:-1])
-            knob_config = json.loads(text)
-        except json.JSONDecodeError as e:
-            logger.error(f"LLM 输出不是合法 JSON: {e}\n{raw_response}")
-            return None
+            # 1. 重置 → 应用
+            pg_ctl.reset_to_default()
+            needs_restart = knob_space.needs_restart(knobs)
+            pg_ctl.apply(knobs, needs_restart=needs_restart)
 
-        # 3. 校验
-        valid_knobs = self.knob_space.validate(knob_config)
-        if not valid_knobs:
-            logger.error("所有 knob 校验失败，跳过")
-            return None
-        logger.info(f"有效 knob ({len(valid_knobs)}): {list(valid_knobs.keys())}")
+            # 2. Benchmark
+            benchmark = BenchmarkRunner(
+                pg_host=pg_host, pg_port=pg_port,
+                pg_user=pg_user, pg_database=pg_database,
+            )
+            perf = benchmark.run()
+            logger.info(f"  TPS: {perf.get('tps', 'N/A')}")
 
-        # 4. 重置 PG → 应用故障配置
-        self.pg_ctl.reset_to_default()
-        needs_restart = self.knob_space.needs_restart(valid_knobs)
-        self.pg_ctl.apply(valid_knobs, needs_restart=needs_restart)
+            # 3. 采集
+            import psycopg2
+            conn = psycopg2.connect(
+                host=pg_host, port=pg_port,
+                user=pg_user, password=pg_password,
+                database=pg_database
+            )
+            collector = ScenarioCollector(conn, database=pg_database)
+            scenario_data = collector.collect_scenario()
 
-        # 5. 跑 benchmark
-        benchmark = self._get_benchmark()
-        perf = benchmark.run()
-        logger.info(f"TPS: {perf.get('tps', 'N/A')}")
+            # 从原始指标计算人可读版本
+            flat = collector.flatten_snapshot({"metrics": scenario_data.get("metrics", {}), "timestamp": ""})
+            csv_metrics = {k: v for k, v in flat.items() if k.startswith("metric_")}
 
-        # 6. 采集完整场景
-        collector = self._get_collector()
-        scenario_data = collector.collect_scenario()
-        collector.pg_conn.close()
+            from core.db.collector import HardwareCollector
+            hardware = HardwareCollector().collect()
+            conn.close()
 
-        # 7. 组装 ScenarioState
-        # 从采集数据中提取人可读的 db_metrics
-        flat = collector.flatten_snapshot({"metrics": scenario_data.get("metrics", {}), "timestamp": ""})
-        csv_metrics = {k: v for k, v in flat.items() if k.startswith("metric_")}
+            # 4. 组装 ScenarioState
+            state = ScenarioState(
+                name=config["name"],
+                difficulty=config.get("difficulty", 1),
+                description=config.get("description", ""),
+                hardware={k: v for k, v in hardware.items() if v is not None},
+                knobs=knobs,
+                system=scenario_data.get("system", {}),
+                db_metrics=ScenarioState._parse_csv_metrics(csv_metrics),
+                wait_events=scenario_data.get("wait_events", []),
+                slow_queries=scenario_data.get("slow_queries", []),
+                logs=scenario_data.get("logs", []),
+                workload={
+                    "type": "mixed",
+                    "tps_current": perf.get("tps", 0),
+                    "latency_avg_ms": perf.get("latency_avg", 0),
+                    "benchmark": "pgbench",
+                },
+                solution={},
+            )
+            state.to_json(out_path)
+            logger.info(f"  ✅ → {out_path}")
 
-        state = ScenarioState(
-            name=name,
-            difficulty=fault_desc.get("difficulty", 1),
-            root_cause=[],
-            description=fault_desc["description"],
-            hardware={k: v for k, v in hardware.items() if v is not None},
-            knobs=valid_knobs,
-            system=scenario_data.get("system", {}),
-            db_metrics=ScenarioState._parse_csv_metrics(csv_metrics),
-            wait_events=scenario_data.get("wait_events", []),
-            slow_queries=scenario_data.get("slow_queries", []),
-            logs=scenario_data.get("logs", []),
-            workload={
-                "type": "mixed",
-                "tps_current": perf.get("tps", 0),
-                "latency_avg_ms": perf.get("latency_avg", 0),
-                "benchmark": "pgbench",
-            },
-            solution={},
-        )
+        except Exception as e:
+            logger.error(f"  ❌ 失败: {e}")
+            try:
+                pg_ctl.reset_to_default()
+                pg_ctl.restart()
+            except Exception:
+                pass
 
-        # 8. 保存
-        os.makedirs(self.output_dir, exist_ok=True)
-        json_path = os.path.join(self.output_dir, f"{name}_v{variant_id}.json")
-        state.to_json(json_path)
+    # 恢复默认
+    try:
+        pg_ctl.reset_to_default()
+        pg_ctl.restart()
+    except Exception:
+        pass
 
-        # 9. 恢复默认
-        self.pg_ctl.reset_to_default()
-        self.pg_ctl.restart()
+    elapsed = time.time() - t0
+    logger.info(f"采集完成，耗时 {int(elapsed)}s")
 
-        return json_path
 
-    def run_all(self, fault_descriptions_path: str, variants_per_fault: int = 1):
-        """对所有故障描述批量运行"""
-        with open(fault_descriptions_path, "r", encoding="utf-8") as f:
-            faults = json.load(f)
-
-        logger.info(f"共 {len(faults)} 个故障描述，每个 {variants_per_fault} 个变体")
-        t0 = time.time()
-
-        for fault in faults:
-            for v in range(variants_per_fault):
-                try:
-                    path = self.run_one(fault, variant_id=v)
-                    if path:
-                        logger.info(f"✅ {path}")
-                except Exception as e:
-                    logger.error(f"❌ {fault['name']}_v{v} 失败: {e}")
-                    # 尝试恢复
-                    try:
-                        self.pg_ctl.reset_to_default()
-                        self.pg_ctl.restart()
-                    except Exception:
-                        pass
-
-        elapsed = time.time() - t0
-        logger.info(f"全部完成，耗时 {int(elapsed)}s")
-
+# ==================== CLI ====================
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="故障场景采集")
-    parser.add_argument("--config", default="configs/knob_space.yaml")
-    parser.add_argument("--seeds", default="datasets/data/scenario_seeds/seeds.json")
-    parser.add_argument("--output", default="datasets/data/scenarios")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=5432)
-    parser.add_argument("--user", default="postgres")
-    parser.add_argument("--password", default="")
-    parser.add_argument("--database", default="postgres")
-    parser.add_argument("--model", default="gpt-4")
-    parser.add_argument("--api-key", default=None)
-    parser.add_argument("--api-base", default=None)
-    parser.add_argument("--variants", type=int, default=1, help="每个故障生成几个变体")
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="故障场景 Pipeline")
+    subparsers = parser.add_subparsers(dest="command")
 
+    # Step 1: generate
+    gen = subparsers.add_parser("generate", help="LLM 生成 knob 配置（不需要 PG）")
+    gen.add_argument("--seeds", default="datasets/data/scenario_seeds/seeds.json")
+    gen.add_argument("--output", default="datasets/data/scenarios/knob_configs")
+    gen.add_argument("--config", default="configs/knob_space.yaml")
+    gen.add_argument("--model", default="gpt-4")
+    gen.add_argument("--api-key", default=None)
+    gen.add_argument("--api-base", default=None)
+    gen.add_argument("--variants", type=int, default=3, help="每个种子生成几个变体")
+
+    # Step 2: collect
+    col = subparsers.add_parser("collect", help="真机采集完整指标（需要 PG）")
+    col.add_argument("--input", default="datasets/data/scenarios/knob_configs")
+    col.add_argument("--output", default="datasets/data/scenarios/collected")
+    col.add_argument("--host", default="127.0.0.1")
+    col.add_argument("--port", type=int, default=5432)
+    col.add_argument("--user", default="postgres")
+    col.add_argument("--password", default="")
+    col.add_argument("--database", default="postgres")
+    col.add_argument("--pg-data-dir", default=None)
+
+    args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    # 构造 LLM 客户端
-    from datasets.synthesis.mcts.run_search import create_llm_client
-    llm_fn = create_llm_client(model=args.model, api_key=args.api_key, api_base=args.api_base)
-
-    pipeline = ScenarioPipeline(
-        knob_space_path=args.config,
-        pg_host=args.host, pg_port=args.port,
-        pg_user=args.user, pg_password=args.password,
-        pg_database=args.database,
-        output_dir=args.output,
-        llm_generate=llm_fn,
-    )
-
-    pipeline.run_all(args.seeds, variants_per_fault=args.variants)
+    if args.command == "generate":
+        from datasets.synthesis.mcts.run_search import create_llm_client
+        llm_fn = create_llm_client(
+            model=args.model,
+            api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
+            api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
+        )
+        generate_knobs(
+            seeds_path=args.seeds,
+            output_dir=args.output,
+            knob_space_path=args.config,
+            llm_generate=llm_fn,
+            variants=args.variants,
+        )
+    elif args.command == "collect":
+        collect_scenarios(
+            input_dir=args.input,
+            output_dir=args.output,
+            pg_host=args.host, pg_port=args.port,
+            pg_user=args.user, pg_password=args.password,
+            pg_database=args.database, pg_data_dir=args.pg_data_dir,
+        )
+    else:
+        parser.print_help()
