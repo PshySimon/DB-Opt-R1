@@ -395,13 +395,29 @@ class PredictPerformanceTool(DBTool):
     def execute_simulated(self, args):
         if self.cost_model is None:
             return json.dumps({"error": "cost model not loaded"})
-        predicted = self.cost_model.predict(dict(self.env_state))
-        baseline = self.env_state.get("tps", 0)
-        pred_tps = predicted.get("tps", 0)
+
+        # 从 env_state 构造 knob 配置 dict
+        knob_config = {}
+        for k, v in self.env_state.items():
+            if k.startswith("knob_"):
+                knob_config[k.replace("knob_", "")] = v
+        knob_config["workload"] = self.env_state.get("workload", "mixed")
+
+        # 构造硬件信息
+        hw_info = {}
+        for k, v in self.env_state.items():
+            if k.startswith("hw_"):
+                hw_info[k.replace("hw_", "")] = v
+
+        try:
+            pred_tps = self.cost_model.predict(knob_config, hw_info)
+        except Exception as e:
+            return json.dumps({"error": f"prediction failed: {str(e)}"})
+
+        baseline = float(self.env_state.get("tps", 0) or 0)
         return json.dumps({
-            "predicted_tps": pred_tps,
-            "predicted_latency_avg": predicted.get("latency_avg", 0),
-            "baseline_tps": baseline,
+            "predicted_tps": round(pred_tps, 1),
+            "baseline_tps": round(baseline, 1),
             "improvement_pct": round((pred_tps - baseline) / max(baseline, 1) * 100, 2),
         }, indent=2)
 

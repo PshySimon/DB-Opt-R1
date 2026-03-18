@@ -87,19 +87,19 @@ def run_mcts(args):
         "system_prompt": SYSTEM_PROMPT,
     }
 
-    # 加载 cost model（占位）
+    # 加载 cost model
     cost_model = None
     if args.cost_model:
         logger.info(f"加载 Cost Model: {args.cost_model}")
-        # TODO: 加载真实 cost model
-        # cost_model = load_cost_model(args.cost_model)
+        from cost_model.model import CostModel
+        cost_model = CostModel.load(args.cost_model)
 
     sft_data = []
     contrastive_data = []
 
     # 对每个环境样本搜索
     import pandas as pd
-    dataset = pd.read_csv(args.dataset)
+    dataset = pd.read_csv(args.dataset, on_bad_lines="skip")
     num_samples = min(args.num_envs, len(dataset))
 
     for i in range(num_samples):

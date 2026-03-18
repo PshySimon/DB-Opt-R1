@@ -44,7 +44,7 @@ class DBToolEnv(ToolEnv):
         self._original_knobs = {}
 
         if mode == "train" and dataset_path:
-            self.dataset = pd.read_csv(dataset_path)
+            self.dataset = pd.read_csv(dataset_path, on_bad_lines="skip")
 
         common = {"mode": mode, "config": config, "env_state": self.env_state}
 
