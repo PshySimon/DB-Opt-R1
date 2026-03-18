@@ -1,0 +1,16 @@
+{
+  "name": "olap_on_oltp_config",
+  "variant": 0,
+  "difficulty": 2,
+  "description": "在 OLAP 分析型 workload（大量复杂聚合查询）上运行 OLTP 默认配置，work_mem 太小导致排序和哈希溢出磁盘，并行度不够。",
+  "category": "workload_mismatch",
+  "knobs": {
+    "work_mem": "1MB",
+    "max_parallel_workers_per_gather": 0
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}

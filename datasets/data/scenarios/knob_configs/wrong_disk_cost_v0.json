@@ -1,0 +1,15 @@
+{
+  "name": "wrong_disk_cost",
+  "variant": 0,
+  "difficulty": 1,
+  "description": "在 HDD 磁盘上使用了 SSD 的代价参数（random_page_cost 设为 1.1），导致优化器过度偏好索引扫描，实际 IO 延迟很高。",
+  "category": "optimizer",
+  "knobs": {
+    "random_page_cost": 1.1
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}

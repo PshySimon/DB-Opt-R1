@@ -1,0 +1,16 @@
+{
+  "name": "bgwriter_too_slow",
+  "variant": 0,
+  "difficulty": 2,
+  "description": "后台写入器效率低下：bgwriter_delay 过大（2000ms）且 bgwriter_lru_maxpages 过小，脏页不能及时写出，checkpoint 时突发大量 IO。",
+  "category": "bgwriter",
+  "knobs": {
+    "bgwriter_delay": 2000,
+    "bgwriter_lru_maxpages": 1
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}

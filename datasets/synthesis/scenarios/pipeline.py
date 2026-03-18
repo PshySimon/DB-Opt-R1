@@ -60,7 +60,8 @@ def create_scenario_prompt(seed: dict, hardware: dict, knob_space: KnobSpace) ->
 # ==================== Step 1: 生成 knob 配置 ====================
 
 def generate_knobs(seeds_path: str, output_dir: str, knob_space_path: str,
-                   llm_generate, variants: int = 1, hardware: dict = None):
+                   llm_generate, variants: int = 1, hardware: dict = None,
+                   workers: int = 1):
     """读取种子描述，调用 LLM 生成 knob 配置，保存为 JSON"""
     knob_space = KnobSpace(knob_space_path)
 
@@ -71,43 +72,38 @@ def generate_knobs(seeds_path: str, output_dir: str, knob_space_path: str,
         hardware = {"cpu_count": 8, "total_memory_gb": 16, "disk_type": "SSD"}
 
     os.makedirs(output_dir, exist_ok=True)
-    total = len(seeds) * variants
-    logger.info(f"共 {len(seeds)} 个种子 × {variants} 变体 = {total} 个配置待生成")
 
-    generated = 0
+    # 构建待生成任务列表（跳过已存在的）
+    tasks = []
     for seed in seeds:
         for v in range(variants):
             name = seed["name"]
             out_path = os.path.join(output_dir, f"{name}_v{v}.json")
-
-            # 跳过已生成的
             if os.path.exists(out_path):
                 logger.info(f"跳过已存在: {out_path}")
-                generated += 1
-                continue
+            else:
+                tasks.append((seed, v, out_path))
 
-            logger.info(f"[{generated+1}/{total}] 生成 {name}_v{v} ...")
+    total = len(seeds) * variants
+    logger.info(f"共 {total} 个（跳过 {total - len(tasks)} 个已存在），待生成 {len(tasks)} 个，并发 {workers}")
 
+    def _generate_one(args):
+        seed, v, out_path = args
+        name = seed["name"]
+        try:
             prompt = create_scenario_prompt(seed, hardware, knob_space)
             raw = llm_generate(prompt)
 
-            # 解析
-            try:
-                text = raw.strip()
-                if text.startswith("```"):
-                    text = "\n".join(text.split("\n")[1:-1])
-                knob_config = json.loads(text)
-            except json.JSONDecodeError as e:
-                logger.error(f"  LLM 输出非法 JSON: {e}")
-                continue
+            text = raw.strip()
+            if text.startswith("```"):
+                text = "\n".join(text.split("\n")[1:-1])
+            knob_config = json.loads(text)
 
-            # 校验
             valid = knob_space.validate(knob_config)
             if not valid:
-                logger.error(f"  所有 knob 校验失败，跳过")
-                continue
+                logger.error(f"  {name}_v{v}: 所有 knob 校验失败")
+                return False
 
-            # 保存
             result = {
                 "name": name,
                 "variant": v,
@@ -120,10 +116,27 @@ def generate_knobs(seeds_path: str, output_dir: str, knob_space_path: str,
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
 
-            logger.info(f"  ✅ {len(valid)} 个 knob → {out_path}")
-            generated += 1
+            logger.info(f"  ✅ {name}_v{v}: {len(valid)} 个 knob")
+            return True
+        except json.JSONDecodeError as e:
+            logger.error(f"  {name}_v{v}: LLM 输出非法 JSON: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"  {name}_v{v}: {e}")
+            return False
 
-    logger.info(f"生成完成: {generated}/{total}")
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        success = 0
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_generate_one, t): t for t in tasks}
+            for future in as_completed(futures):
+                if future.result():
+                    success += 1
+        logger.info(f"生成完成: {success}/{len(tasks)}")
+    else:
+        success = sum(1 for t in tasks if _generate_one(t))
+        logger.info(f"生成完成: {success}/{len(tasks)}")
 
 
 # ==================== Step 2: 真机采集 ====================
@@ -256,6 +269,7 @@ if __name__ == "__main__":
     gen.add_argument("--api-key", default=None)
     gen.add_argument("--api-base", default=None)
     gen.add_argument("--variants", type=int, default=3, help="每个种子生成几个变体")
+    gen.add_argument("--workers", type=int, default=5, help="并发线程数")
 
     # Step 2: collect
     col = subparsers.add_parser("collect", help="真机采集完整指标（需要 PG）")
@@ -284,6 +298,7 @@ if __name__ == "__main__":
             knob_space_path=args.config,
             llm_generate=llm_fn,
             variants=args.variants,
+            workers=args.workers,
         )
     elif args.command == "collect":
         collect_scenarios(

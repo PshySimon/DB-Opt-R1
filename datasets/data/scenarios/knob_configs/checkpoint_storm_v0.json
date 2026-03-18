@@ -1,0 +1,17 @@
+{
+  "name": "checkpoint_storm",
+  "variant": 0,
+  "difficulty": 2,
+  "description": "checkpoint 风暴：max_wal_size 太小且 checkpoint_timeout 太短，导致频繁 checkpoint，大量写 IO 影响正常查询性能。",
+  "category": "wal",
+  "knobs": {
+    "max_wal_size": "128MB",
+    "checkpoint_timeout": 30,
+    "checkpoint_completion_target": 0.1
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}

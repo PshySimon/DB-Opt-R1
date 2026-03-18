@@ -1,0 +1,16 @@
+{
+  "name": "no_parallelism",
+  "variant": 0,
+  "difficulty": 1,
+  "description": "在 OLAP 分析场景下，max_parallel_workers 和 max_parallel_workers_per_gather 被设为 0，无法利用多核 CPU 加速大查询。",
+  "category": "parallelism",
+  "knobs": {
+    "max_parallel_workers_per_gather": 0,
+    "max_parallel_workers": 0
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}

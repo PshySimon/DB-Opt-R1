@@ -1,0 +1,15 @@
+{
+  "name": "connection_exhaustion",
+  "variant": 0,
+  "difficulty": 2,
+  "description": "max_connections 设置过高（如 1000），每个连接占用内存，导致系统内存压力大，性能下降。",
+  "category": "connection",
+  "knobs": {
+    "max_connections": 1000
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}

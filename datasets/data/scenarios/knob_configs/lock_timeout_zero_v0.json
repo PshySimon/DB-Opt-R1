@@ -1,0 +1,16 @@
+{
+  "name": "lock_timeout_zero",
+  "variant": 0,
+  "difficulty": 2,
+  "description": "lock_timeout 设为 0（无限等待）且 deadlock_timeout 过大，高并发场景下锁争用导致大量连接阻塞。",
+  "category": "lock",
+  "knobs": {
+    "deadlock_timeout": 10000,
+    "max_connections": 800
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}

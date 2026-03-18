@@ -1,0 +1,16 @@
+{
+  "name": "wal_write_bottleneck",
+  "variant": 0,
+  "difficulty": 2,
+  "description": "WAL 写入瓶颈：synchronous_commit=on 且 wal_buffers 过小，高并发写入场景下 WAL 刷盘成为性能瓶颈。",
+  "category": "wal",
+  "knobs": {
+    "wal_buffers": "1MB",
+    "max_connections": 500
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}

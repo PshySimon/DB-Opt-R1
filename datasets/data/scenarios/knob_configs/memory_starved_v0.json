@@ -1,0 +1,16 @@
+{
+  "name": "memory_starved",
+  "variant": 0,
+  "difficulty": 2,
+  "description": "模拟内存严重不足的场景：shared_buffers 和 work_mem 远低于硬件内存水平，导致大量数据溢出到磁盘临时文件，缓冲区命中率极低。",
+  "category": "memory",
+  "knobs": {
+    "shared_buffers": "32MB",
+    "work_mem": "1MB"
+  },
+  "hardware_hint": {
+    "cpu_count": 8,
+    "total_memory_gb": 16,
+    "disk_type": "SSD"
+  }
+}
