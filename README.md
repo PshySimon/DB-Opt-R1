@@ -55,7 +55,7 @@
 │   └── knob_effects.yaml              # Knob 效果知识库（瓶颈方向 + 效果描述）
 └── scripts/
     ├── setup_env.sh                    # 环境准备
-    └── collect_data.sh                 # 数据采集
+    └── collect_costmodel.sh            # Cost Model 数据采集
 ```
 
 ## 环境准备
@@ -84,10 +84,10 @@ bash scripts/setup_env.sh
 
 ```bash
 # 默认后台执行（日志 + PID 保存到 logs/costmodel/）
-bash scripts/collect_data.sh --rounds 1500 --database benchmark --workload all
+bash scripts/collect_costmodel.sh --rounds 1500 --database benchmark --workload all
 
 # 调试时前台执行
-bash scripts/collect_data.sh --rounds 10 --foreground
+bash scripts/collect_costmodel.sh --rounds 10 --foreground
 ```
 
 **负载类型**：
