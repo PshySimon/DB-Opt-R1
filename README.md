@@ -143,14 +143,16 @@ python3 -m datasets.synthesis.scenarios.pipeline generate \
     --seeds datasets/data/scenarios/seeds.json \
     --output datasets/data/scenarios/knob_configs_4c8g_ssd.json \
     --knob-space configs/knob_space.yaml \
-    --cpu 4 --memory 8 --disk SSD --variants 5
+    --cpu 4 --memory 8 --disk SSD \
+    --variants 5 --difficulty-ratio 2:5:3
 
 # 8c16g HDD 机器
 python3 -m datasets.synthesis.scenarios.pipeline generate \
     --seeds datasets/data/scenarios/seeds.json \
     --output datasets/data/scenarios/knob_configs_8c16g_hdd.json \
     --knob-space configs/knob_space.yaml \
-    --cpu 8 --memory 16 --disk HDD --variants 5
+    --cpu 8 --memory 16 --disk HDD \
+    --variants 5 --difficulty-ratio 2:5:3
 ```
 
 #### Step 2: 真机采集（需要 PG）
