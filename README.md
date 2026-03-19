@@ -180,18 +180,11 @@ python3 -m datasets.synthesis.scenarios.pipeline collect \
 基于采集的场景数据，MCTS 搜索最优调优轨迹，生成 SFT + 对比对数据。
 
 ```bash
-# 使用场景数据（新模式）
 python3 -m datasets.synthesis.mcts.run_search \
     --scenarios datasets/data/scenarios/collected.json \
     --knob-space configs/knob_space.yaml \
     --cost-model cost_model/saved/model.pkl \
     --output-dir datasets/data
-
-# 使用 CSV 数据（旧模式，仍兼容）
-python3 -m datasets.synthesis.mcts.run_search \
-    --dataset datasets/data/cost_model/dataset.csv \
-    --knob-space configs/knob_space.yaml \
-    --cost-model cost_model/saved/model.pkl
 ```
 
 输出：
