@@ -308,8 +308,9 @@ def collect_scenarios(input_path: str, output_path: str,
 
     for i, config in enumerate(pending):
         knobs = config["knobs"]
+        workload = config.get("workload", "mixed")
         label = f"{config['name']}_v{config.get('variant', 0)}"
-        logger.info(f"[{i+1}/{len(pending)}] 采集 {label} ...")
+        logger.info(f"[{i+1}/{len(pending)}] 采集 {label} (workload={workload}) ...")
 
         try:
             pg_ctl.reset_to_default()
@@ -319,6 +320,7 @@ def collect_scenarios(input_path: str, output_path: str,
             benchmark = BenchmarkRunner(
                 pg_host=pg_host, pg_port=pg_port,
                 pg_user=pg_user, pg_database=pg_database,
+                workload=workload,
             )
             perf = benchmark.run()
             logger.info(f"  TPS: {perf.get('tps', 'N/A')}")
