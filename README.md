@@ -154,11 +154,16 @@ python3 -m datasets.synthesis.scenarios.pipeline generate \
 将 knob 配置应用到 PG → pgbench → 采集完整指标（CPU/IO/等待事件/慢查询/日志）。
 
 ```bash
-python3 -m datasets.synthesis.scenarios.pipeline collect \
-    --input datasets/data/scenarios/knob_configs.json \
+# 后台执行（480 条约需 8 小时）
+nohup python3 -m datasets.synthesis.scenarios.pipeline collect \
+    --input datasets/data/scenarios/knob_configs_8c16g_hdd.json \
     --output datasets/data/scenarios/collected.json \
     --host 127.0.0.1 --port 5432 \
-    --user postgres --database benchmark
+    --user postgres --database benchmark \
+    > logs/collect.log 2>&1 &
+
+# 查看进度
+tail -f logs/collect.log
 ```
 
 #### Step 3: MCTS 轨迹合成
