@@ -51,7 +51,8 @@
 │       └── mcts/                       # MCTS 轨迹合成
 ├── configs/
 │   ├── config.yaml                     # 全局配置
-│   └── knob_space.yaml                 # 45 个可调 knob 定义
+│   ├── knob_space.yaml                 # 45 个可调 knob 定义
+│   └── knob_effects.yaml              # Knob 效果知识库（瓶颈方向 + 效果描述）
 └── scripts/
     ├── setup_env.sh                    # 环境准备
     └── collect_data.sh                 # 数据采集
