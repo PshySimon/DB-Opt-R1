@@ -160,10 +160,15 @@ def generate_seeds(knob_space_path: str, output_path: str, llm_generate,
 
 # ==================== Step 1: 生成 knob 配置 ====================
 
+WORKLOAD_TYPES = ["mixed", "read_only", "write_heavy", "high_concurrency"]
+
 def generate_knobs(seeds_path: str, output_path: str, knob_space_path: str,
                    llm_generate, variants: int = 1, hardware: dict = None,
                    workers: int = 1):
     """读取种子描述，调用 LLM 生成 knob 配置，保存为单个 JSON 文件"""
+    import threading
+    import random as _random
+
     knob_space = KnobSpace(knob_space_path)
 
     with open(seeds_path, "r", encoding="utf-8") as f:
@@ -173,13 +178,14 @@ def generate_knobs(seeds_path: str, output_path: str, knob_space_path: str,
         hardware = {"cpu_count": 8, "total_memory_gb": 16, "disk_type": "SSD"}
 
     # 加载已有结果（断点续跑）
-    existing = []
+    results = []
     existing_keys = set()
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     if os.path.exists(output_path):
         with open(output_path, "r", encoding="utf-8") as f:
-            existing = json.load(f)
-        existing_keys = {(e["name"], e["variant"]) for e in existing}
-        logger.info(f"已有 {len(existing)} 条记录，断点续跑")
+            results = json.load(f)
+        existing_keys = {(e["name"], e["variant"]) for e in results}
+        logger.info(f"已有 {len(results)} 条记录，断点续跑")
 
     # 构建待生成任务
     tasks = []
@@ -188,10 +194,21 @@ def generate_knobs(seeds_path: str, output_path: str, knob_space_path: str,
             if (seed["name"], v) not in existing_keys:
                 tasks.append((seed, v))
 
-    total = len(seeds) * variants
-    logger.info(f"共 {total} 个（已有 {len(existing)}），待生成 {len(tasks)} 个，并发 {workers}")
+    total_all = len(seeds) * variants
+    logger.info(f"共 {total_all} 个（已有 {len(results)}），待生成 {len(tasks)} 个，并发 {workers}")
 
-    results = list(existing)  # 复制已有
+    if not tasks:
+        logger.info("无需生成")
+        return
+
+    # 线程安全的进度计数器 + 增量保存
+    lock = threading.Lock()
+    counter = {"done": 0, "success": 0, "total": len(tasks)}
+
+    def _save():
+        """写磁盘（调用方需持有 lock）"""
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
 
     def _generate_one(args):
         seed, v = args
@@ -207,8 +224,13 @@ def generate_knobs(seeds_path: str, output_path: str, knob_space_path: str,
 
             valid = knob_space.validate(knob_config)
             if not valid:
-                logger.error(f"  {name}_v{v}: 所有 knob 校验失败")
-                return None
+                with lock:
+                    counter["done"] += 1
+                    logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {name}_v{v}: 校验失败")
+                return
+
+            # 为场景分配负载类型
+            workload = _random.choice(WORKLOAD_TYPES)
 
             result = {
                 "name": name,
@@ -216,39 +238,39 @@ def generate_knobs(seeds_path: str, output_path: str, knob_space_path: str,
                 "difficulty": seed.get("difficulty", 1),
                 "description": seed["description"],
                 "category": seed.get("category", ""),
+                "workload": workload,
                 "knobs": valid,
                 "hardware_hint": hardware,
             }
-            logger.info(f"  ✅ {name}_v{v}: {len(valid)} 个 knob")
-            return result
+
+            with lock:
+                results.append(result)
+                counter["done"] += 1
+                counter["success"] += 1
+                logger.info(f"  [{counter['done']}/{counter['total']}] ✅ {name}_v{v}: {len(valid)} knob, workload={workload}")
+                # 每条都写磁盘
+                _save()
+
         except json.JSONDecodeError as e:
-            logger.error(f"  {name}_v{v}: LLM 输出非法 JSON: {e}")
-            return None
+            with lock:
+                counter["done"] += 1
+                logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {name}_v{v}: 非法 JSON: {e}")
         except Exception as e:
-            logger.error(f"  {name}_v{v}: {e}")
-            return None
+            with lock:
+                counter["done"] += 1
+                logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {name}_v{v}: {e}")
 
     if workers > 1:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_generate_one, t): t for t in tasks}
+            futures = [pool.submit(_generate_one, t) for t in tasks]
             for future in as_completed(futures):
-                r = future.result()
-                if r:
-                    results.append(r)
+                future.result()  # 触发异常
     else:
         for t in tasks:
-            r = _generate_one(t)
-            if r:
-                results.append(r)
+            _generate_one(t)
 
-    # 保存
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-
-    new_count = len(results) - len(existing)
-    logger.info(f"生成完成: 新增 {new_count}，总计 {len(results)} → {output_path}")
+    logger.info(f"生成完成: 成功 {counter['success']}/{counter['total']}，总计 {len(results)} 条 → {output_path}")
 
 
 # ==================== Step 2: 真机采集 ====================
