@@ -136,12 +136,24 @@ pg_isready -q || { echo "PostgreSQL 启动失败！"; exit 1; }
 echo ""
 echo "[4/5] 创建 benchmark 数据库..."
 
-# 容器里已经是 root，尝试直接用 postgres 用户执行
-su - postgres -c "psql -c \"CREATE DATABASE $PG_DATABASE;\"" 2>/dev/null || echo "数据库 $PG_DATABASE 已存在"
-su - postgres -c "psql -c \"ALTER USER $PG_USER WITH PASSWORD 'postgres';\"" 2>/dev/null
+# 创建数据库
+echo "  → 创建数据库 $PG_DATABASE..."
+if su - postgres -c "psql -c \"CREATE DATABASE $PG_DATABASE;\""; then
+    echo "  ✓ 数据库 $PG_DATABASE 创建成功"
+else
+    echo "  ⚠ 数据库 $PG_DATABASE 已存在或创建失败（见上方输出）"
+fi
 
-echo "数据库: $PG_DATABASE"
-echo "用户:   $PG_USER / postgres"
+# 设置密码
+echo "  → 设置用户 $PG_USER 密码..."
+if su - postgres -c "psql -c \"ALTER USER $PG_USER WITH PASSWORD 'postgres';\""; then
+    echo "  ✓ 密码设置成功"
+else
+    echo "  ❌ 密码设置失败（见上方输出）"
+fi
+
+echo "  数据库: $PG_DATABASE"
+echo "  用户:   $PG_USER / postgres"
 
 # ==================== 5. Python 依赖 ====================
 echo ""
@@ -150,9 +162,13 @@ echo "[5/5] 安装 Python 依赖..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "  → pip install -r requirements.txt..."
-pip3 install -r "$PROJECT_DIR/requirements.txt"
-echo "  ✓ Python 依赖安装完成"
+if [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    echo "  → pip install -r requirements.txt..."
+    pip3 install -r "$PROJECT_DIR/requirements.txt"
+    echo "  ✓ Python 依赖安装完成"
+else
+    echo "  ⚠ 未找到 requirements.txt，跳过"
+fi
 
 # ==================== 完成 ====================
 echo ""
