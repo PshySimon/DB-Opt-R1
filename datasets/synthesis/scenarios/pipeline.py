@@ -383,11 +383,11 @@ def collect_scenarios(input_path: str, output_path: str,
             collector = ScenarioCollector(conn, database=pg_database)
             scenario_data = collector.collect_scenario()
 
-            flat = collector.flatten_snapshot({"metrics": scenario_data.get("metrics", {}), "timestamp": ""})
+            # scenario_data 已包含 hardware/software/knobs/metrics 等完整快照
+            flat = collector.flatten_snapshot(scenario_data)
             csv_metrics = {k: v for k, v in flat.items() if k.startswith("metric_")}
 
-            from core.db.collector import HardwareCollector
-            hardware = HardwareCollector().collect()
+            hardware = scenario_data.get("hardware", {})
             conn.close()
 
             from dataclasses import asdict

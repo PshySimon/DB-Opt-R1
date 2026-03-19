@@ -96,6 +96,9 @@ else
     $SUDO sed -i "s/#log_lock_waits = off/log_lock_waits = on/" $PG_CONF
     $SUDO sed -i "s/#log_checkpoints = off/log_checkpoints = on/" $PG_CONF
 
+    echo "  → 启用 pg_stat_statements 扩展"
+    $SUDO sed -i "s/#shared_preload_libraries = ''/shared_preload_libraries = 'pg_stat_statements'/" $PG_CONF
+
     echo "  → 配置本地免密登录"
     # 允许本地免密登录（Unix socket + TCP 127.0.0.1 都改成 trust）
     if [ -n "$PG_HBA" ]; then
@@ -151,6 +154,10 @@ if $SUDO -u postgres psql -c "ALTER USER $PG_USER WITH PASSWORD 'postgres';"; th
 else
     echo "  ❌ 密码设置失败（见上方输出）"
 fi
+
+# 创建 pg_stat_statements 扩展
+echo "  → 创建 pg_stat_statements 扩展..."
+$SUDO -u postgres psql -d $PG_DATABASE -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;" 2>&1 || true
 
 echo "  数据库: $PG_DATABASE"
 echo "  用户:   $PG_USER / postgres"
