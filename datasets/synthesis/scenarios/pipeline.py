@@ -406,7 +406,8 @@ if __name__ == "__main__":
     gen.add_argument("--seeds", default="datasets/data/scenarios/seeds.json")
     gen.add_argument("--output", default="datasets/data/scenarios/knob_configs.json")
     gen.add_argument("--knob-space", default="configs/knob_space.yaml")
-    gen.add_argument("--variants", type=int, default=5, help="每个种子生成几个变体")
+    gen.add_argument("--variants", type=int, default=5, help="每个种子的平均变体数")
+    gen.add_argument("--difficulty-ratio", default="2:5:3", help="难度比例 easy:medium:hard")
     gen.add_argument("--cpu", type=int, default=8, help="CPU 核数")
     gen.add_argument("--memory", type=int, default=16, help="内存 GB")
     gen.add_argument("--disk", default="SSD", choices=["SSD", "HDD", "NVMe"], help="磁盘类型")
@@ -451,6 +452,7 @@ if __name__ == "__main__":
             knob_space_path=args.knob_space,
             hardware=hardware,
             variants=args.variants,
+            difficulty_ratio=args.difficulty_ratio,
         )
 
         os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)

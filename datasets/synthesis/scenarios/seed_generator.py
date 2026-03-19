@@ -251,15 +251,57 @@ def resolve_knob_value(knob_name: str, direction: str, knob_space: dict,
 
 
 def seeds_to_knob_configs(seeds: list, knob_space_path: str,
-                          hardware: dict, variants: int = 5) -> list:
-    """将种子转换为具体的 knob 配置（不需要 LLM）"""
-    knob_space = load_knob_space(knob_space_path)
-    configs = []
+                          hardware: dict, variants: int = 5,
+                          difficulty_ratio: str = "2:5:3") -> list:
+    """将种子转换为具体的 knob 配置（不需要 LLM）
 
+    Args:
+        difficulty_ratio: 难度比例 easy:medium:hard，如 "2:5:3"
+            会按比例分配每个难度的 variants 数量
+    """
+    knob_space = load_knob_space(knob_space_path)
+
+    # 解析难度比例
+    ratio_parts = [int(x) for x in difficulty_ratio.split(":")]
+    if len(ratio_parts) != 3:
+        ratio_parts = [2, 5, 3]
+    ratio_sum = sum(ratio_parts)
+
+    # 按难度分组
+    by_difficulty = {1: [], 2: [], 3: []}
     for seed in seeds:
-        for v in range(variants):
+        d = min(seed.get("difficulty", 1), 3)
+        by_difficulty[d].append(seed)
+
+    # 计算每个难度的 variants 数（按比例分配总预算）
+    total_seeds = len(seeds)
+    total_budget = total_seeds * variants  # 总配置数预算
+
+    difficulty_variants = {}
+    for d, ratio in zip([1, 2, 3], ratio_parts):
+        n_seeds = len(by_difficulty[d])
+        if n_seeds == 0:
+            difficulty_variants[d] = 0
+            continue
+        # 该难度应占的配置数
+        target_count = total_budget * ratio / ratio_sum
+        # 每个种子需要的 variants 数
+        v = max(1, int(round(target_count / n_seeds)))
+        difficulty_variants[d] = v
+
+    logger.info(f"难度比例 {difficulty_ratio}: "
+                f"d1({len(by_difficulty[1])}种子×{difficulty_variants.get(1,0)}v), "
+                f"d2({len(by_difficulty[2])}种子×{difficulty_variants.get(2,0)}v), "
+                f"d3({len(by_difficulty[3])}种子×{difficulty_variants.get(3,0)}v)")
+
+    configs = []
+    for seed in seeds:
+        d = min(seed.get("difficulty", 1), 3)
+        n_variants = difficulty_variants.get(d, variants)
+
+        for v in range(n_variants):
             knobs = {}
-            jitter = 0.05 + 0.15 * (v / max(variants - 1, 1))  # v0=0.05, v4=0.20
+            jitter = 0.05 + 0.15 * (v / max(n_variants - 1, 1))
 
             for knob_name, spec in seed["knobs"].items():
                 direction = spec["direction"]
