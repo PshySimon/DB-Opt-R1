@@ -103,7 +103,7 @@ psql -U $PG_USER -h $PG_HOST -p $PG_PORT -tc \
 echo "  ✓ 数据库 ${PG_DATABASE} 就绪"
 
 # 构建命令
-CMD="python3 -m cost_model.data.pipeline \
+CMD="python3 -u -m cost_model.data.pipeline \
     --config configs/knob_space.yaml \
     --host $PG_HOST --port $PG_PORT \
     --user $PG_USER \

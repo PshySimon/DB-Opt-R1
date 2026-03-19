@@ -159,7 +159,7 @@ python3 -m datasets.synthesis.scenarios.pipeline generate \
 ```bash
 # 后台执行（日志 + PID 保存到 logs/scenarios/）
 mkdir -p logs/scenarios
-nohup python3 -m datasets.synthesis.scenarios.pipeline collect \
+nohup python3 -u -m datasets.synthesis.scenarios.pipeline collect \
     --input datasets/data/scenarios/knob_configs_8c16g_hdd.json \
     --output datasets/data/scenarios/collected.json \
     --host 127.0.0.1 --port 5432 \
