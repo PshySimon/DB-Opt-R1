@@ -376,7 +376,7 @@ if __name__ == "__main__":
     sd.add_argument("--output", default="datasets/data/scenario_seeds/seeds.json")
     sd.add_argument("--existing", default=None, help="已有种子文件（用于去重）")
     sd.add_argument("--count", type=int, default=50, help="生成数量")
-    sd.add_argument("--model", default="gpt-4")
+    sd.add_argument("--model", default="gpt-5")
     sd.add_argument("--api-key", default=None)
     sd.add_argument("--api-base", default=None)
 
@@ -385,7 +385,7 @@ if __name__ == "__main__":
     gen.add_argument("--seeds", default="datasets/data/scenario_seeds/seeds.json")
     gen.add_argument("--output", default="datasets/data/scenarios/knob_configs.json")
     gen.add_argument("--config", default="configs/knob_space.yaml")
-    gen.add_argument("--model", default="gpt-4")
+    gen.add_argument("--model", default="gpt-5")
     gen.add_argument("--api-key", default=None)
     gen.add_argument("--api-base", default=None)
     gen.add_argument("--variants", type=int, default=3, help="每个种子生成几个变体")

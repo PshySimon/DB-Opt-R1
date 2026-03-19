@@ -132,7 +132,7 @@ python3 -m datasets.synthesis.scenarios.pipeline seeds \
     --config configs/knob_space.yaml \
     --output datasets/data/scenario_seeds/seeds.json \
     --count 50 \
-    --model gpt-4 \
+    --model gpt-5 \
     --api-key $OPENAI_API_KEY \
     --api-base $OPENAI_API_BASE
 ```
@@ -148,7 +148,9 @@ python3 -m datasets.synthesis.scenarios.pipeline generate \
     --output datasets/data/scenarios/knob_configs_4c8g_ssd.json \
     --config configs/knob_space.yaml \
     --cpu 4 --memory 8 --disk SSD \
-    --model gpt-4 --variants 3 --workers 5
+    --model gpt-5 --variants 3 --workers 5 \
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE
 
 # 8c16g HDD 机器
 python3 -m datasets.synthesis.scenarios.pipeline generate \
@@ -156,7 +158,9 @@ python3 -m datasets.synthesis.scenarios.pipeline generate \
     --output datasets/data/scenarios/knob_configs_8c16g_hdd.json \
     --config configs/knob_space.yaml \
     --cpu 8 --memory 16 --disk HDD \
-    --model gpt-4 --variants 3 --workers 5
+    --model gpt-5 --variants 3 --workers 5 \
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE
 ```
 
 #### Step 2: 真机采集（需要 PG）
