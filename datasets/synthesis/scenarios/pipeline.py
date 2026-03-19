@@ -1,23 +1,23 @@
 """
 故障场景采集 Pipeline（三步流程）
 
-Step 0: seeds     — LLM 生成种子场景描述（可选，用于扩充种子）
-Step 1: generate  — LLM 根据种子生成 knob 配置（不需要 PG）
+Step 0: seeds     — 程序化生成种子（基于 knob_effects.yaml，不需要 LLM）
+Step 1: generate  — 根据种子方向 + 硬件 + 随机扰动生成具体 knob 值（不需要 LLM）
 Step 2: collect   — 真机执行 + 采集完整指标（需要 PG）
 
 用法:
-    # Step 0: LLM 扩充种子（可选）
+    # Step 0: 生成种子
     python3 -m datasets.synthesis.scenarios.pipeline seeds \
-        --config configs/knob_space.yaml \
-        --output datasets/data/scenarios/seeds.json \
-        --count 50 --model gpt-4
+        --effects configs/knob_effects.yaml \
+        --knob-space configs/knob_space.yaml \
+        --output datasets/data/scenarios/seeds.json
 
-    # Step 1: 生成 knob 配置
+    # Step 1: 生成 knob 配置（纯程序化，秒级完成）
     python3 -m datasets.synthesis.scenarios.pipeline generate \
         --seeds datasets/data/scenarios/seeds.json \
         --output datasets/data/scenarios/knob_configs.json \
-        --config configs/knob_space.yaml \
-        --model gpt-4 --variants 3
+        --knob-space configs/knob_space.yaml \
+        --variants 5 --cpu 8 --memory 16 --disk HDD
 
     # Step 2: 真机采集
     python3 -m datasets.synthesis.scenarios.pipeline collect \
@@ -394,26 +394,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="故障场景 Pipeline")
     subparsers = parser.add_subparsers(dest="command")
 
-    # Step 0: seeds
-    sd = subparsers.add_parser("seeds", help="LLM 生成种子场景描述")
-    sd.add_argument("--config", default="configs/knob_space.yaml")
+    # Step 0: seeds（程序化生成）
+    sd = subparsers.add_parser("seeds", help="程序化生成种子（不需要 LLM）")
+    sd.add_argument("--effects", default="configs/knob_effects.yaml", help="knob 效果知识库")
+    sd.add_argument("--knob-space", default="configs/knob_space.yaml", help="knob 搜索空间")
     sd.add_argument("--output", default="datasets/data/scenarios/seeds.json")
-    sd.add_argument("--existing", default=None, help="已有种子文件（用于去重）")
-    sd.add_argument("--count", type=int, default=50, help="生成数量")
-    sd.add_argument("--model", default="gpt-5")
-    sd.add_argument("--api-key", default=None)
-    sd.add_argument("--api-base", default=None)
+    sd.add_argument("--layer3-count", type=int, default=20, help="Layer 3 跨类组合数量")
 
-    # Step 1: generate
-    gen = subparsers.add_parser("generate", help="LLM 生成 knob 配置（不需要 PG）")
+    # Step 1: generate（程序化，秒级完成）
+    gen = subparsers.add_parser("generate", help="根据种子生成 knob 配置（纯程序化，不需要 LLM）")
     gen.add_argument("--seeds", default="datasets/data/scenarios/seeds.json")
     gen.add_argument("--output", default="datasets/data/scenarios/knob_configs.json")
-    gen.add_argument("--config", default="configs/knob_space.yaml")
-    gen.add_argument("--model", default="gpt-5")
-    gen.add_argument("--api-key", default=None)
-    gen.add_argument("--api-base", default=None)
-    gen.add_argument("--variants", type=int, default=3, help="每个种子生成几个变体")
-    gen.add_argument("--workers", type=int, default=5, help="并发线程数")
+    gen.add_argument("--knob-space", default="configs/knob_space.yaml")
+    gen.add_argument("--variants", type=int, default=5, help="每个种子生成几个变体")
     gen.add_argument("--cpu", type=int, default=8, help="CPU 核数")
     gen.add_argument("--memory", type=int, default=16, help="内存 GB")
     gen.add_argument("--disk", default="SSD", choices=["SSD", "HDD", "NVMe"], help="磁盘类型")
@@ -434,36 +427,36 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     if args.command == "seeds":
-        from datasets.synthesis.mcts.run_search import create_llm_client
-        llm_fn = create_llm_client(
-            model=args.model,
-            api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
-            api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
-        )
-        generate_seeds(
-            knob_space_path=args.config,
-            output_path=args.output,
-            llm_generate=llm_fn,
-            count=args.count,
-            existing_path=args.existing,
+        from .seed_generator import generate_all_seeds
+        seeds = generate_all_seeds(
+            effects_path=args.effects,
+            knob_space_path=args.knob_space,
+            layer3_count=args.layer3_count,
         )
 
+        os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(seeds, f, ensure_ascii=False, indent=2)
+        logger.info(f"✅ {len(seeds)} 条种子 → {args.output}")
+
     elif args.command == "generate":
-        from datasets.synthesis.mcts.run_search import create_llm_client
-        llm_fn = create_llm_client(
-            model=args.model,
-            api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
-            api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
-        )
-        generate_knobs(
-            seeds_path=args.seeds,
-            output_path=args.output,
-            knob_space_path=args.config,
-            llm_generate=llm_fn,
+        from .seed_generator import seeds_to_knob_configs
+
+        with open(args.seeds, "r", encoding="utf-8") as f:
+            seeds = json.load(f)
+
+        hardware = {"cpu_count": args.cpu, "total_memory_gb": args.memory, "disk_type": args.disk}
+        configs = seeds_to_knob_configs(
+            seeds=seeds,
+            knob_space_path=args.knob_space,
+            hardware=hardware,
             variants=args.variants,
-            workers=args.workers,
-            hardware={"cpu_count": args.cpu, "total_memory_gb": args.memory, "disk_type": args.disk},
         )
+
+        os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(configs, f, ensure_ascii=False, indent=2)
+        logger.info(f"✅ {len(configs)} 条配置 → {args.output}")
 
     elif args.command == "collect":
         collect_scenarios(

@@ -1,0 +1,378 @@
+# Knob 效果知识库
+# 每个 knob 的极端值效果、关联 knob、适用类别
+# 用于程序化种子生成
+
+knobs:
+  # ========== 内存类 ==========
+  shared_buffers:
+    category: memory
+    too_low: "缓冲池不足，频繁从磁盘读取，buffers_alloc 升高，缓存命中率下降"
+    too_high: "占用过多物理内存，挤压 OS page cache，可能触发 OOM"
+    related: [effective_cache_size, work_mem]
+
+  work_mem:
+    category: memory
+    too_low: "排序和 hash 操作溢写临时文件，temp_files 增多，查询变慢"
+    too_high: "并发查询内存暴涨，单查询占用过多内存"
+    related: [maintenance_work_mem, shared_buffers]
+
+  effective_cache_size:
+    category: memory
+    too_low: "优化器低估缓存能力，偏向 seq scan 而非 index scan"
+    too_high: "优化器高估缓存能力，选择的计划依赖缓存但实际 miss 严重"
+    related: [shared_buffers, random_page_cost]
+
+  maintenance_work_mem:
+    category: memory
+    too_low: "VACUUM/CREATE INDEX 速度慢，autovacuum 效率低"
+    too_high: "maintenance 操作占用过多内存"
+    related: [autovacuum_max_workers, work_mem]
+
+  wal_buffers:
+    category: memory
+    too_low: "WAL 写入频繁刷盘，事务提交延迟增加"
+    too_high: null  # 过大无明显负面效果
+    related: [max_wal_size, synchronous_commit]
+
+  temp_buffers:
+    category: memory
+    too_low: "临时表操作溢出到磁盘"
+    too_high: null
+    related: [work_mem]
+
+  max_stack_depth:
+    category: memory
+    too_low: "复杂递归查询报错 stack depth limit exceeded"
+    too_high: null
+    related: []
+
+  # ========== 优化器 ==========
+  random_page_cost:
+    category: optimizer
+    too_low: "优化器过度偏向 index scan，即使顺序扫描更快"
+    too_high: "优化器过度偏向 seq scan，忽略可用索引"
+    related: [seq_page_cost, effective_cache_size]
+
+  seq_page_cost:
+    category: optimizer
+    too_low: "优化器低估顺序扫描成本"
+    too_high: "优化器高估顺序扫描成本，偏向索引"
+    related: [random_page_cost]
+
+  cpu_tuple_cost:
+    category: optimizer
+    too_low: "优化器低估行处理成本，偏向返回大量行的计划"
+    too_high: "优化器高估行处理成本，偏向减少行数的计划"
+    related: [cpu_index_tuple_cost, cpu_operator_cost]
+
+  cpu_index_tuple_cost:
+    category: optimizer
+    too_low: "优化器低估索引扫描的行处理成本"
+    too_high: "优化器高估索引扫描开销，偏向 seq scan"
+    related: [cpu_tuple_cost, random_page_cost]
+
+  cpu_operator_cost:
+    category: optimizer
+    too_low: null
+    too_high: "优化器高估表达式计算成本"
+    related: [cpu_tuple_cost]
+
+  default_statistics_target:
+    category: optimizer
+    too_low: "统计直方图粗糙，行数估计偏差大，执行计划不稳定"
+    too_high: "ANALYZE 耗时长，统计信息占用更多内存"
+    related: [from_collapse_limit, join_collapse_limit]
+
+  from_collapse_limit:
+    category: optimizer
+    too_low: "多表查询不做 join 重排，计划可能次优"
+    too_high: "优化器花大量时间枚举 join 顺序，planning time 长"
+    related: [join_collapse_limit, geqo_threshold]
+
+  join_collapse_limit:
+    category: optimizer
+    too_low: "显式 JOIN 不做重排优化"
+    too_high: "大量 JOIN 的查询 planning time 爆炸"
+    related: [from_collapse_limit, geqo_threshold]
+
+  geqo_threshold:
+    category: optimizer
+    too_low: "少量表就触发遗传算法，计划质量下降"
+    too_high: "大量表仍用穷举，planning time 过长"
+    related: [from_collapse_limit, join_collapse_limit]
+
+  # ========== 并行 ==========
+  effective_io_concurrency:
+    category: parallel
+    too_low: "HDD 上预读不足，bitmap scan 性能差"
+    too_high: "SSD 上无明显负面效果"
+    related: []
+
+  max_parallel_workers_per_gather:
+    category: parallel
+    too_low: "查询无法利用并行，大表扫描/聚合变慢"
+    too_high: "单查询占用过多 CPU，影响并发"
+    related: [max_parallel_workers]
+
+  max_parallel_workers:
+    category: parallel
+    too_low: "整个实例并行能力受限"
+    too_high: null
+    related: [max_parallel_workers_per_gather, max_parallel_maintenance_workers]
+
+  max_parallel_maintenance_workers:
+    category: parallel
+    too_low: "CREATE INDEX / VACUUM 无法并行，速度慢"
+    too_high: null
+    related: [max_parallel_workers, maintenance_work_mem]
+
+  # ========== WAL / Checkpoint ==========
+  checkpoint_completion_target:
+    category: checkpoint
+    too_low: "checkpoint 快速写完，IO 尖峰明显"
+    too_high: "checkpoint 写入过于分散，可能与下次 checkpoint 重叠"
+    related: [checkpoint_timeout, max_wal_size]
+
+  max_wal_size:
+    category: wal
+    too_low: "checkpoint 过于频繁，IO 被写回占满"
+    too_high: "crash recovery 时间长，WAL 占用大量磁盘"
+    related: [min_wal_size, checkpoint_timeout]
+
+  min_wal_size:
+    category: wal
+    too_low: "WAL 文件频繁回收和创建"
+    too_high: null
+    related: [max_wal_size]
+
+  checkpoint_timeout:
+    category: checkpoint
+    too_low: "checkpoint 间隔太短，频繁全量写回"
+    too_high: "checkpoint 间隔太长，WAL 积压，恢复慢"
+    related: [max_wal_size, checkpoint_completion_target]
+
+  wal_compression:
+    category: wal
+    # enum 类型，只有 on/off
+    too_low: null  # off 是默认
+    too_high: null
+    related: [max_wal_size]
+
+  synchronous_commit:
+    category: wal
+    too_low: null  # off 提升性能但有持久性风险
+    too_high: null
+    related: [commit_delay, wal_buffers]
+
+  commit_delay:
+    category: wal
+    too_low: null  # 0 是默认
+    too_high: "事务提交延迟增加，TPS 下降"
+    related: [synchronous_commit]
+
+  # ========== 后台写入 ==========
+  bgwriter_delay:
+    category: bgwriter
+    too_low: "bgwriter 过于活跃，占用 IO 带宽"
+    too_high: "bgwriter 太懒，脏页堆积，backend 被迫自己写"
+    related: [bgwriter_lru_maxpages, bgwriter_lru_multiplier]
+
+  bgwriter_lru_maxpages:
+    category: bgwriter
+    too_low: "bgwriter 每轮写入页数太少，跟不上脏页产生速度"
+    too_high: "bgwriter 每轮写入过多，IO 尖峰"
+    related: [bgwriter_delay, bgwriter_lru_multiplier]
+
+  bgwriter_lru_multiplier:
+    category: bgwriter
+    too_low: "bgwriter 预测不足，清理的页太少"
+    too_high: "bgwriter 过度清理，无效 IO"
+    related: [bgwriter_delay, bgwriter_lru_maxpages]
+
+  # ========== 连接 ==========
+  max_connections:
+    category: connections
+    too_low: "并发连接受限，应用报 too many clients"
+    too_high: "每个连接占 ~10MB 内存，大量空闲连接浪费资源"
+    related: [superuser_reserved_connections]
+
+  superuser_reserved_connections:
+    category: connections
+    too_low: null  # 1 已经很低
+    too_high: null
+    related: [max_connections]
+
+  idle_in_transaction_session_timeout:
+    category: connections
+    too_low: null  # 0 表示不超时
+    too_high: null
+    related: [max_connections]
+
+  # ========== VACUUM ==========
+  autovacuum:
+    category: vacuum
+    # enum: on/off
+    off: "表膨胀、事务 ID wraparound 风险、统计信息过时"
+    related: [autovacuum_naptime, autovacuum_max_workers]
+
+  autovacuum_max_workers:
+    category: vacuum
+    too_low: "vacuum 并发度低，大量表排队等待清理"
+    too_high: "vacuum 进程过多，占用 CPU 和 IO"
+    related: [autovacuum_naptime, maintenance_work_mem]
+
+  autovacuum_naptime:
+    category: vacuum
+    too_low: "autovacuum 检查过于频繁，系统开销增加"
+    too_high: "autovacuum 反应迟钝，死元组堆积"
+    related: [autovacuum_vacuum_threshold, autovacuum_vacuum_scale_factor]
+
+  autovacuum_vacuum_threshold:
+    category: vacuum
+    too_low: "小表频繁触发 vacuum"
+    too_high: "表需要大量变更才触发 vacuum，死元组堆积"
+    related: [autovacuum_vacuum_scale_factor, autovacuum_naptime]
+
+  autovacuum_vacuum_scale_factor:
+    category: vacuum
+    too_low: "小比例变更就触发 vacuum，可能过于频繁"
+    too_high: "大表需要变更很高比例才触发 vacuum"
+    related: [autovacuum_vacuum_threshold]
+
+  autovacuum_analyze_threshold:
+    category: vacuum
+    too_low: "频繁触发 ANALYZE"
+    too_high: "统计信息更新不及时"
+    related: [autovacuum_analyze_scale_factor, default_statistics_target]
+
+  autovacuum_analyze_scale_factor:
+    category: vacuum
+    too_low: "小比例变更就触发 ANALYZE"
+    too_high: "统计信息长期过时"
+    related: [autovacuum_analyze_threshold]
+
+  # ========== 锁 ==========
+  deadlock_timeout:
+    category: locks
+    too_low: "频繁检测死锁，CPU 开销增加"
+    too_high: "死锁检测延迟，事务长时间阻塞"
+    related: [lock_timeout]
+
+  lock_timeout:
+    category: locks
+    too_low: null  # 0 表示不超时（默认）
+    too_high: null
+    related: [deadlock_timeout]
+
+  # ========== 统计收集 ==========
+  track_activities:
+    category: stats
+    off: "pg_stat_activity 无数据，无法监控活跃查询"
+    related: [track_counts]
+
+  track_counts:
+    category: stats
+    off: "autovacuum 无法正常工作（依赖统计计数）"
+    related: [track_activities, autovacuum]
+
+# 预定义关联组合（Layer 2）
+combinations:
+  - name: memory_starvation
+    category: memory
+    knobs: {shared_buffers: min, work_mem: min, effective_cache_size: min}
+    description: "全面内存不足，缓冲池、排序内存、缓存估计都偏低"
+
+  - name: checkpoint_storm
+    category: checkpoint
+    knobs: {checkpoint_timeout: min, max_wal_size: min, checkpoint_completion_target: min}
+    description: "checkpoint 过于频繁且集中写入，IO 尖峰明显"
+
+  - name: seq_scan_bias
+    category: optimizer
+    knobs: {random_page_cost: max, effective_cache_size: min}
+    description: "优化器严重偏向顺序扫描，忽略索引"
+
+  - name: index_scan_bias
+    category: optimizer
+    knobs: {random_page_cost: min, seq_page_cost: max}
+    description: "优化器严重偏向索引扫描，即使全表扫描更快"
+
+  - name: no_parallelism
+    category: parallel
+    knobs: {max_parallel_workers_per_gather: min, max_parallel_workers: min}
+    description: "完全禁用并行查询"
+
+  - name: vacuum_disabled
+    category: vacuum
+    knobs: {autovacuum: "off", autovacuum_max_workers: min}
+    description: "autovacuum 禁用，表膨胀和事务 ID wraparound 风险"
+
+  - name: vacuum_too_lazy
+    category: vacuum
+    knobs: {autovacuum_naptime: max, autovacuum_vacuum_threshold: max, autovacuum_vacuum_scale_factor: max}
+    description: "autovacuum 阈值过高，几乎不触发清理"
+
+  - name: vacuum_too_aggressive
+    category: vacuum
+    knobs: {autovacuum_naptime: min, autovacuum_vacuum_threshold: min, autovacuum_vacuum_scale_factor: min}
+    description: "autovacuum 过于激进，频繁占用 IO"
+
+  - name: bgwriter_overactive
+    category: bgwriter
+    knobs: {bgwriter_delay: min, bgwriter_lru_maxpages: max, bgwriter_lru_multiplier: max}
+    description: "bgwriter 过度活跃，无效 IO 占用带宽"
+
+  - name: bgwriter_underactive
+    category: bgwriter
+    knobs: {bgwriter_delay: max, bgwriter_lru_maxpages: min}
+    description: "bgwriter 太懒，脏页堆积，backend 被迫自己写"
+
+  - name: planner_explosion
+    category: optimizer
+    knobs: {from_collapse_limit: max, join_collapse_limit: max, geqo_threshold: max}
+    description: "优化器穷举空间过大，多表 JOIN 的 planning time 爆炸"
+
+  - name: planner_no_reorder
+    category: optimizer
+    knobs: {from_collapse_limit: min, join_collapse_limit: min}
+    description: "禁用 JOIN 重排，查询计划可能严重次优"
+
+  - name: wal_write_bottleneck
+    category: wal
+    knobs: {synchronous_commit: "on", commit_delay: max, wal_buffers: min}
+    description: "WAL 写入瓶颈：同步提交 + 高延迟 + 小缓冲"
+
+  - name: stats_too_coarse
+    category: optimizer
+    knobs: {default_statistics_target: min, autovacuum_analyze_threshold: max}
+    description: "统计信息粗糙且更新不及时，行数估计偏差大"
+
+  - name: memory_plus_checkpoint
+    category: combo
+    knobs: {shared_buffers: min, max_wal_size: min, checkpoint_timeout: min}
+    description: "内存不足叠加 checkpoint 风暴"
+
+  - name: optimizer_plus_no_parallel
+    category: combo
+    knobs: {random_page_cost: max, max_parallel_workers_per_gather: min}
+    description: "偏向 seq scan 且无法并行，大表查询极慢"
+
+  - name: vacuum_plus_memory
+    category: combo
+    knobs: {autovacuum: "off", maintenance_work_mem: min, shared_buffers: min}
+    description: "autovacuum 禁用 + 维护内存不足 + 缓冲池小"
+
+  - name: connection_pressure
+    category: combo
+    knobs: {max_connections: max, shared_buffers: min, work_mem: min}
+    description: "大量连接但内存配置低，每连接可用资源极少"
+
+  - name: write_heavy_bottleneck
+    category: combo
+    knobs: {synchronous_commit: "on", max_wal_size: min, bgwriter_delay: max}
+    description: "写密集场景：同步提交 + WAL 频繁 checkpoint + bgwriter 太慢"
+
+  - name: full_degradation
+    category: combo
+    knobs: {shared_buffers: min, work_mem: min, checkpoint_timeout: min, autovacuum: "off", max_parallel_workers: min}
+    description: "全面配置劣化：内存不足 + checkpoint 频繁 + 无 vacuum + 无并行"

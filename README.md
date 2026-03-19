@@ -122,44 +122,35 @@ python3 -m cost_model.train \
 
 三步流程，每步独立，支持断点续跑：
 
-#### Step 0: 生成种子场景描述（可选，扩充种子库）
+#### Step 0: 生成种子（程序化，不需要 LLM）
 
-LLM 根据 knob_space 自动生成多样化的故障/调优场景描述。
+基于 `knob_effects.yaml` 知识库，程序化生成三层种子：单 knob 极端值、关联组合、跨类组合。
 
 ```bash
 python3 -m datasets.synthesis.scenarios.pipeline seeds \
-    --config configs/knob_space.yaml \
-    --output datasets/data/scenarios/seeds.json \
-    --count 50 \
-    --model gpt-5 \
-    --api-key $OPENAI_API_KEY \
-    --api-base $OPENAI_API_BASE
+    --effects configs/knob_effects.yaml \
+    --knob-space configs/knob_space.yaml \
+    --output datasets/data/scenarios/seeds.json
 ```
 
-#### Step 1: 生成 knob 配置（不需要 PG）
+#### Step 1: 生成 knob 配置（程序化，秒级完成）
 
-LLM 根据种子描述生成对应的 knob 配置，经 `KnobSpace.validate()` 校验。通过 `--cpu/--memory/--disk` 指定目标硬件，建议按硬件规格分文件保存。
+根据种子的方向（min/max）+ 硬件规格 + 随机扰动生成具体 knob 值。通过 `--cpu/--memory/--disk` 指定目标硬件，建议按硬件规格分文件保存。
 
 ```bash
 # 4c8g SSD 机器
 python3 -m datasets.synthesis.scenarios.pipeline generate \
     --seeds datasets/data/scenarios/seeds.json \
     --output datasets/data/scenarios/knob_configs_4c8g_ssd.json \
-    --config configs/knob_space.yaml \
-    --cpu 4 --memory 8 --disk SSD \
-    --model gpt-5 --variants 3 --workers 5 \
-    --api-key $OPENAI_API_KEY \
-    --api-base $OPENAI_API_BASE
+    --knob-space configs/knob_space.yaml \
+    --cpu 4 --memory 8 --disk SSD --variants 5
 
 # 8c16g HDD 机器
 python3 -m datasets.synthesis.scenarios.pipeline generate \
     --seeds datasets/data/scenarios/seeds.json \
     --output datasets/data/scenarios/knob_configs_8c16g_hdd.json \
-    --config configs/knob_space.yaml \
-    --cpu 8 --memory 16 --disk HDD \
-    --model gpt-5 --variants 3 --workers 5 \
-    --api-key $OPENAI_API_KEY \
-    --api-base $OPENAI_API_BASE
+    --knob-space configs/knob_space.yaml \
+    --cpu 8 --memory 16 --disk HDD --variants 5
 ```
 
 #### Step 2: 真机采集（需要 PG）
