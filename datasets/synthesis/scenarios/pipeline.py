@@ -390,6 +390,9 @@ if __name__ == "__main__":
     gen.add_argument("--api-base", default=None)
     gen.add_argument("--variants", type=int, default=3, help="每个种子生成几个变体")
     gen.add_argument("--workers", type=int, default=5, help="并发线程数")
+    gen.add_argument("--cpu", type=int, default=8, help="CPU 核数")
+    gen.add_argument("--memory", type=int, default=16, help="内存 GB")
+    gen.add_argument("--disk", default="SSD", choices=["SSD", "HDD", "NVMe"], help="磁盘类型")
 
     # Step 2: collect
     col = subparsers.add_parser("collect", help="真机采集完整指标（需要 PG）")
@@ -435,6 +438,7 @@ if __name__ == "__main__":
             llm_generate=llm_fn,
             variants=args.variants,
             workers=args.workers,
+            hardware={"cpu_count": args.cpu, "total_memory_gb": args.memory, "disk_type": args.disk},
         )
 
     elif args.command == "collect":
