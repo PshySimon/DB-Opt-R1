@@ -63,9 +63,20 @@ class PGConfigurator:
             logger.error(f"reload 失败: {e}")
             raise
 
+    PG_LOG_PATH = "/var/log/postgresql/postgresql-16-main.log"
+
     def restart(self):
-        """重启 PostgreSQL"""
+        """重启 PostgreSQL（重启前清空日志）"""
         logger.info("正在重启 PostgreSQL...")
+
+        # 清空日志文件，确保每个场景只采集自己的日志
+        try:
+            subprocess.run(
+                ["sudo", "truncate", "-s", "0", self.PG_LOG_PATH],
+                capture_output=True, timeout=5
+            )
+        except Exception:
+            pass
 
         if self.pg_data_dir:
             self._run_cmd(f"pg_ctl -D {self.pg_data_dir} restart -w -t {RESTART_TIMEOUT}")

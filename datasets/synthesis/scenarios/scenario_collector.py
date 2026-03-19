@@ -135,8 +135,8 @@ class ScenarioCollector(DataCollector):
             logger.warning(f"采集慢查询失败（可能未启用 pg_stat_statements）: {e}")
             return []
 
-    def _collect_recent_logs(self, log_path: str = None, n: int = 20) -> list:
-        """读取 PG 最近的调优相关日志"""
+    def _collect_recent_logs(self, log_path: str = None, n: int = 50) -> list:
+        """读取 PG 调优相关日志（每次重启前日志已清空，直接读整个文件）"""
         if log_path is None:
             log_path = "/var/log/postgresql/postgresql-16-main.log"
 
@@ -152,7 +152,7 @@ class ScenarioCollector(DataCollector):
 
         try:
             result = subprocess.run(
-                ["sudo", "tail", "-n", "500", log_path],
+                ["sudo", "cat", log_path],
                 capture_output=True, text=True, timeout=5
             )
             logs = []
