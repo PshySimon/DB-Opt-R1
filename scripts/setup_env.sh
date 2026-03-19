@@ -138,7 +138,7 @@ echo "[4/5] 创建 benchmark 数据库..."
 
 # 创建数据库
 echo "  → 创建数据库 $PG_DATABASE..."
-if su - postgres -c "psql -c \"CREATE DATABASE $PG_DATABASE;\""; then
+if $SUDO -u postgres psql -c "CREATE DATABASE $PG_DATABASE;"; then
     echo "  ✓ 数据库 $PG_DATABASE 创建成功"
 else
     echo "  ⚠ 数据库 $PG_DATABASE 已存在或创建失败（见上方输出）"
@@ -146,7 +146,7 @@ fi
 
 # 设置密码
 echo "  → 设置用户 $PG_USER 密码..."
-if su - postgres -c "psql -c \"ALTER USER $PG_USER WITH PASSWORD 'postgres';\""; then
+if $SUDO -u postgres psql -c "ALTER USER $PG_USER WITH PASSWORD 'postgres';"; then
     echo "  ✓ 密码设置成功"
 else
     echo "  ❌ 密码设置失败（见上方输出）"
