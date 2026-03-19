@@ -281,13 +281,18 @@ class GetWorkloadInfoTool(DBTool):
 class GetRecentLogsTool(DBTool):
     def __init__(self, **kwargs):
         super().__init__(
-            name="get_recent_logs",
-            description="获取最近的 PostgreSQL 日志（慢查询、报错等）",
+            name="view_logs",
+            description=(
+                "查看 PostgreSQL 日志。\n"
+                "注意：模拟模式下，这是场景初始状态的日志快照，不是实时日志。"
+                "应用 knob 变更或重启后，日志不会更新。建议在诊断阶段使用，辅助判断瓶颈方向。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "lines": {"type": "integer", "description": "返回行数，默认 50"},
-                    "level": {"type": "string", "description": "最低日志级别，默认 WARNING"}
+                    "n": {"type": "integer", "description": "返回最多 N 条日志，默认 20"},
+                    "level": {"type": "string", "description": "按日志级别过滤: LOG / WARNING / ERROR / FATAL。留空返回所有级别"},
+                    "keyword": {"type": "string", "description": "按关键词过滤（如 checkpoint, deadlock, temporary file）。留空不过滤"},
                 },
                 "required": []
             },
@@ -295,43 +300,52 @@ class GetRecentLogsTool(DBTool):
         )
 
     def execute_real(self, args):
-        lines = args.get("lines", 50)
-        level = args.get("level", "WARNING")
+        n = args.get("n", 20)
+        level = args.get("level", "")
+        keyword = args.get("keyword", "")
         log_path = self.config.get("tools.database.log_path",
                                    "/var/log/postgresql/postgresql-16-main.log")
         try:
-            result = subprocess.run(["tail", "-n", str(lines * 3), log_path],
+            result = subprocess.run(["sudo", "cat", log_path],
                                     capture_output=True, text=True, timeout=5)
-            level_pri = {"DEBUG": 0, "LOG": 1, "INFO": 2, "NOTICE": 3,
-                         "WARNING": 4, "ERROR": 5, "FATAL": 6}
-            min_pri = level_pri.get(level.upper(), 4)
-            filtered = [l for l in result.stdout.strip().split("\n")
-                        if any(lvl in l and pri >= min_pri for lvl, pri in level_pri.items())]
-            return "\n".join(filtered[-lines:]) or "No matching log entries."
+            lines = result.stdout.strip().split("\n")
+
+            # 按级别过滤
+            if level:
+                lines = [l for l in lines if level.upper() in l]
+
+            # 按关键词过滤
+            if keyword:
+                lines = [l for l in lines if keyword.lower() in l.lower()]
+
+            return "\n".join(lines[-n:]) or "No matching log entries."
         except Exception as e:
             return f"Error reading logs: {e}"
 
     def execute_simulated(self, args):
-        if self.scenario and self.scenario.logs:
-            level = args.get("level", "WARNING").upper()
-            level_pri = {"LOG": 0, "WARNING": 1, "ERROR": 2, "FATAL": 3}
-            min_pri = level_pri.get(level, 1)
-            logs = [
-                f"{entry['level']}: {entry['message']}"
-                for entry in self.scenario.logs
-                if level_pri.get(entry.get('level', 'LOG'), 0) >= min_pri
-            ]
-            return "\n".join(logs) if logs else "No matching log entries."
+        n = args.get("n", 20)
+        level = args.get("level", "")
+        keyword = args.get("keyword", "")
 
-        # 兼容旧模式
-        logs = []
-        for k, v in self.env_state.items():
-            if k.startswith("metric_") and isinstance(v, (int, float)):
-                if "buffer_hit" in k and v < 0.9:
-                    logs.append("WARNING: buffer hit rate low, consider increasing shared_buffers")
-                if "temp_files" in k and v > 100:
-                    logs.append(f"WARNING: {int(v)} temporary files, consider increasing work_mem")
-        return "\n".join(logs) if logs else "No warnings detected."
+        if self.scenario and self.scenario.logs:
+            logs = self.scenario.logs
+
+            # 按级别过滤
+            if level:
+                level_pri = {"LOG": 0, "WARNING": 1, "ERROR": 2, "FATAL": 3}
+                min_pri = level_pri.get(level.upper(), 0)
+                logs = [e for e in logs
+                        if level_pri.get(e.get("level", "LOG"), 0) >= min_pri]
+
+            # 按关键词过滤
+            if keyword:
+                kw = keyword.lower()
+                logs = [e for e in logs if kw in e.get("message", "").lower()]
+
+            formatted = [f"{e['level']}: {e['message']}" for e in logs[-n:]]
+            return "\n".join(formatted) if formatted else "No matching log entries."
+
+        return "No log data available."
 
 
 # ==================== 行动类 ====================
