@@ -70,9 +70,11 @@ class PGConfigurator:
         if self.pg_data_dir:
             self._run_cmd(f"pg_ctl -D {self.pg_data_dir} restart -w -t {RESTART_TIMEOUT}")
         else:
-            # 优先 pg_ctlcluster（Debian/Ubuntu 容器），其次 systemctl
+            # 优先 systemctl（systemd 管理的集群），其次 pg_ctlcluster（容器）
             import shutil
-            if shutil.which("pg_ctlcluster"):
+            if self._is_systemd_managed():
+                self._run_cmd("sudo systemctl restart postgresql")
+            elif shutil.which("pg_ctlcluster"):
                 self._run_cmd("pg_ctlcluster 16 main restart")
             else:
                 self._run_cmd("sudo systemctl restart postgresql")
@@ -154,6 +156,17 @@ class PGConfigurator:
             time.sleep(READY_CHECK_INTERVAL)
 
         raise TimeoutError(f"PostgreSQL 在 {RESTART_TIMEOUT}s 内未就绪")
+
+    def _is_systemd_managed(self) -> bool:
+        """检测 PostgreSQL 是否由 systemd 管理"""
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", "postgresql"],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
 
     def _run_cmd(self, cmd: str):
         """执行 shell 命令"""
