@@ -136,9 +136,19 @@ class ScenarioCollector(DataCollector):
             return []
 
     def _collect_recent_logs(self, log_path: str = None, n: int = 20) -> list:
-        """读取 PG 最近的 WARNING/ERROR 日志"""
+        """读取 PG 最近的调优相关日志"""
         if log_path is None:
             log_path = "/var/log/postgresql/postgresql-16-main.log"
+
+        # 调优相关的关键词（LOG 级别也采集）
+        TUNING_KEYWORDS = [
+            "checkpoint",        # checkpoint 信息
+            "temporary file",    # 临时文件（work_mem 不足）
+            "lock wait",         # 锁等待
+            "deadlock",          # 死锁
+            "out of memory",     # OOM
+            "could not resize",  # shared memory 问题
+        ]
 
         try:
             result = subprocess.run(
@@ -147,10 +157,18 @@ class ScenarioCollector(DataCollector):
             )
             logs = []
             for line in result.stdout.strip().split("\n"):
+                # WARNING/ERROR/FATAL 全采
                 for level in ("WARNING", "ERROR", "FATAL"):
                     if level in line:
                         logs.append({"level": level, "message": line.strip()[-200:]})
                         break
+                else:
+                    # LOG 级别只采集调优相关
+                    line_lower = line.lower()
+                    for kw in TUNING_KEYWORDS:
+                        if kw in line_lower:
+                            logs.append({"level": "LOG", "message": line.strip()[-200:]})
+                            break
             return logs[-n:]
         except Exception as e:
             logger.warning(f"读取日志失败: {e}")
