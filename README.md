@@ -139,13 +139,23 @@ python3 -m datasets.synthesis.scenarios.pipeline seeds \
 
 #### Step 1: 生成 knob 配置（不需要 PG）
 
-LLM 根据种子描述生成对应的 knob 配置，经 `KnobSpace.validate()` 校验。
+LLM 根据种子描述生成对应的 knob 配置，经 `KnobSpace.validate()` 校验。通过 `--cpu/--memory/--disk` 指定目标硬件，建议按硬件规格分文件保存。
 
 ```bash
+# 4c8g SSD 机器
 python3 -m datasets.synthesis.scenarios.pipeline generate \
     --seeds datasets/data/scenario_seeds/seeds.json \
-    --output datasets/data/scenarios/knob_configs.json \
+    --output datasets/data/scenarios/knob_configs_4c8g_ssd.json \
     --config configs/knob_space.yaml \
+    --cpu 4 --memory 8 --disk SSD \
+    --model gpt-4 --variants 3 --workers 5
+
+# 8c16g HDD 机器
+python3 -m datasets.synthesis.scenarios.pipeline generate \
+    --seeds datasets/data/scenario_seeds/seeds.json \
+    --output datasets/data/scenarios/knob_configs_8c16g_hdd.json \
+    --config configs/knob_space.yaml \
+    --cpu 8 --memory 16 --disk HDD \
     --model gpt-4 --variants 3 --workers 5
 ```
 
