@@ -99,10 +99,10 @@ else
     echo "  → 配置本地免密登录"
     # 允许本地免密登录（Unix socket + TCP 127.0.0.1 都改成 trust）
     if [ -n "$PG_HBA" ]; then
-        sed -i 's/local\s\+all\s\+postgres\s\+peer/local   all             postgres                                trust/' $PG_HBA
-        sed -i 's/local\s\+all\s\+all\s\+peer/local   all             all                                     trust/' $PG_HBA
-        sed -i 's|host\s\+all\s\+all\s\+127.0.0.1/32\s\+scram-sha-256|host    all             all             127.0.0.1/32            trust|' $PG_HBA
-        sed -i 's|host\s\+all\s\+all\s\+::1/128\s\+scram-sha-256|host    all             all             ::1/128                 trust|' $PG_HBA
+        $SUDO sed -i 's/local\s\+all\s\+postgres\s\+peer/local   all             postgres                                trust/' $PG_HBA
+        $SUDO sed -i 's/local\s\+all\s\+all\s\+peer/local   all             all                                     trust/' $PG_HBA
+        $SUDO sed -i 's|host\s\+all\s\+all\s\+127.0.0.1/32\s\+scram-sha-256|host    all             all             127.0.0.1/32            trust|' $PG_HBA
+        $SUDO sed -i 's|host\s\+all\s\+all\s\+::1/128\s\+scram-sha-256|host    all             all             ::1/128                 trust|' $PG_HBA
     fi
     echo "  ✓ 配置修改完成"
 fi
