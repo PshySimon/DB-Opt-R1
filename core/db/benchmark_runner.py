@@ -2,12 +2,34 @@
 负载运行器：运行 benchmark 并解析性能指标
 """
 
+import os
 import re
+import signal
 import subprocess
 import logging
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# 全局跟踪当前运行的 benchmark 子进程
+_active_process: Optional[subprocess.Popen] = None
+
+
+def _cleanup_handler(signum, frame):
+    """信号处理器：杀掉正在运行的 benchmark 子进程"""
+    global _active_process
+    if _active_process and _active_process.poll() is None:
+        logger.info(f"收到信号 {signum}，终止 benchmark 子进程 (PID={_active_process.pid})...")
+        try:
+            os.killpg(os.getpgid(_active_process.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    raise SystemExit(1)
+
+
+# 注册信号处理
+signal.signal(signal.SIGTERM, _cleanup_handler)
+signal.signal(signal.SIGINT, _cleanup_handler)
 
 
 class BenchmarkRunner:
@@ -104,8 +126,7 @@ class BenchmarkRunner:
             f"-U {self.pg_user} {self.pg_database}"
         )
         logger.info(f"运行 pgbench [{self.workload}]: {cmd}")
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                                timeout=self.duration + 60)
+        result = self._run_subprocess(cmd, timeout=self.duration + 60)
         if result.returncode != 0:
             logger.error(f"pgbench 运行失败:\n{result.stderr}")
             return {"tps": 0, "latency_avg": 0, "latency_p95": None}
@@ -164,8 +185,7 @@ class BenchmarkRunner:
             f"run"
         )
         logger.info(f"运行 sysbench: {cmd}")
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                                timeout=self.duration + 60)
+        result = self._run_subprocess(cmd, timeout=self.duration + 60)
         if result.returncode != 0:
             logger.error(f"sysbench 运行失败:\n{result.stderr}")
             return {"tps": 0, "latency_avg": 0, "latency_p95": None}
@@ -197,3 +217,21 @@ class BenchmarkRunner:
 
         logger.info(f"sysbench 结果: tps={perf['tps']}, latency_avg={perf['latency_avg']}ms")
         return perf
+
+    def _run_subprocess(self, cmd: str, timeout: int = 120) -> subprocess.CompletedProcess:
+        """运行子进程，使用进程组便于信号处理器清理"""
+        global _active_process
+        proc = subprocess.Popen(
+            cmd, shell=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True,  # 新进程组
+        )
+        _active_process = proc
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            stdout, stderr = proc.communicate(timeout=5)
+        finally:
+            _active_process = None
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
