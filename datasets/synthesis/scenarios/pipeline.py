@@ -132,24 +132,13 @@ def _extract_knob_list_for_direction(effects_data: dict, direction: str) -> str:
 
 
 def generate_seeds(effects_path: str, knob_space_path: str, output_path: str,
-                   llm_generate, count: int = 100, mode: str = "llm"):
-    """按瓶颈方向生成种子场景描述
+                   llm_generate, count: int = 100):
+    """按瓶颈方向让 LLM 生成种子场景描述
 
     Args:
         effects_path: knob_effects.yaml 路径
         knob_space_path: knob_space.yaml 路径
-        mode: "llm"（按方向调用 LLM）或 "programmatic"（规则化生成）
     """
-    if mode == "programmatic":
-        from .seed_generator import generate_all_seeds
-        seeds = generate_all_seeds(effects_path, knob_space_path)
-        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(seeds, f, ensure_ascii=False, indent=2)
-        logger.info(f"✅ 程序化生成 {len(seeds)} 条种子 → {output_path}")
-        return
-
-    # LLM 模式：按瓶颈方向逐个生成
     import yaml
     with open(effects_path, "r", encoding="utf-8") as f:
         effects_data = yaml.safe_load(f)
@@ -460,8 +449,6 @@ if __name__ == "__main__":
     sd.add_argument("--knob-space", default="configs/knob_space.yaml", help="knob 搜索空间")
     sd.add_argument("--output", default="datasets/data/scenarios/seeds.json")
     sd.add_argument("--count", type=int, default=100, help="目标种子总数")
-    sd.add_argument("--mode", default="llm", choices=["llm", "programmatic"],
-                    help="生成模式：llm（按瓶颈方向）或 programmatic（规则化）")
     sd.add_argument("--model", default="gpt-5")
     sd.add_argument("--api-key", default=None)
     sd.add_argument("--api-base", default=None)
@@ -496,29 +483,19 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     if args.command == "seeds":
-        if args.mode == "llm":
-            from datasets.synthesis.mcts.run_search import create_llm_client
-            llm_fn = create_llm_client(
-                model=args.model,
-                api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
-                api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
-            )
-            generate_seeds(
-                effects_path=args.effects,
-                knob_space_path=args.knob_space,
-                output_path=args.output,
-                llm_generate=llm_fn,
-                count=args.count,
-                mode="llm",
-            )
-        else:
-            generate_seeds(
-                effects_path=args.effects,
-                knob_space_path=args.knob_space,
-                output_path=args.output,
-                llm_generate=None,
-                mode="programmatic",
-            )
+        from datasets.synthesis.mcts.run_search import create_llm_client
+        llm_fn = create_llm_client(
+            model=args.model,
+            api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
+            api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
+        )
+        generate_seeds(
+            effects_path=args.effects,
+            knob_space_path=args.knob_space,
+            output_path=args.output,
+            llm_generate=llm_fn,
+            count=args.count,
+        )
 
     elif args.command == "generate":
         from datasets.synthesis.mcts.run_search import create_llm_client
