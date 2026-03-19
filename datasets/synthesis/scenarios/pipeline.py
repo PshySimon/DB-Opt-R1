@@ -9,12 +9,12 @@ Step 2: collect   — 真机执行 + 采集完整指标（需要 PG）
     # Step 0: LLM 扩充种子（可选）
     python3 -m datasets.synthesis.scenarios.pipeline seeds \
         --config configs/knob_space.yaml \
-        --output datasets/data/scenario_seeds/seeds.json \
+        --output datasets/data/scenarios/seeds.json \
         --count 50 --model gpt-4
 
     # Step 1: 生成 knob 配置
     python3 -m datasets.synthesis.scenarios.pipeline generate \
-        --seeds datasets/data/scenario_seeds/seeds.json \
+        --seeds datasets/data/scenarios/seeds.json \
         --output datasets/data/scenarios/knob_configs.json \
         --config configs/knob_space.yaml \
         --model gpt-4 --variants 3
@@ -397,7 +397,7 @@ if __name__ == "__main__":
     # Step 0: seeds
     sd = subparsers.add_parser("seeds", help="LLM 生成种子场景描述")
     sd.add_argument("--config", default="configs/knob_space.yaml")
-    sd.add_argument("--output", default="datasets/data/scenario_seeds/seeds.json")
+    sd.add_argument("--output", default="datasets/data/scenarios/seeds.json")
     sd.add_argument("--existing", default=None, help="已有种子文件（用于去重）")
     sd.add_argument("--count", type=int, default=50, help="生成数量")
     sd.add_argument("--model", default="gpt-5")
@@ -406,7 +406,7 @@ if __name__ == "__main__":
 
     # Step 1: generate
     gen = subparsers.add_parser("generate", help="LLM 生成 knob 配置（不需要 PG）")
-    gen.add_argument("--seeds", default="datasets/data/scenario_seeds/seeds.json")
+    gen.add_argument("--seeds", default="datasets/data/scenarios/seeds.json")
     gen.add_argument("--output", default="datasets/data/scenarios/knob_configs.json")
     gen.add_argument("--config", default="configs/knob_space.yaml")
     gen.add_argument("--model", default="gpt-5")
