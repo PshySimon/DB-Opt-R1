@@ -142,7 +142,7 @@ class ScenarioCollector(DataCollector):
 
         try:
             result = subprocess.run(
-                ["tail", "-n", "500", log_path],
+                ["sudo", "tail", "-n", "500", log_path],
                 capture_output=True, text=True, timeout=5
             )
             logs = []
