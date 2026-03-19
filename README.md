@@ -54,10 +54,8 @@
 │   ├── knob_space.yaml                 # 45 个可调 knob 定义
 │   └── knob_effects.yaml              # Knob 效果知识库（瓶颈方向 + 效果描述）
 └── scripts/
-    ├── common.sh                       # 采集脚本公共函数库
     ├── setup_env.sh                    # 环境准备
-    ├── collect_costmodel.sh            # Cost Model 数据采集
-    └── collect_scenarios.sh            # SFT 场景数据采集
+    └── collect_data.sh                 # 数据采集
 ```
 
 ## 环境准备
@@ -85,11 +83,11 @@ bash scripts/setup_env.sh
 在真机上随机采样 knob 配置 → pgbench → 采集指标，输出 CSV。
 
 ```bash
-# 默认后台执行
-bash scripts/collect_costmodel.sh --rounds 1500 --database benchmark --workload all
+# 默认后台执行（日志 + PID 保存到 logs/costmodel/）
+bash scripts/collect_data.sh --rounds 1500 --database benchmark --workload all
 
-# 前台执行（调试用）
-bash scripts/collect_costmodel.sh --rounds 10 --foreground
+# 调试时前台执行
+bash scripts/collect_data.sh --rounds 10 --foreground
 ```
 
 **负载类型**：
@@ -159,14 +157,20 @@ python3 -m datasets.synthesis.scenarios.pipeline generate \
 将 knob 配置应用到 PG → pgbench → 采集完整指标（CPU/IO/等待事件/慢查询/日志）。
 
 ```bash
-# 默认后台执行
-bash scripts/collect_scenarios.sh \
+# 后台执行（日志 + PID 保存到 logs/scenarios/）
+mkdir -p logs/scenarios
+nohup python3 -m datasets.synthesis.scenarios.pipeline collect \
     --input datasets/data/scenarios/knob_configs_8c16g_hdd.json \
     --output datasets/data/scenarios/collected.json \
-    --database benchmark
+    --host 127.0.0.1 --port 5432 \
+    --user postgres --database benchmark \
+    > logs/scenarios/$(date +%Y%m%d_%H%M%S).log 2>&1 &
+echo $! > logs/scenarios/running.pid
 
 # 查看进度
 tail -f logs/scenarios/*.log
+# 停止采集
+kill $(cat logs/scenarios/running.pid)
 ```
 
 #### Step 3: MCTS 轨迹合成
