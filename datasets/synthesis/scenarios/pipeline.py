@@ -340,6 +340,21 @@ def collect_scenarios(input_path: str, output_path: str,
     with open(input_path, "r", encoding="utf-8") as f:
         configs = json.load(f)
 
+    # 按 knobs 内容去重
+    seen_knobs = set()
+    unique_configs = []
+    dup_count = 0
+    for c in configs:
+        knob_key = json.dumps(c["knobs"], sort_keys=True)
+        if knob_key not in seen_knobs:
+            seen_knobs.add(knob_key)
+            unique_configs.append(c)
+        else:
+            dup_count += 1
+    if dup_count > 0:
+        logger.info(f"去重: {len(configs)} → {len(unique_configs)} 条（移除 {dup_count} 条重复配置，{dup_count*100/len(configs):.1f}%）")
+    configs = unique_configs
+
     # 加载已有结果（断点续跑）
     existing = []
     existing_keys = set()
