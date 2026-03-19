@@ -71,6 +71,7 @@ bash scripts/setup_env.sh
 - 安装 PostgreSQL 16 + pgbench（国内优先系统源）
 - 开启统计收集（`track_io_timing`）和慢查询日志
 - 配置本地免密登录（Unix socket + TCP 127.0.0.1）
+- 创建 benchmark 数据库 + pgbench 初始化
 - 安装 Python 依赖
 
 ---
@@ -82,24 +83,9 @@ bash scripts/setup_env.sh
 在真机上随机采样 knob 配置 → pgbench → 采集指标，输出 CSV。
 
 ```bash
-# 首次：初始化 pgbench 测试表 + 采集
-bash scripts/collect_data.sh --init --rounds 1500 --database benchmark --workload all --background
-
-# 后续：直接采集（无需 --init）
+# 采集数据（pgbench 已在 setup 阶段初始化）
 bash scripts/collect_data.sh --rounds 1500 --database benchmark --workload all --background
 ```
-
-或直接调用 Python pipeline：
-
-```bash
-python3 -m cost_model.data.pipeline \
-    --config configs/knob_space.yaml \
-    --output datasets/data/cost_model \
-    --rounds 1500 --sampling lhs \
-    --database benchmark
-```
-
-> ⚠️ 重建数据库或重装 PG 后需重新 `--init`
 
 **负载类型**：
 

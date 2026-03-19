@@ -14,7 +14,6 @@ OUTPUT_DIR="${OUTPUT_DIR:-./cost_model/data/raw}"
 ROUNDS="${ROUNDS:-100}"
 SAMPLING="${SAMPLING:-random}"
 WORKLOAD="${WORKLOAD:-all}"
-INIT_BENCHMARK=false
 BACKGROUND=false
 
 usage() {
@@ -31,7 +30,6 @@ usage() {
     echo "  --rounds       采集轮数 (默认: $ROUNDS)"
     echo "  --sampling     采样策略: random/lhs (默认: $SAMPLING)"
     echo "  --workload     负载类型: mixed/read_only/high_concurrency/write_heavy/all (默认: all)"
-    echo "  --init         初始化 benchmark 数据"
     echo "  --background   后台运行（nohup）"
     echo "  -h, --help     显示帮助"
     exit 0
@@ -49,7 +47,6 @@ while [[ $# -gt 0 ]]; do
         --rounds)       ROUNDS="$2"; shift 2 ;;
         --sampling)     SAMPLING="$2"; shift 2 ;;
         --workload)     WORKLOAD="$2"; shift 2 ;;
-        --init)         INIT_BENCHMARK=true; shift ;;
         --background)   BACKGROUND=true; shift ;;
         -h|--help)      usage ;;
         *)              echo "未知参数: $1"; usage ;;
@@ -111,10 +108,6 @@ if [ -n "$PG_PASSWORD" ]; then
 fi
 if [ -n "$PG_DATA_DIR" ]; then
     CMD="$CMD --pg-data-dir $PG_DATA_DIR"
-fi
-
-if [ "$INIT_BENCHMARK" = true ]; then
-    CMD="$CMD --init"
 fi
 
 if [ "$BACKGROUND" = true ]; then

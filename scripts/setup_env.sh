@@ -155,12 +155,17 @@ fi
 echo "  数据库: $PG_DATABASE"
 echo "  用户:   $PG_USER / postgres"
 
-# 初始化 pgbench 数据
-echo "  → 初始化 pgbench (scale factor = 10)..."
-if $SUDO -u postgres pgbench -i -s 10 $PG_DATABASE; then
-    echo "  ✓ pgbench 初始化完成"
+# 初始化 pgbench 数据（仅在未初始化时执行）
+echo "  → 检查 pgbench 是否已初始化..."
+if $SUDO -u postgres psql -d $PG_DATABASE -tc "SELECT 1 FROM pg_tables WHERE tablename = 'pgbench_accounts'" | grep -q 1; then
+    echo "  ✓ pgbench 已初始化，跳过"
 else
-    echo "  ⚠ pgbench 初始化失败（可能已存在或数据库未就绪）"
+    echo "  → 初始化 pgbench (scale factor = 10)..."
+    if $SUDO -u postgres pgbench -i -s 10 $PG_DATABASE; then
+        echo "  ✓ pgbench 初始化完成"
+    else
+        echo "  ❌ pgbench 初始化失败"
+    fi
 fi
 
 # ==================== 5. Python 依赖 ====================
