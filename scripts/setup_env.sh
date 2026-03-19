@@ -155,6 +155,14 @@ fi
 echo "  数据库: $PG_DATABASE"
 echo "  用户:   $PG_USER / postgres"
 
+# 初始化 pgbench 数据
+echo "  → 初始化 pgbench (scale factor = 10)..."
+if $SUDO -u postgres pgbench -i -s 10 $PG_DATABASE; then
+    echo "  ✓ pgbench 初始化完成"
+else
+    echo "  ⚠ pgbench 初始化失败（可能已存在或数据库未就绪）"
+fi
+
 # ==================== 5. Python 依赖 ====================
 echo ""
 echo "[5/5] 安装 Python 依赖..."
