@@ -135,9 +135,6 @@ python3 -m datasets.synthesis.scenarios.pipeline seeds \
     --count 100 --model gpt-5 \
     --api-key $OPENAI_API_KEY \
     --api-base $OPENAI_API_BASE
-
-# 或使用程序化模式（不需要 LLM，秒级完成）
-python3 -m datasets.synthesis.scenarios.pipeline seeds --mode programmatic
 ```
 
 #### Step 1: LLM 生成 knob 配置
