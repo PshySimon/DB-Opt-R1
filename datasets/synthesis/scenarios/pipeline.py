@@ -403,6 +403,17 @@ def collect_scenarios(input_path: str, output_path: str,
             csv_metrics = {k: v for k, v in flat.items() if k.startswith("metric_")}
 
             hardware = scenario_data.get("hardware", {})
+
+            # 从 PG 查全量 tunable knob 的当前值
+            cursor = conn.cursor()
+            all_knobs = {}
+            for knob_name in knob_space.knobs:
+                try:
+                    cursor.execute(f"SHOW {knob_name}")
+                    all_knobs[knob_name] = cursor.fetchone()[0]
+                except Exception:
+                    all_knobs[knob_name] = knobs.get(knob_name, "unknown")
+            cursor.close()
             conn.close()
 
             from dataclasses import asdict
@@ -411,7 +422,7 @@ def collect_scenarios(input_path: str, output_path: str,
                 difficulty=config.get("difficulty", 1),
                 description=config.get("description", ""),
                 hardware={k: v for k, v in hardware.items() if v is not None},
-                knobs=knobs,
+                knobs=all_knobs,
                 system=scenario_data.get("system", {}),
                 db_metrics=ScenarioState._parse_csv_metrics(csv_metrics),
                 wait_events=scenario_data.get("wait_events", []),
