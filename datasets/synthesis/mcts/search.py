@@ -126,7 +126,8 @@ class MCTSSearch:
             rollout_steps.append(step)
 
             # 如果调了 predict_performance 就结束
-            if "predict_performance" in action:
+            tool_call = self._parse_tool_call(action)
+            if tool_call and tool_call.get("name") == "predict_performance":
                 break
 
         reward = self._compute_reward()

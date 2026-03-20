@@ -179,7 +179,8 @@ class AsyncMCTSSearch(MCTSSearch):
             trajectory.append(step)
             rollout_steps.append(step)
 
-            if "predict_performance" in action:
+            tool_call = self._parse_tool_call(action)
+            if tool_call and tool_call.get("name") == "predict_performance":
                 break
 
         reward = self._compute_reward_with(env)
