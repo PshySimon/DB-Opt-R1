@@ -490,7 +490,7 @@ def random_sample_knobs(knob_space_path: str, output_path: str,
         count: 采样数量
         strategy: random / near_default / lhs / mixed
     """
-    from cost_model.data.knob_generator import KnobGenerator
+    from cost_model.knob_generator import KnobGenerator
     import random as rand_mod
 
     knob_space = KnobSpace(knob_space_path)
