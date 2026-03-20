@@ -83,6 +83,12 @@ def run_mcts(args):
     from environment.tools import DBToolEnv
     t0 = time.time()
 
+    # 每次运行创建带时间戳的子目录
+    run_id = time.strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join(args.output_dir, f"run_{run_id}")
+    os.makedirs(run_dir, exist_ok=True)
+    logger.info(f"输出目录: {run_dir}")
+
     data_source = args.scenarios if args.scenarios else args.dataset
     logger.info(f"数据源: {data_source}")
     logger.info(f"模型: {args.model}")
@@ -166,7 +172,7 @@ def run_mcts(args):
         root = searcher.search(sample_idx=i)
 
         # 保存搜索树用于 debug
-        tree_dir = os.path.join(args.output_dir, "mcts_trees")
+        tree_dir = os.path.join(run_dir, "mcts_trees")
         os.makedirs(tree_dir, exist_ok=True)
         tree_path = os.path.join(tree_dir, f"tree_env_{i}.json")
         with open(tree_path, "w", encoding="utf-8") as f:
@@ -224,13 +230,11 @@ def run_mcts(args):
             contrastive_data.extend(contrastive_items)
 
     # 保存
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    sft_path = os.path.join(args.output_dir, "sft_trajectories.jsonl")
+    sft_path = os.path.join(run_dir, "sft_trajectories.jsonl")
     save_jsonl(sft_data, sft_path)
     logger.info(f"\nSFT 数据: {len(sft_data)} 条 → {sft_path}")
 
-    contrastive_path = os.path.join(args.output_dir, "contrastive_pairs.jsonl")
+    contrastive_path = os.path.join(run_dir, "contrastive_pairs.jsonl")
     save_jsonl(contrastive_data, contrastive_path)
     logger.info(f"对比数据: {len(contrastive_data)} 对 → {contrastive_path}")
 
@@ -242,7 +246,7 @@ def run_mcts(args):
     logger.info(f"\n预览数据:")
     logger.info(f"  python3 -m datasets.synthesis.mcts.preview {sft_path}")
     logger.info(f"  python3 -m datasets.synthesis.mcts.preview {contrastive_path}")
-    tree_dir = os.path.join(args.output_dir, "mcts_trees")
+    tree_dir = os.path.join(run_dir, "mcts_trees")
     if os.path.isdir(tree_dir):
         trees = [f for f in os.listdir(tree_dir) if f.endswith('.json')]
         if trees:
