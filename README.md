@@ -158,7 +158,7 @@ echo $! > logs/scenarios/running.pid
 ```bash
 python3 -m cost_model.train \
     --data datasets/data/scenarios/collected.json \
-    --output cost_model/checkpoints/v3
+    --output cost_model/checkpoints/v1
 ```
 
 #### Step 5: MCTS 轨迹合成
