@@ -1,0 +1,3536 @@
+[
+  {
+    "name": "small_wal_buffers_flush_stalls",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "wal_buffers 偏小，在写入高峰期（大量 INSERT/UPDATE）WAL 缓冲频繁填满，导致更频繁的刷盘与 WALWriteLock 等待。典型现象：事务提交尾延迟抖动增大，pg_stat_wal 中写入/同步次数偏高，CPU 利用率不高但延迟升高。优化方向：增大 wal_buffers（例如 16~64MB，根据 WAL 产生速率评估），平滑写入高峰，降低提交等待。",
+    "category": "memory",
+    "workload": "read_only",
+    "knobs": {
+      "wal_buffers": "32MB",
+      "max_wal_size": "2GB",
+      "checkpoint_completion_target": 0.8,
+      "wal_compression": "on"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_work_mem_sort_spill",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "work_mem 过低（如 2~4MB），导致 ORDER BY / GROUP BY / 窗口函数等排序频繁溢写临时文件。典型现象：EXPLAIN ANALYZE 显示 Sort Method: external merge Disk，pg_stat_database 的 temp_files/temp_bytes 增长，pg_temp 目录 IO 突增，查询时延呈阶梯式增加。优化方向：针对报表/分析会话提升 work_mem（可 SET LOCAL），或按语句类型分配更高 work_mem，降低外部排序发生率。",
+    "category": "memory",
+    "workload": "high_concurrency",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "work_mem": "16MB",
+      "effective_cache_size": "24GB",
+      "effective_io_concurrency": 2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "tiny_shared_buffers",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "shared_buffers 设置过低（例如仅占物理内存的 5% 以下），热数据无法留存于缓冲池。典型现象：pg_stat_bgwriter 中 buffers_alloc 持续升高、shared_blks_read 相对 shared_blks_hit 偏高，重复执行的相同查询仍产生大量磁盘读，平均与尾延迟上升。优化方向：适度提高 shared_buffers（常见经验值为物理内存的 20%~25%，按工作负载验证），观察缓存命中率提升与磁盘读下降。",
+    "category": "memory",
+    "workload": "read_only",
+    "knobs": {
+      "shared_buffers": "6GB",
+      "effective_cache_size": "24GB",
+      "max_wal_size": "3GB",
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_work_mem_sort_spill",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "work_mem 过低（如 2~4MB），导致 ORDER BY / GROUP BY / 窗口函数等排序频繁溢写临时文件。典型现象：EXPLAIN ANALYZE 显示 Sort Method: external merge Disk，pg_stat_database 的 temp_files/temp_bytes 增长，pg_temp 目录 IO 突增，查询时延呈阶梯式增加。优化方向：针对报表/分析会话提升 work_mem（可 SET LOCAL），或按语句类型分配更高 work_mem，降低外部排序发生率。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "work_mem": "16MB",
+      "effective_cache_size": "24GB",
+      "effective_io_concurrency": 2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "tiny_shared_buffers",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "shared_buffers 设置过低（例如仅占物理内存的 5% 以下），热数据无法留存于缓冲池。典型现象：pg_stat_bgwriter 中 buffers_alloc 持续升高、shared_blks_read 相对 shared_blks_hit 偏高，重复执行的相同查询仍产生大量磁盘读，平均与尾延迟上升。优化方向：适度提高 shared_buffers（常见经验值为物理内存的 20%~25%，按工作负载验证），观察缓存命中率提升与磁盘读下降。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "6GB",
+      "effective_cache_size": "24GB",
+      "bgwriter_lru_maxpages": 400,
+      "effective_io_concurrency": 2,
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "small_wal_buffers_flush_stalls",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "wal_buffers 偏小，在写入高峰期（大量 INSERT/UPDATE）WAL 缓冲频繁填满，导致更频繁的刷盘与 WALWriteLock 等待。典型现象：事务提交尾延迟抖动增大，pg_stat_wal 中写入/同步次数偏高，CPU 利用率不高但延迟升高。优化方向：增大 wal_buffers（例如 16~64MB，根据 WAL 产生速率评估），平滑写入高峰，降低提交等待。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "wal_buffers": "64MB",
+      "max_wal_size": "2GB",
+      "min_wal_size": "256MB",
+      "checkpoint_completion_target": 0.8,
+      "wal_compression": "on"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_temp_buffers_temp_spill",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "ETL/批处理频繁使用临时表，但 temp_buffers 过低导致对临时表的大量写入落到磁盘。典型现象：pg_temp 目录增长快，temp_files 增多但并非来自排序；含多步中间结果的 ETL 作业耗时显著。优化方向：对使用临时表的会话提升 temp_buffers（会话级生效），让临时表操作更多留在内存。",
+    "category": "memory",
+    "workload": "mixed",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB",
+      "temp_buffers": "64MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_temp_buffers_temp_spill",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "ETL/批处理频繁使用临时表，但 temp_buffers 过低导致对临时表的大量写入落到磁盘。典型现象：pg_temp 目录增长快，temp_files 增多但并非来自排序；含多步中间结果的 ETL 作业耗时显著。优化方向：对使用临时表的会话提升 temp_buffers（会话级生效），让临时表操作更多留在内存。",
+    "category": "memory",
+    "workload": "mixed",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB",
+      "temp_buffers": "96MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_shared_buffers_os_cache_pressure",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "shared_buffers 设置过高（如占用内存 60%~70%），挤压 OS page cache。典型现象：顺序扫描与 VACUUM 的吞吐不佳，系统出现频繁页面回收（kswapd 活跃但无明显缺页错误），检查点或 bgwriter 刷新出现突发放大，整体 IO 抖动。优化方向：适度下调 shared_buffers，留足 OS page cache；并据此调整 effective_cache_size 反映真实可用缓存，改善优化器判断。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "2GB",
+      "effective_cache_size": "24GB",
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB",
+      "bgwriter_lru_maxpages": 400
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_shared_buffers_os_cache_pressure",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "shared_buffers 设置过高（如占用内存 60%~70%），挤压 OS page cache。典型现象：顺序扫描与 VACUUM 的吞吐不佳，系统出现频繁页面回收（kswapd 活跃但无明显缺页错误），检查点或 bgwriter 刷新出现突发放大，整体 IO 抖动。优化方向：适度下调 shared_buffers，留足 OS page cache；并据此调整 effective_cache_size 反映真实可用缓存，改善优化器判断。",
+    "category": "memory",
+    "workload": "high_concurrency",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "effective_cache_size": "20GB",
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "3GB",
+      "effective_io_concurrency": 2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "overestimated_effective_cache_size_plan_misses",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "effective_cache_size 估计过高（如按整机内存 80%~90% 配置，忽略与其他进程共用），优化器高估缓存命中，偏向选择随机读取多的索引嵌套循环。典型现象：生产中 shared_blks_hit 低于预期、随机 IO 抬升，某些查询在重启后（缓存冷）时延显著变差且计划不稳定。优化方向：下调 effective_cache_size 到更贴近 shared_buffers + 实际 OS page cache 的水平，令规划更保守、减少缓存未命中带来的随机 IO。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "6GB",
+      "effective_cache_size": "14GB",
+      "random_page_cost": 4.5,
+      "effective_io_concurrency": 2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "overestimated_effective_cache_size_plan_misses",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "effective_cache_size 估计过高（如按整机内存 80%~90% 配置，忽略与其他进程共用），优化器高估缓存命中，偏向选择随机读取多的索引嵌套循环。典型现象：生产中 shared_blks_hit 低于预期、随机 IO 抬升，某些查询在重启后（缓存冷）时延显著变差且计划不稳定。优化方向：下调 effective_cache_size 到更贴近 shared_buffers + 实际 OS page cache 的水平，令规划更保守、减少缓存未命中带来的随机 IO。",
+    "category": "memory",
+    "workload": "high_concurrency",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "effective_cache_size": "12GB",
+      "random_page_cost": 4.5
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_maintenance_work_mem_parallel_ddl_pressure",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "maintenance_work_mem 过高（如单作业数 GB），在并发 CREATE INDEX / REINDEX / VACUUM 等维护任务同时运行时，内存占用叠加推高，挤压缓存并放大 IO。典型现象：系统总体内存压力上升、页缓存下降，业务查询尾延迟变差；维护任务本身并非更快，反而互相争用资源。优化方向：下调 maintenance_work_mem 至合理值，并限制并发维护数量；在需要时按会话临时提高用于单次大索引构建。",
+    "category": "memory",
+    "workload": "high_concurrency",
+    "knobs": {
+      "maintenance_work_mem": "1GB",
+      "autovacuum_max_workers": 6,
+      "max_parallel_maintenance_workers": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_work_mem_concurrency_bloat",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "work_mem 设置偏大（如 128~256MB），在 50~200 的并发分析查询下，同一查询包含多个排序/哈希节点，导致实际可分配内存远超预估。典型现象：总体内存水位在高并发时急剧上升，OS 回收缓存、系统 IO 上升，延迟抖动；仍可能出现个别节点溢写。优化方向：下调全局 work_mem，针对少量重查询在会话/事务级单独提高；控制并发，避免“高 work_mem × 多算子 × 高并发”的乘法放大。",
+    "category": "memory",
+    "workload": "read_only",
+    "knobs": {
+      "work_mem": "8MB",
+      "shared_buffers": "2GB",
+      "max_connections": 80,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_maintenance_work_mem_parallel_ddl_pressure",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "maintenance_work_mem 过高（如单作业数 GB），在并发 CREATE INDEX / REINDEX / VACUUM 等维护任务同时运行时，内存占用叠加推高，挤压缓存并放大 IO。典型现象：系统总体内存压力上升、页缓存下降，业务查询尾延迟变差；维护任务本身并非更快，反而互相争用资源。优化方向：下调 maintenance_work_mem 至合理值，并限制并发维护数量；在需要时按会话临时提高用于单次大索引构建。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "maintenance_work_mem": "128MB",
+      "max_parallel_maintenance_workers": 1,
+      "autovacuum_max_workers": 2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_work_mem_concurrency_bloat",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "work_mem 设置偏大（如 128~256MB），在 50~200 的并发分析查询下，同一查询包含多个排序/哈希节点，导致实际可分配内存远超预估。典型现象：总体内存水位在高并发时急剧上升，OS 回收缓存、系统 IO 上升，延迟抖动；仍可能出现个别节点溢写。优化方向：下调全局 work_mem，针对少量重查询在会话/事务级单独提高；控制并发，避免“高 work_mem × 多算子 × 高并发”的乘法放大。",
+    "category": "memory",
+    "workload": "mixed",
+    "knobs": {
+      "shared_buffers": "2GB",
+      "work_mem": "128MB",
+      "effective_cache_size": "24GB",
+      "max_connections": 200
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_maintenance_mem_and_small_buffers_autovacuum_bloat",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "maintenance_work_mem 较低且 shared_buffers 较小，导致 autovacuum/vacuum 在大表上多次扫描、索引清理效率低，缓冲复用差。典型现象：autovacuum 运行时间长、n_dead_tup 长期偏高，表/索引膨胀导致查询退化（回表与索引层级增加），IO 较为持续而低效。优化方向：提高 maintenance_work_mem 以加速清理与索引重建，适度提升 shared_buffers 以改善热块复用；在低峰期执行针对性的 VACUUM/REINDEX。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "maintenance_work_mem": "1GB",
+      "max_parallel_maintenance_workers": 4,
+      "autovacuum_vacuum_scale_factor": 0.05
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_cache_and_work_mem_join_sort_spills",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "effective_cache_size 估计偏低使优化器倾向于 Merge Join/Seq Scan，而全局 work_mem 偏小又使必须的排序/去重溢写。典型现象：大表连接选择 Merge Join + Sort，EXPLAIN ANALYZE 显示多个 external merge Disk；temp_files 激增，I/O 放大明显。优化方向：同时提升 effective_cache_size（更贴近真实可用缓存）与 work_mem（或对目标语句 SET LOCAL），让优化器可选择更少磁盘操作的计划、减少外部排序。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "effective_cache_size": "12GB",
+      "work_mem": "16MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_cache_and_work_mem_join_sort_spills",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "effective_cache_size 估计偏低使优化器倾向于 Merge Join/Seq Scan，而全局 work_mem 偏小又使必须的排序/去重溢写。典型现象：大表连接选择 Merge Join + Sort，EXPLAIN ANALYZE 显示多个 external merge Disk；temp_files 激增，I/O 放大明显。优化方向：同时提升 effective_cache_size（更贴近真实可用缓存）与 work_mem（或对目标语句 SET LOCAL），让优化器可选择更少磁盘操作的计划、减少外部排序。",
+    "category": "memory",
+    "workload": "mixed",
+    "knobs": {
+      "effective_cache_size": "2GB",
+      "work_mem": "3MB",
+      "random_page_cost": 4.5
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_maintenance_mem_and_small_buffers_autovacuum_bloat",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "maintenance_work_mem 较低且 shared_buffers 较小，导致 autovacuum/vacuum 在大表上多次扫描、索引清理效率低，缓冲复用差。典型现象：autovacuum 运行时间长、n_dead_tup 长期偏高，表/索引膨胀导致查询退化（回表与索引层级增加），IO 较为持续而低效。优化方向：提高 maintenance_work_mem 以加速清理与索引重建，适度提升 shared_buffers 以改善热块复用；在低峰期执行针对性的 VACUUM/REINDEX。",
+    "category": "memory",
+    "workload": "read_only",
+    "knobs": {
+      "shared_buffers": "6GB",
+      "maintenance_work_mem": "1GB",
+      "effective_cache_size": "24GB",
+      "autovacuum_vacuum_scale_factor": 0.1,
+      "max_parallel_maintenance_workers": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_temp_and_work_mem_connection_spike_pressure",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "temp_buffers 设置过大（如每会话 256~512MB）且 work_mem 也不低（如 64MB），在连接数量瞬时上升时，即使未被完全使用也会造成高内存保留与碎片，挤压 OS page cache。典型现象：连接激增阶段整体内存水位抬升、缓存命中下降、磁盘读写抖动，查询尾延迟升高。优化方向：下调全局 temp_buffers 与 work_mem，将高内存需求限制在特定会话；尽量复用连接，避免大量短会话持有高 temp_buffers。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "work_mem": "64MB",
+      "temp_buffers": "128MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "planner_bias_with_cache_misestimate_and_spill",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "effective_cache_size 过高导致优化器偏好大量随机索引访问的 Nested Loop，而下游聚合/哈希因 work_mem 偏小发生溢写，形成“双重惩罚”。典型现象：EXPLAIN 显示 Nested Loop + Index Scan 访问大量行，实际运行 shared hit 低、随机 IO 高；随后 HashAggregate/Hash Join external spill，temp_bytes 上升。优化方向：下调 effective_cache_size 贴近真实缓存能力以减少错误乐观的随机访问，同时适度上调 work_mem（或仅对该查询 SET LOCAL），降低聚合/哈希溢写概率。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "effective_cache_size": "28GB",
+      "work_mem": "2MB",
+      "random_page_cost": 2.0
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_temp_and_work_mem_connection_spike_pressure",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "temp_buffers 设置过大（如每会话 256~512MB）且 work_mem 也不低（如 64MB），在连接数量瞬时上升时，即使未被完全使用也会造成高内存保留与碎片，挤压 OS page cache。典型现象：连接激增阶段整体内存水位抬升、缓存命中下降、磁盘读写抖动，查询尾延迟升高。优化方向：下调全局 temp_buffers 与 work_mem，将高内存需求限制在特定会话；尽量复用连接，避免大量短会话持有高 temp_buffers。",
+    "category": "memory",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "2GB",
+      "temp_buffers": "4MB",
+      "max_connections": 80,
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "planner_bias_with_cache_misestimate_and_spill",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "effective_cache_size 过高导致优化器偏好大量随机索引访问的 Nested Loop，而下游聚合/哈希因 work_mem 偏小发生溢写，形成“双重惩罚”。典型现象：EXPLAIN 显示 Nested Loop + Index Scan 访问大量行，实际运行 shared hit 低、随机 IO 高；随后 HashAggregate/Hash Join external spill，temp_bytes 上升。优化方向：下调 effective_cache_size 贴近真实缓存能力以减少错误乐观的随机访问，同时适度上调 work_mem（或仅对该查询 SET LOCAL），降低聚合/哈希溢写概率。",
+    "category": "memory",
+    "workload": "high_concurrency",
+    "knobs": {
+      "effective_cache_size": "24GB",
+      "work_mem": "2MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_random_page_cost_index_scan_bias",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "random_page_cost 设得过低（如 1.0~1.2），在工作集无法完全命中缓存或磁盘为 HDD 的环境下，优化器过度偏向 Index Scan/Nested Loop。典型现象：选择性一般的查询走大量随机堆读，EXPLAIN ANALYZE 显示 heap fetch 次数高、IO 等待明显，而顺序扫描本可更快。优化方向：适度提高 random_page_cost（如 2.0~3.5，结合介质特性校准），必要时与 seq_page_cost 一起校准后重算计划。",
+    "category": "optimizer",
+    "workload": "write_heavy",
+    "knobs": {
+      "random_page_cost": 1.2,
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_random_page_cost_index_scan_bias",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "random_page_cost 设得过低（如 1.0~1.2），在工作集无法完全命中缓存或磁盘为 HDD 的环境下，优化器过度偏向 Index Scan/Nested Loop。典型现象：选择性一般的查询走大量随机堆读，EXPLAIN ANALYZE 显示 heap fetch 次数高、IO 等待明显，而顺序扫描本可更快。优化方向：适度提高 random_page_cost（如 2.0~3.5，结合介质特性校准），必要时与 seq_page_cost 一起校准后重算计划。",
+    "category": "optimizer",
+    "workload": "write_heavy",
+    "knobs": {
+      "random_page_cost": 1.1,
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_random_page_cost_seq_scan_bias",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "random_page_cost 设得过高（如 4.0 以上）但底层为 SSD/NVMe，优化器倾向 Seq Scan，即使谓词高度选择性也忽略可用索引。典型现象：扫描数千万行后再过滤，CPU 大量用于无效行过滤，响应时间长。优化方向：下调 random_page_cost 到更贴近 SSD 随机读成本（如 1.1~1.5），使选择性高的条件更倾向 Index/Bitmap Scan。",
+    "category": "optimizer",
+    "workload": "write_heavy",
+    "knobs": {
+      "random_page_cost": 5.0,
+      "seq_page_cost": 0.9,
+      "effective_cache_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_random_page_cost_seq_scan_bias",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "random_page_cost 设得过高（如 4.0 以上）但底层为 SSD/NVMe，优化器倾向 Seq Scan，即使谓词高度选择性也忽略可用索引。典型现象：扫描数千万行后再过滤，CPU 大量用于无效行过滤，响应时间长。优化方向：下调 random_page_cost 到更贴近 SSD 随机读成本（如 1.1~1.5），使选择性高的条件更倾向 Index/Bitmap Scan。",
+    "category": "optimizer",
+    "workload": "mixed",
+    "knobs": {
+      "random_page_cost": 1.4,
+      "effective_io_concurrency": 64,
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_cpu_tuple_cost_row_heavy_plans",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "cpu_tuple_cost 过低（如 0.005~0.01）导致优化器低估逐行处理开销，偏好产生大量中间行的计划（如宽松的 Nested Loop 或在过滤前进行大表连接）。典型现象：Rows Removed by Filter 很高，CPU 忙于执行器层面过滤，整体延迟偏高。优化方向：适度提高 cpu_tuple_cost（如 0.02~0.05），让优化器更倾向先减少行数的策略（更早过滤、更合适的连接顺序）。",
+    "category": "optimizer",
+    "workload": "write_heavy",
+    "knobs": {
+      "cpu_tuple_cost": 0.03,
+      "default_statistics_target": 200,
+      "work_mem": "16MB",
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_cpu_tuple_cost_row_heavy_plans",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "cpu_tuple_cost 过低（如 0.005~0.01）导致优化器低估逐行处理开销，偏好产生大量中间行的计划（如宽松的 Nested Loop 或在过滤前进行大表连接）。典型现象：Rows Removed by Filter 很高，CPU 忙于执行器层面过滤，整体延迟偏高。优化方向：适度提高 cpu_tuple_cost（如 0.02~0.05），让优化器更倾向先减少行数的策略（更早过滤、更合适的连接顺序）。",
+    "category": "optimizer",
+    "workload": "high_concurrency",
+    "knobs": {
+      "cpu_tuple_cost": 0.02,
+      "default_statistics_target": 150,
+      "join_collapse_limit": 12
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "unbalanced_seq_random_cost_ratio_misplan",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "seq_page_cost 与 random_page_cost 比例失衡（例如 seq_page_cost 过低或 random_page_cost 过高），导致优化器在顺序扫描与索引扫描之间做出次优选择。典型现象：部分查询总是走 Seq Scan（或相反过度走 Index Scan），EXPLAIN 估算成本与实际耗时偏离；更换数据量/缓存状态后计划波动。优化方向：联合校准 seq_page_cost 与 random_page_cost 的相对比值以匹配硬件（SSD 常见 1.0 : 1.1~1.5；HDD 可达 1.0 : 2.5~4.0），并复核关键 SQL 的计划。",
+    "category": "optimizer",
+    "workload": "high_concurrency",
+    "knobs": {
+      "seq_page_cost": 1.1,
+      "random_page_cost": 3.2,
+      "effective_cache_size": "24GB",
+      "effective_io_concurrency": 2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_cpu_operator_cost_expression_avoidance",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "cpu_operator_cost 偏高（如 0.05~0.1）使优化器过度高估表达式/函数计算成本，倾向选择更多 I/O 的计划来减少表达式评估次数（例如放弃索引条件，走更宽的扫描）。典型现象：有函数/表达式的 WHERE 条件下，计划使用宽扫描+过滤，磁盘读增多、CPU 利用反而不高。优化方向：下调 cpu_operator_cost 到更贴近实际（常见 0.0025~0.01），必要时针对热点表达式评估场景校准后重新 ANALYZE 并观察计划。",
+    "category": "optimizer",
+    "workload": "mixed",
+    "knobs": {
+      "cpu_operator_cost": 0.04,
+      "random_page_cost": 4.5
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_cpu_operator_cost_expression_avoidance",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "cpu_operator_cost 偏高（如 0.05~0.1）使优化器过度高估表达式/函数计算成本，倾向选择更多 I/O 的计划来减少表达式评估次数（例如放弃索引条件，走更宽的扫描）。典型现象：有函数/表达式的 WHERE 条件下，计划使用宽扫描+过滤，磁盘读增多、CPU 利用反而不高。优化方向：下调 cpu_operator_cost 到更贴近实际（常见 0.0025~0.01），必要时针对热点表达式评估场景校准后重新 ANALYZE 并观察计划。",
+    "category": "optimizer",
+    "workload": "read_only",
+    "knobs": {
+      "cpu_operator_cost": 0.006,
+      "random_page_cost": 3.5,
+      "effective_cache_size": "24GB",
+      "default_statistics_target": 200
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "unbalanced_seq_random_cost_ratio_misplan",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "seq_page_cost 与 random_page_cost 比例失衡（例如 seq_page_cost 过低或 random_page_cost 过高），导致优化器在顺序扫描与索引扫描之间做出次优选择。典型现象：部分查询总是走 Seq Scan（或相反过度走 Index Scan），EXPLAIN 估算成本与实际耗时偏离；更换数据量/缓存状态后计划波动。优化方向：联合校准 seq_page_cost 与 random_page_cost 的相对比值以匹配硬件（SSD 常见 1.0 : 1.1~1.5；HDD 可达 1.0 : 2.5~4.0），并复核关键 SQL 的计划。",
+    "category": "optimizer",
+    "workload": "write_heavy",
+    "knobs": {
+      "random_page_cost": 3.0,
+      "effective_cache_size": "24GB",
+      "effective_io_concurrency": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_cpu_index_tuple_cost_seq_scan_preference",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "cpu_index_tuple_cost 偏高（如 0.03~0.05）且 random_page_cost 也不低，使优化器显著高估索引扫描的 CPU+随机读成本，从而偏向 Seq Scan/Bitmap Heap Scan。典型现象：选择性很高的点查/短范围查询仍走全表或大范围位图，响应时间不稳定。优化方向：下调 cpu_index_tuple_cost（贴近 cpu_tuple_cost，常见 0.003~0.02），并与 random_page_cost 一起复核，确保索引访问的相对成本合理。",
+    "category": "optimizer",
+    "workload": "read_only",
+    "knobs": {
+      "cpu_index_tuple_cost": 0.006,
+      "random_page_cost": 2.5,
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_cpu_index_tuple_cost_seq_scan_preference",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "cpu_index_tuple_cost 偏高（如 0.03~0.05）且 random_page_cost 也不低，使优化器显著高估索引扫描的 CPU+随机读成本，从而偏向 Seq Scan/Bitmap Heap Scan。典型现象：选择性很高的点查/短范围查询仍走全表或大范围位图，响应时间不稳定。优化方向：下调 cpu_index_tuple_cost（贴近 cpu_tuple_cost，常见 0.003~0.02），并与 random_page_cost 一起复核，确保索引访问的相对成本合理。",
+    "category": "optimizer",
+    "workload": "write_heavy",
+    "knobs": {
+      "cpu_index_tuple_cost": 0.008,
+      "random_page_cost": 3.0,
+      "effective_cache_size": "24GB",
+      "effective_io_concurrency": 2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_default_statistics_target_skew_misestimation",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "default_statistics_target 过低（如 10~50），对高度倾斜或多峰分布列（tenant_id、status、region 等）直方图过粗，行数估计偏差大。典型现象：同一 SQL 在不同参数下计划频繁切换（Hash Join 与 Nested Loop 互换），偶发慢查询；EXPLAIN 中估计行数与实际行数偏差数十倍。优化方向：提高 default_statistics_target（如 200~500）或对热点列按列提升统计级别并 ANALYZE，稳定基数估计与连接顺序。",
+    "category": "optimizer",
+    "workload": "write_heavy",
+    "knobs": {
+      "default_statistics_target": 300,
+      "autovacuum_analyze_scale_factor": 0.05,
+      "autovacuum_analyze_threshold": 30,
+      "effective_io_concurrency": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_default_statistics_target_skew_misestimation",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "default_statistics_target 过低（如 10~50），对高度倾斜或多峰分布列（tenant_id、status、region 等）直方图过粗，行数估计偏差大。典型现象：同一 SQL 在不同参数下计划频繁切换（Hash Join 与 Nested Loop 互换），偶发慢查询；EXPLAIN 中估计行数与实际行数偏差数十倍。优化方向：提高 default_statistics_target（如 200~500）或对热点列按列提升统计级别并 ANALYZE，稳定基数估计与连接顺序。",
+    "category": "optimizer",
+    "workload": "mixed",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB",
+      "work_mem": "16MB",
+      "default_statistics_target": 50
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_join_collapse_limit_fixed_join_order",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "join_collapse_limit 设得过低（如 4），显式 JOIN 的多表查询无法进行充分的连接重排，优化器被迫按书写顺序执行。典型现象：涉及 8~10 张表的查询对书写顺序高度敏感，部分场景产生巨大的中间结果，执行耗时明显。优化方向：提高 join_collapse_limit 至 8~12 以允许重排，同时关注 planning time 变化以取得平衡。",
+    "category": "optimizer",
+    "workload": "mixed",
+    "knobs": {
+      "join_collapse_limit": 4,
+      "work_mem": "16MB",
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_join_collapse_limit_fixed_join_order",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "join_collapse_limit 设得过低（如 4），显式 JOIN 的多表查询无法进行充分的连接重排，优化器被迫按书写顺序执行。典型现象：涉及 8~10 张表的查询对书写顺序高度敏感，部分场景产生巨大的中间结果，执行耗时明显。优化方向：提高 join_collapse_limit 至 8~12 以允许重排，同时关注 planning time 变化以取得平衡。",
+    "category": "optimizer",
+    "workload": "mixed",
+    "knobs": {
+      "join_collapse_limit": 10,
+      "from_collapse_limit": 10,
+      "work_mem": "16MB",
+      "default_statistics_target": 200
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_stats_and_join_collapse_planning_bloat",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "default_statistics_target 设得很高（如 1000）且 join_collapse_limit 也偏大（如 20），在包含大量 JOIN 的 BI/报表查询中，优化器在复杂统计与大量连接顺序枚举上耗费过多时间。典型现象：Planning Time 达到数秒甚至超过执行时间；CPU 大量消耗在规划阶段。优化方向：降低 join_collapse_limit（如 8~12）限制枚举规模，同时将高统计目标只保留在少数热点/倾斜列上（其他列降低），缩短规划时间且维持计划质量。",
+    "category": "optimizer",
+    "workload": "high_concurrency",
+    "knobs": {
+      "default_statistics_target": 600,
+      "join_collapse_limit": 16,
+      "geqo_threshold": 16
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_from_collapse_plus_low_stats_join_misorder",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "from_collapse_limit 偏低（如 6）配合较低的 default_statistics_target，隐式多表查询（逗号分隔）既无法充分重写为 JOIN 树、又基数估计不准，导致错误的连接顺序与巨大的中间结果。典型现象：复杂查询偶发放大到数十 GB 的 Hash/Sort 临时数据，执行时间剧增。优化方向：提升 from_collapse_limit 使优化器可以重排隐式 JOIN，并提高关键列统计级别后 ANALYZE，必要时将隐式 FROM 重写为显式 JOIN 以获得更好的重排机会。",
+    "category": "optimizer",
+    "workload": "high_concurrency",
+    "knobs": {
+      "default_statistics_target": 200,
+      "from_collapse_limit": 14,
+      "join_collapse_limit": 14,
+      "geqo_threshold": 18,
+      "autovacuum_analyze_scale_factor": 0.05
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_stats_and_join_collapse_planning_bloat",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "default_statistics_target 设得很高（如 1000）且 join_collapse_limit 也偏大（如 20），在包含大量 JOIN 的 BI/报表查询中，优化器在复杂统计与大量连接顺序枚举上耗费过多时间。典型现象：Planning Time 达到数秒甚至超过执行时间；CPU 大量消耗在规划阶段。优化方向：降低 join_collapse_limit（如 8~12）限制枚举规模，同时将高统计目标只保留在少数热点/倾斜列上（其他列降低），缩短规划时间且维持计划质量。",
+    "category": "optimizer",
+    "workload": "write_heavy",
+    "knobs": {
+      "default_statistics_target": 150,
+      "join_collapse_limit": 10,
+      "geqo_threshold": 10
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_geqo_threshold_planning_time_explosion",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "geqo_threshold 设得过高（如 20+），在包含十余张表的查询中，优化器仍尝试穷举连接顺序，导致规划时间爆炸。典型现象：大查询 Planning Time 明显上升（数秒级），CPU 长时间停留在规划阶段；小改动（增删一表）引发规划时间非线性增长。优化方向：下调 geqo_threshold（如 12~16）让 GEQO 更早介入，并可配合适度降低 join_collapse_limit 控制枚举规模，平衡计划质量与规划时延。",
+    "category": "optimizer",
+    "workload": "mixed",
+    "knobs": {
+      "geqo_threshold": 19,
+      "join_collapse_limit": 16
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_from_collapse_plus_low_stats_join_misorder",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "from_collapse_limit 偏低（如 6）配合较低的 default_statistics_target，隐式多表查询（逗号分隔）既无法充分重写为 JOIN 树、又基数估计不准，导致错误的连接顺序与巨大的中间结果。典型现象：复杂查询偶发放大到数十 GB 的 Hash/Sort 临时数据，执行时间剧增。优化方向：提升 from_collapse_limit 使优化器可以重排隐式 JOIN，并提高关键列统计级别后 ANALYZE，必要时将隐式 FROM 重写为显式 JOIN 以获得更好的重排机会。",
+    "category": "optimizer",
+    "workload": "mixed",
+    "knobs": {
+      "from_collapse_limit": 16,
+      "join_collapse_limit": 16,
+      "default_statistics_target": 300,
+      "geqo_threshold": 16,
+      "work_mem": "32MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_random_page_cost_plus_low_stats_nested_loop_overfetch",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "random_page_cost 偏低叠加 default_statistics_target 偏低，优化器同时低估随机读与选择性，容易选出 Nested Loop + Index Scan 的计划，但实际外层行数远超预期，造成大量随机堆读。典型现象：EXPLAIN ANALYZE 显示外层实际行数远大于估计值，Index Scan 重复执行次数高、磁盘随机读飙升。优化方向：提高 random_page_cost 校正随机读成本，并提升关键过滤/连接列的统计级别后 ANALYZE，使优化器选择更合适的 Hash/Merge Join 或先降基数的连接顺序。",
+    "category": "optimizer",
+    "workload": "high_concurrency",
+    "knobs": {
+      "random_page_cost": 1.5,
+      "default_statistics_target": 50
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_geqo_threshold_planning_time_explosion",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "geqo_threshold 设得过高（如 20+），在包含十余张表的查询中，优化器仍尝试穷举连接顺序，导致规划时间爆炸。典型现象：大查询 Planning Time 明显上升（数秒级），CPU 长时间停留在规划阶段；小改动（增删一表）引发规划时间非线性增长。优化方向：下调 geqo_threshold（如 12~16）让 GEQO 更早介入，并可配合适度降低 join_collapse_limit 控制枚举规模，平衡计划质量与规划时延。",
+    "category": "optimizer",
+    "workload": "high_concurrency",
+    "knobs": {
+      "geqo_threshold": 14,
+      "join_collapse_limit": 6,
+      "from_collapse_limit": 6
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_random_page_cost_plus_low_stats_nested_loop_overfetch",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "random_page_cost 偏低叠加 default_statistics_target 偏低，优化器同时低估随机读与选择性，容易选出 Nested Loop + Index Scan 的计划，但实际外层行数远超预期，造成大量随机堆读。典型现象：EXPLAIN ANALYZE 显示外层实际行数远大于估计值，Index Scan 重复执行次数高、磁盘随机读飙升。优化方向：提高 random_page_cost 校正随机读成本，并提升关键过滤/连接列的统计级别后 ANALYZE，使优化器选择更合适的 Hash/Merge Join 或先降基数的连接顺序。",
+    "category": "optimizer",
+    "workload": "mixed",
+    "knobs": {
+      "random_page_cost": 1.5,
+      "default_statistics_target": 30
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_max_wal_size_checkpoint_storm",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "max_wal_size 设得偏低，而业务每分钟产生的 WAL 量较大，导致几分钟就触发一次 checkpoint。典型现象：日志频繁出现 “checkpoints are occurring too frequently”，pg_stat_bgwriter 中 checkpoints_req 占比偏高、buffers_checkpoint 激增，TPS 呈锯齿状波动，p95 写入延迟在 checkpoint 突发期显著上升。可优化方向：提升 max_wal_size（按峰值 WAL 产出量的数倍预留），并结合实际 RTO 要求审视 checkpoint 周期。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "max_wal_size": "3GB",
+      "checkpoint_timeout": 900,
+      "checkpoint_completion_target": 0.8,
+      "wal_buffers": "16MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_max_wal_size_checkpoint_storm",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "max_wal_size 设得偏低，而业务每分钟产生的 WAL 量较大，导致几分钟就触发一次 checkpoint。典型现象：日志频繁出现 “checkpoints are occurring too frequently”，pg_stat_bgwriter 中 checkpoints_req 占比偏高、buffers_checkpoint 激增，TPS 呈锯齿状波动，p95 写入延迟在 checkpoint 突发期显著上升。可优化方向：提升 max_wal_size（按峰值 WAL 产出量的数倍预留），并结合实际 RTO 要求审视 checkpoint 周期。",
+    "category": "wal",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_wal_size": "3GB",
+      "checkpoint_timeout": 900,
+      "checkpoint_completion_target": 0.8,
+      "wal_buffers": "32MB",
+      "wal_compression": "on"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_min_wal_size_wal_churn",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "min_wal_size 过低，系统在平稳负载下依然频繁回收并重新创建 WAL 段文件，造成不必要的文件系统元数据抖动和额外 fsync。典型现象：日志里 WAL segment “created/recycled” 交替出现；pg_wal 目录中文件数上下波动，系统态 CPU（sys）占比升高但业务 TPS 无显著提升。可优化方向：将 min_wal_size 提高到覆盖一段时间内的常规 WAL 水位，减少段文件的回收/创建频率。",
+    "category": "wal",
+    "workload": "write_heavy",
+    "knobs": {
+      "min_wal_size": "768MB",
+      "max_wal_size": "2GB",
+      "checkpoint_completion_target": 0.8,
+      "wal_buffers": "16MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_min_wal_size_wal_churn",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "min_wal_size 过低，系统在平稳负载下依然频繁回收并重新创建 WAL 段文件，造成不必要的文件系统元数据抖动和额外 fsync。典型现象：日志里 WAL segment “created/recycled” 交替出现；pg_wal 目录中文件数上下波动，系统态 CPU（sys）占比升高但业务 TPS 无显著提升。可优化方向：将 min_wal_size 提高到覆盖一段时间内的常规 WAL 水位，减少段文件的回收/创建频率。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "min_wal_size": "768MB",
+      "max_wal_size": "2GB",
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "excessive_commit_delay_latency_penalty",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "为追求 group commit，将 commit_delay 设得较高（例如数千微秒），但实际并发度不足或提交节奏分散，导致大多数事务白白等待。典型现象：平均 TPS 变化不大或略降，而 p95/p99 事务提交延迟明显升高；即使磁盘不繁忙，响应时间仍偏长。可优化方向：将 commit_delay 调低或设为 0；仅在高并发且单次提交代价高（慢 fsync）的场景尝试小幅延迟（如 100–300µs）。",
+    "category": "wal",
+    "workload": "high_concurrency",
+    "knobs": {
+      "commit_delay": 200,
+      "wal_buffers": "16MB",
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "excessive_commit_delay_latency_penalty",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "为追求 group commit，将 commit_delay 设得较高（例如数千微秒），但实际并发度不足或提交节奏分散，导致大多数事务白白等待。典型现象：平均 TPS 变化不大或略降，而 p95/p99 事务提交延迟明显升高；即使磁盘不繁忙，响应时间仍偏长。可优化方向：将 commit_delay 调低或设为 0；仅在高并发且单次提交代价高（慢 fsync）的场景尝试小幅延迟（如 100–300µs）。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "commit_delay": 0,
+      "wal_buffers": "16MB",
+      "max_wal_size": "2GB",
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "no_wal_compression_fpi_bandwidth_pressure",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "wal_compression 关闭，在频繁 checkpoint 的负载下，大量首写产生的 full-page image（FPI）原样写入 WAL，放大带宽消耗并推高存储写入放大。典型现象：WAL 生成速率（pg_stat_wal）异常高，checkpoint 刚过后 WAL 带宽攀升；SSD/NVMe 接近饱和时 TPS 抖动。可优化方向：开启 wal_compression 以压缩 FPI，明显降低 WAL 体积；同时配合更平滑的 checkpoint 策略进一步减轻 FPI 峰值。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "wal_compression": "on",
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "3GB",
+      "min_wal_size": "512MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "no_wal_compression_fpi_bandwidth_pressure",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "wal_compression 关闭，在频繁 checkpoint 的负载下，大量首写产生的 full-page image（FPI）原样写入 WAL，放大带宽消耗并推高存储写入放大。典型现象：WAL 生成速率（pg_stat_wal）异常高，checkpoint 刚过后 WAL 带宽攀升；SSD/NVMe 接近饱和时 TPS 抖动。可优化方向：开启 wal_compression 以压缩 FPI，明显降低 WAL 体积；同时配合更平滑的 checkpoint 策略进一步减轻 FPI 峰值。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "max_wal_size": "256MB",
+      "checkpoint_timeout": 180,
+      "checkpoint_completion_target": 0.4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "short_checkpoint_timeout_fpi_burst",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "checkpoint_timeout 设得过短，叠加 wal_compression 关闭，使得每次 checkpoint 之后的大量首写页面以未压缩的 FPI 形式写入 WAL，形成周期性带宽尖峰。典型现象：开启 log_checkpoints 后可见 checkpoint 间隔过密且写入时间与同步时间波动大；负载周期性“卡顿”。可优化方向：拉长 checkpoint_timeout（如 10–15 分钟，结合负载与 RTO），并开启 wal_compression 以降低 FPI 体积，平滑 WAL 带宽。",
+    "category": "wal",
+    "workload": "write_heavy",
+    "knobs": {
+      "checkpoint_timeout": 180,
+      "checkpoint_completion_target": 0.3
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "zero_commit_delay_no_group_commit_benefit",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "在大量微小事务、同步提交（synchronous_commit=on）的场景中，commit_delay=0 使每次提交都更可能触发独立的 WAL 刷盘，造成高频小刷写。典型现象：每秒提交次数很高但单次写入粒度小，存储队列深度起伏、fsync 次数偏多，整体 TPS 受限。可优化方向：在保证延迟可接受的前提下设置一个很小的 commit_delay（如 100–300µs）以增加可聚合的提交批量，或对非关键事务考虑降低同步级别。",
+    "category": "wal",
+    "workload": "write_heavy",
+    "knobs": {
+      "commit_delay": 200,
+      "wal_buffers": "16MB",
+      "max_wal_size": "2GB",
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "short_checkpoint_timeout_fpi_burst",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "checkpoint_timeout 设得过短，叠加 wal_compression 关闭，使得每次 checkpoint 之后的大量首写页面以未压缩的 FPI 形式写入 WAL，形成周期性带宽尖峰。典型现象：开启 log_checkpoints 后可见 checkpoint 间隔过密且写入时间与同步时间波动大；负载周期性“卡顿”。可优化方向：拉长 checkpoint_timeout（如 10–15 分钟，结合负载与 RTO），并开启 wal_compression 以降低 FPI 体积，平滑 WAL 带宽。",
+    "category": "wal",
+    "workload": "write_heavy",
+    "knobs": {
+      "checkpoint_timeout": 120,
+      "checkpoint_completion_target": 0.4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "sync_commit_remote_apply_tail_latency",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "synchronous_commit 设为 remote_apply 或严格同步复制，主库提交需等待同步备库回放完成。当备库因 I/O 或回放压力增大而滞后时，主库提交尾延迟显著增加。典型现象：客户端偶发提交卡顿，pg_stat_replication 显示 apply 延迟拉大且与主库 p99 提交延迟同步上升。可优化方向：将 synchronous_commit 调整为 remote_write/local（在可接受的持久性范围内），或仅对关键事务使用更严格级别。",
+    "category": "wal",
+    "workload": "write_heavy",
+    "knobs": {
+      "synchronous_commit": "remote_write",
+      "wal_compression": "on",
+      "max_wal_size": "3GB",
+      "checkpoint_timeout": 900,
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "zero_commit_delay_no_group_commit_benefit",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "在大量微小事务、同步提交（synchronous_commit=on）的场景中，commit_delay=0 使每次提交都更可能触发独立的 WAL 刷盘，造成高频小刷写。典型现象：每秒提交次数很高但单次写入粒度小，存储队列深度起伏、fsync 次数偏多，整体 TPS 受限。可优化方向：在保证延迟可接受的前提下设置一个很小的 commit_delay（如 100–300µs）以增加可聚合的提交批量，或对非关键事务考虑降低同步级别。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "commit_delay": 200,
+      "wal_buffers": "16MB",
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "sync_commit_remote_apply_tail_latency",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "synchronous_commit 设为 remote_apply 或严格同步复制，主库提交需等待同步备库回放完成。当备库因 I/O 或回放压力增大而滞后时，主库提交尾延迟显著增加。典型现象：客户端偶发提交卡顿，pg_stat_replication 显示 apply 延迟拉大且与主库 p99 提交延迟同步上升。可优化方向：将 synchronous_commit 调整为 remote_write/local（在可接受的持久性范围内），或仅对关键事务使用更严格级别。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "synchronous_commit": "remote_write",
+      "wal_buffers": "16MB",
+      "max_wal_size": "2GB",
+      "checkpoint_completion_target": 0.8,
+      "wal_compression": "on"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_checkpoint_completion_target_io_spikes",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "checkpoint_completion_target 偏低（例如 0.3–0.5），导致 checkpoint 写入过于集中，产生 I/O 峰值并干扰前台事务。典型现象：checkpoint 期间数据文件写入和 fsync 峰值明显，TPS 与延迟呈周期性波动。可优化方向：提高 checkpoint_completion_target（如 0.7–0.9）并配合合理的 checkpoint_timeout，使写入更均匀、峰值更低。",
+    "category": "wal",
+    "workload": "high_concurrency",
+    "knobs": {
+      "checkpoint_completion_target": 0.8,
+      "checkpoint_timeout": 900,
+      "max_wal_size": "2GB",
+      "bgwriter_lru_maxpages": 300,
+      "bgwriter_lru_multiplier": 2.5
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_checkpoint_completion_target_io_spikes",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "checkpoint_completion_target 偏低（例如 0.3–0.5），导致 checkpoint 写入过于集中，产生 I/O 峰值并干扰前台事务。典型现象：checkpoint 期间数据文件写入和 fsync 峰值明显，TPS 与延迟呈周期性波动。可优化方向：提高 checkpoint_completion_target（如 0.7–0.9）并配合合理的 checkpoint_timeout，使写入更均匀、峰值更低。",
+    "category": "wal",
+    "workload": "mixed",
+    "knobs": {
+      "checkpoint_completion_target": 0.85,
+      "checkpoint_timeout": 900,
+      "max_wal_size": "2GB",
+      "bgwriter_lru_maxpages": 200
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_max_wal_size_long_recovery",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "max_wal_size 设得过大，同时 checkpoint_timeout 也偏长且 wal_compression 关闭，使 WAL 长时间累积、体量巨大。一旦崩溃或重启，恢复需要扫描和重放大量 WAL，恢复时间（RTO）显著拉长。典型现象：pg_wal 占用磁盘空间持续攀升；偶发重启后数据库长时间处于恢复阶段。可优化方向：将 max_wal_size 调整到与恢复目标与磁盘预算相匹配的水平，适度缩短 checkpoint_timeout，并开启 wal_compression 降低 WAL 体积。",
+    "category": "wal",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_wal_size": "768MB",
+      "checkpoint_timeout": 240,
+      "wal_compression": "on",
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_max_wal_size_long_recovery",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "max_wal_size 设得过大，同时 checkpoint_timeout 也偏长且 wal_compression 关闭，使 WAL 长时间累积、体量巨大。一旦崩溃或重启，恢复需要扫描和重放大量 WAL，恢复时间（RTO）显著拉长。典型现象：pg_wal 占用磁盘空间持续攀升；偶发重启后数据库长时间处于恢复阶段。可优化方向：将 max_wal_size 调整到与恢复目标与磁盘预算相匹配的水平，适度缩短 checkpoint_timeout，并开启 wal_compression 降低 WAL 体积。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "max_wal_size": "768MB",
+      "checkpoint_timeout": 180,
+      "wal_compression": "on",
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "checkpoint_stalls_with_sync_commit_and_small_maxwal",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "max_wal_size 偏小叠加 checkpoint_completion_target 偏低，导致频繁且突发的 checkpoint；同时 synchronous_commit=on 使提交在高峰期更易受 I/O 抖动影响。典型现象：日志有大量“requested checkpoint”，checkpoint 写入与同步时间占比高；业务侧在 checkpoint 突发期提交延迟显著上扬。可优化方向：提高 max_wal_size，增大 checkpoint_completion_target 以拉平写入；若业务允许，针对部分事务降低同步级别减小提交时延。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "max_wal_size": "3GB",
+      "checkpoint_completion_target": 0.8,
+      "checkpoint_timeout": 900,
+      "synchronous_commit": "local"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "checkpoint_stalls_with_sync_commit_and_small_maxwal",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "max_wal_size 偏小叠加 checkpoint_completion_target 偏低，导致频繁且突发的 checkpoint；同时 synchronous_commit=on 使提交在高峰期更易受 I/O 抖动影响。典型现象：日志有大量“requested checkpoint”，checkpoint 写入与同步时间占比高；业务侧在 checkpoint 突发期提交延迟显著上扬。可优化方向：提高 max_wal_size，增大 checkpoint_completion_target 以拉平写入；若业务允许，针对部分事务降低同步级别减小提交时延。",
+    "category": "wal",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_wal_size": "512MB",
+      "checkpoint_completion_target": 0.3
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "cpu_bound_with_wal_compression_on",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "wal_compression=on 在 CPU 较为紧张且更新触发大量首写页面的场景，会把瓶颈从存储带宽转移到 CPU 压缩开销，整体吞吐不升反降。典型现象：系统 CPU 使用率（user）升高、walwriter 与 checkpointer 占用明显，WAL 带宽下降但 TPS 未改善或下降。可优化方向：在 CPU 受限场景关闭 wal_compression（或采用更高效实现的压缩选项/版本），并通过拉长 checkpoint_timeout、提高 checkpoint_completion_target 来降低 FPI 产生频率。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "wal_compression": "on",
+      "checkpoint_timeout": 120,
+      "checkpoint_completion_target": 0.4,
+      "max_wal_size": "256MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "cpu_bound_with_wal_compression_on",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "wal_compression=on 在 CPU 较为紧张且更新触发大量首写页面的场景，会把瓶颈从存储带宽转移到 CPU 压缩开销，整体吞吐不升反降。典型现象：系统 CPU 使用率（user）升高、walwriter 与 checkpointer 占用明显，WAL 带宽下降但 TPS 未改善或下降。可优化方向：在 CPU 受限场景关闭 wal_compression（或采用更高效实现的压缩选项/版本），并通过拉长 checkpoint_timeout、提高 checkpoint_completion_target 来降低 FPI 产生频率。",
+    "category": "wal",
+    "workload": "mixed",
+    "knobs": {
+      "wal_compression": "on",
+      "checkpoint_timeout": 240,
+      "checkpoint_completion_target": 0.4,
+      "max_wal_size": "768MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "etl_burst_with_small_maxwal_and_strict_durability",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "批量 ETL 突发期间，max_wal_size 偏小导致周期性“顶到上限→checkpoint→I/O 峰值”，同时 synchronous_commit=on 严格持久化加剧提交等待，commit_delay=0 使提交难以聚合。典型现象：ETL 窗口内吞吐呈显著锯齿，pg_stat_bgwriter 的 checkpoints_req 增多且 checkpoint_sync_time 偏高，提交 p99 延迟在峰值期飙升。可优化方向：提升 max_wal_size 以覆盖 ETL 峰值窗口、提高 checkpoint_completion_target 并适度拉长 checkpoint_timeout；对可接受的 ETL 步骤下调 synchronous_commit 或配置小幅 commit_delay 以改善聚合提交。",
+    "category": "wal",
+    "workload": "mixed",
+    "knobs": {
+      "max_wal_size": "256MB",
+      "checkpoint_completion_target": 0.4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "etl_burst_with_small_maxwal_and_strict_durability",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "批量 ETL 突发期间，max_wal_size 偏小导致周期性“顶到上限→checkpoint→I/O 峰值”，同时 synchronous_commit=on 严格持久化加剧提交等待，commit_delay=0 使提交难以聚合。典型现象：ETL 窗口内吞吐呈显著锯齿，pg_stat_bgwriter 的 checkpoints_req 增多且 checkpoint_sync_time 偏高，提交 p99 延迟在峰值期飙升。可优化方向：提升 max_wal_size 以覆盖 ETL 峰值窗口、提高 checkpoint_completion_target 并适度拉长 checkpoint_timeout；对可接受的 ETL 步骤下调 synchronous_commit 或配置小幅 commit_delay 以改善聚合提交。",
+    "category": "wal",
+    "workload": "read_only",
+    "knobs": {
+      "max_wal_size": "512MB",
+      "checkpoint_completion_target": 0.3
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_workers_vacuum_queueing",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "autovacuum_max_workers 设置偏低（例如保持默认 3，而实例有数百张活跃表）。典型现象：pg_stat_all_tables 中多张表的 n_dead_tup 持续上升、last_autovacuum 很久以前，autovacuum_vacuum_count 增长缓慢；业务侧 UPDATE/DELETE/SELECT 明显变慢（堆和索引膨胀带来的更多随机 I/O）；高峰过后仍长期存在清理积压。优化方向：提高 autovacuum_max_workers（可配合按大表设置更积极的 per-table 触发条件），以提升 vacuum 并发度并缩短等待队列。",
+    "category": "vacuum",
+    "workload": "read_only",
+    "knobs": {
+      "autovacuum_max_workers": 6,
+      "autovacuum_naptime": 30,
+      "autovacuum_vacuum_scale_factor": 0.08,
+      "autovacuum_vacuum_threshold": 300,
+      "maintenance_work_mem": "512MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_workers_vacuum_queueing",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "autovacuum_max_workers 设置偏低（例如保持默认 3，而实例有数百张活跃表）。典型现象：pg_stat_all_tables 中多张表的 n_dead_tup 持续上升、last_autovacuum 很久以前，autovacuum_vacuum_count 增长缓慢；业务侧 UPDATE/DELETE/SELECT 明显变慢（堆和索引膨胀带来的更多随机 I/O）；高峰过后仍长期存在清理积压。优化方向：提高 autovacuum_max_workers（可配合按大表设置更积极的 per-table 触发条件），以提升 vacuum 并发度并缩短等待队列。",
+    "category": "vacuum",
+    "workload": "mixed",
+    "knobs": {
+      "autovacuum_max_workers": 6,
+      "autovacuum_naptime": 30,
+      "autovacuum_vacuum_scale_factor": 0.05,
+      "autovacuum_analyze_scale_factor": 0.05,
+      "maintenance_work_mem": "512MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_workers_io_contention",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "autovacuum_max_workers 设得过高（如 8~12）且磁盘带宽/CPU 不足。典型现象：pg_stat_activity 同时存在大量“autovacuum: VACUUM”会话；iowait 升高、后台 I/O 吞吐飙升；查询延迟在 autovacuum 活动期间显著抖动，尤其是需要全表/索引扫描的报表查询。优化方向：下调 autovacuum_max_workers，控制并发 vacuum 数量，让 I/O 和 CPU 为前台查询让路。",
+    "category": "vacuum",
+    "workload": "high_concurrency",
+    "knobs": {
+      "autovacuum_max_workers": 8,
+      "autovacuum_naptime": 30
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_workers_io_contention",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "autovacuum_max_workers 设得过高（如 8~12）且磁盘带宽/CPU 不足。典型现象：pg_stat_activity 同时存在大量“autovacuum: VACUUM”会话；iowait 升高、后台 I/O 吞吐飙升；查询延迟在 autovacuum 活动期间显著抖动，尤其是需要全表/索引扫描的报表查询。优化方向：下调 autovacuum_max_workers，控制并发 vacuum 数量，让 I/O 和 CPU 为前台查询让路。",
+    "category": "vacuum",
+    "workload": "high_concurrency",
+    "knobs": {
+      "autovacuum_max_workers": 6,
+      "autovacuum_naptime": 45
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "long_naptime_slow_autovacuum",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "autovacuum_naptime 偏高（如 10min），导致巡检启动不够及时。典型现象：写入突增后很久（多次 naptime 周期）autovacuum 仍未触发，n_dead_tup 在此期间迅速积累；突增结束后才集中清理，业务体验“先堆积、后抖动”。优化方向：降低 autovacuum_naptime（如 1min），使启动器更快地发现需要清理的表。",
+    "category": "vacuum",
+    "workload": "write_heavy",
+    "knobs": {
+      "autovacuum_naptime": 30,
+      "autovacuum_max_workers": 5,
+      "autovacuum_vacuum_scale_factor": 0.1,
+      "autovacuum_analyze_scale_factor": 0.05
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "long_naptime_slow_autovacuum",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "autovacuum_naptime 偏高（如 10min），导致巡检启动不够及时。典型现象：写入突增后很久（多次 naptime 周期）autovacuum 仍未触发，n_dead_tup 在此期间迅速积累；突增结束后才集中清理，业务体验“先堆积、后抖动”。优化方向：降低 autovacuum_naptime（如 1min），使启动器更快地发现需要清理的表。",
+    "category": "vacuum",
+    "workload": "write_heavy",
+    "knobs": {
+      "autovacuum_naptime": 30,
+      "autovacuum_max_workers": 5,
+      "autovacuum_vacuum_scale_factor": 0.1,
+      "maintenance_work_mem": "512MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_analyze_scale_stale_stats",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "autovacuum_analyze_scale_factor 偏高（如 0.2~0.3），使 ANALYZE 触发过于保守。典型现象：n_mod_since_analyze 长期较高、last_analyze 时间久远；执行计划依赖过时统计信息，出现错误连接顺序、错误连接方式（Nested Loop/Hash Join 误选）或错误选择索引，查询偶发性慢。优化方向：下调 autovacuum_analyze_scale_factor（对热点大表或倾斜列可更低），更及时刷新统计信息。",
+    "category": "vacuum",
+    "workload": "high_concurrency",
+    "knobs": {
+      "autovacuum_analyze_scale_factor": 0.05,
+      "autovacuum_analyze_threshold": 30,
+      "autovacuum_naptime": 30,
+      "autovacuum_max_workers": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_analyze_scale_stale_stats",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "autovacuum_analyze_scale_factor 偏高（如 0.2~0.3），使 ANALYZE 触发过于保守。典型现象：n_mod_since_analyze 长期较高、last_analyze 时间久远；执行计划依赖过时统计信息，出现错误连接顺序、错误连接方式（Nested Loop/Hash Join 误选）或错误选择索引，查询偶发性慢。优化方向：下调 autovacuum_analyze_scale_factor（对热点大表或倾斜列可更低），更及时刷新统计信息。",
+    "category": "vacuum",
+    "workload": "read_only",
+    "knobs": {
+      "autovacuum_analyze_scale_factor": 0.25,
+      "autovacuum_analyze_threshold": 200
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_naptime_low_vacuum_threshold_chatter",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "autovacuum_naptime 很低（如 30s）且 autovacuum_vacuum_threshold 也很低（如 20），导致小表在少量变更后就频繁触发 vacuum。典型现象：系统中大量短促的 VACUUM 反复出现，pg_stat_activity 里 autovacuum 进出频繁；CPU 出现调度开销，I/O 呈碎片化；大表的清理反而被挤占。优化方向：适度提高 autovacuum_vacuum_threshold 或放宽 naptime；对仅有少量写入的小表可提高阈值以减少“过度打扫”。",
+    "category": "vacuum",
+    "workload": "high_concurrency",
+    "knobs": {
+      "autovacuum_naptime": 120,
+      "autovacuum_vacuum_threshold": 200,
+      "autovacuum_vacuum_scale_factor": 0.15,
+      "autovacuum_max_workers": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_naptime_low_vacuum_threshold_chatter",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "autovacuum_naptime 很低（如 30s）且 autovacuum_vacuum_threshold 也很低（如 20），导致小表在少量变更后就频繁触发 vacuum。典型现象：系统中大量短促的 VACUUM 反复出现，pg_stat_activity 里 autovacuum 进出频繁；CPU 出现调度开销，I/O 呈碎片化；大表的清理反而被挤占。优化方向：适度提高 autovacuum_vacuum_threshold 或放宽 naptime；对仅有少量写入的小表可提高阈值以减少“过度打扫”。",
+    "category": "vacuum",
+    "workload": "high_concurrency",
+    "knobs": {
+      "autovacuum_naptime": 120,
+      "autovacuum_vacuum_threshold": 200,
+      "autovacuum_max_workers": 4,
+      "maintenance_work_mem": "256MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_scale_low_threshold_hot_table_overvacuum",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "autovacuum_vacuum_scale_factor 和 autovacuum_vacuum_threshold 同时偏低，使中大体量的热点表几乎持续被 vacuum。典型现象：热点表在 pg_stat_progress_vacuum 中长时间可见，VACUUM 几乎刚结束又被重启；后台 I/O 占用高，用户查询落盘概率上升；但表并没有明显膨胀。优化方向：提高 autovacuum_vacuum_scale_factor 或阈值（建议按表大小差异化配置），避免对中大表过于频繁的清理循环。",
+    "category": "vacuum",
+    "workload": "mixed",
+    "knobs": {
+      "autovacuum_vacuum_scale_factor": 0.25,
+      "autovacuum_vacuum_threshold": 200,
+      "autovacuum_naptime": 120
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_scale_low_threshold_hot_table_overvacuum",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "autovacuum_vacuum_scale_factor 和 autovacuum_vacuum_threshold 同时偏低，使中大体量的热点表几乎持续被 vacuum。典型现象：热点表在 pg_stat_progress_vacuum 中长时间可见，VACUUM 几乎刚结束又被重启；后台 I/O 占用高，用户查询落盘概率上升；但表并没有明显膨胀。优化方向：提高 autovacuum_vacuum_scale_factor 或阈值（建议按表大小差异化配置），避免对中大表过于频繁的清理循环。",
+    "category": "vacuum",
+    "workload": "mixed",
+    "knobs": {
+      "autovacuum_vacuum_scale_factor": 0.3,
+      "autovacuum_vacuum_threshold": 500,
+      "autovacuum_naptime": 120
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_scale_high_threshold_deadtuple_bloat",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "autovacuum_vacuum_scale_factor 与 autovacuum_vacuum_threshold 同时偏高，导致触发点过晚。典型现象：大表需要累积海量变更才触发 vacuum，n_dead_tup 长期偏高；堆和索引都显著膨胀，扫描同一业务表的查询耗时随时间上升；vacuum 启动后一次清理很重，I/O 高峰明显。优化方向：同时下调 scale_factor 和阈值（对大表尤需更积极），让清理更均匀，降低峰值 I/O 与表膨胀。",
+    "category": "vacuum",
+    "workload": "high_concurrency",
+    "knobs": {
+      "autovacuum_vacuum_scale_factor": 0.05,
+      "autovacuum_vacuum_threshold": 20,
+      "autovacuum_naptime": 30,
+      "autovacuum_max_workers": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_analyze_scale_low_threshold_overanalyze",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "autovacuum_analyze_scale_factor 与 autovacuum_analyze_threshold 都较低，导致 ANALYZE 过于频繁。典型现象：pg_stat_activity 中经常可见 autovacuum: ANALYZE；CPU 被采样/统计开销占用，计划频繁变化引发尾延迟抖动；在写入高峰期，ANALYZE 与 VACUUM 争抢 autovacuum worker。优化方向：提高 autovacuum_analyze_scale_factor 或 analyze_threshold，对变化不大的表降低统计刷新频率。",
+    "category": "vacuum",
+    "workload": "read_only",
+    "knobs": {
+      "autovacuum_analyze_scale_factor": 0.2,
+      "autovacuum_analyze_threshold": 200
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_scale_high_threshold_deadtuple_bloat",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "autovacuum_vacuum_scale_factor 与 autovacuum_vacuum_threshold 同时偏高，导致触发点过晚。典型现象：大表需要累积海量变更才触发 vacuum，n_dead_tup 长期偏高；堆和索引都显著膨胀，扫描同一业务表的查询耗时随时间上升；vacuum 启动后一次清理很重，I/O 高峰明显。优化方向：同时下调 scale_factor 和阈值（对大表尤需更积极），让清理更均匀，降低峰值 I/O 与表膨胀。",
+    "category": "vacuum",
+    "workload": "mixed",
+    "knobs": {
+      "autovacuum_vacuum_threshold": 30,
+      "autovacuum_vacuum_scale_factor": 0.05,
+      "autovacuum_max_workers": 4,
+      "autovacuum_naptime": 30
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_analyze_scale_low_threshold_overanalyze",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "autovacuum_analyze_scale_factor 与 autovacuum_analyze_threshold 都较低，导致 ANALYZE 过于频繁。典型现象：pg_stat_activity 中经常可见 autovacuum: ANALYZE；CPU 被采样/统计开销占用，计划频繁变化引发尾延迟抖动；在写入高峰期，ANALYZE 与 VACUUM 争抢 autovacuum worker。优化方向：提高 autovacuum_analyze_scale_factor 或 analyze_threshold，对变化不大的表降低统计刷新频率。",
+    "category": "vacuum",
+    "workload": "mixed",
+    "knobs": {
+      "autovacuum_analyze_threshold": 200,
+      "autovacuum_analyze_scale_factor": 0.25,
+      "autovacuum_max_workers": 4,
+      "maintenance_work_mem": "512MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_workers_long_naptime_high_scale_burst_backlog",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "autovacuum_max_workers 偏低 + autovacuum_naptime 偏长 + autovacuum_vacuum_scale_factor 偏高，导致写入突增后清理滞后。典型现象：一次导入/更新风暴后，多表 n_dead_tup 暴涨且长时间得不到处理；后续查询明显变慢；当终于开始清理时出现长时间重度 VACUUM 占用 I/O。优化方向：提升 autovacuum_max_workers、缩短 naptime 并下调 scale_factor，使系统能更快地识别和并行消化突发产生的死元组。",
+    "category": "vacuum",
+    "workload": "read_only",
+    "knobs": {
+      "autovacuum_max_workers": 2,
+      "autovacuum_naptime": 180,
+      "autovacuum_vacuum_scale_factor": 0.3
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_workers_long_naptime_high_scale_burst_backlog",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "autovacuum_max_workers 偏低 + autovacuum_naptime 偏长 + autovacuum_vacuum_scale_factor 偏高，导致写入突增后清理滞后。典型现象：一次导入/更新风暴后，多表 n_dead_tup 暴涨且长时间得不到处理；后续查询明显变慢；当终于开始清理时出现长时间重度 VACUUM 占用 I/O。优化方向：提升 autovacuum_max_workers、缩短 naptime 并下调 scale_factor，使系统能更快地识别和并行消化突发产生的死元组。",
+    "category": "vacuum",
+    "workload": "read_only",
+    "knobs": {
+      "autovacuum_max_workers": 2,
+      "autovacuum_naptime": 180,
+      "autovacuum_vacuum_scale_factor": 0.3
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_workers_low_naptime_low_scale_storm",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "autovacuum_max_workers 偏高 + autovacuum_naptime 很低 + autovacuum_vacuum_scale_factor 偏低，形成 autovacuum “风暴”。典型现象：大量 VACUUM 并行启动、持续扫描，造成磁盘队列深度升高、查询延迟显著抖动；autovacuum 几乎常驻且难以完成全局收敛。优化方向：降低 autovacuum_max_workers、适度提高 naptime，并上调 scale_factor，减小触发频率与并发度，恢复 I/O 平稳性。",
+    "category": "vacuum",
+    "workload": "high_concurrency",
+    "knobs": {
+      "autovacuum_max_workers": 2,
+      "autovacuum_naptime": 120,
+      "autovacuum_vacuum_scale_factor": 0.3
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_workers_low_naptime_low_scale_storm",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "autovacuum_max_workers 偏高 + autovacuum_naptime 很低 + autovacuum_vacuum_scale_factor 偏低，形成 autovacuum “风暴”。典型现象：大量 VACUUM 并行启动、持续扫描，造成磁盘队列深度升高、查询延迟显著抖动；autovacuum 几乎常驻且难以完成全局收敛。优化方向：降低 autovacuum_max_workers、适度提高 naptime，并上调 scale_factor，减小触发频率与并发度，恢复 I/O 平稳性。",
+    "category": "vacuum",
+    "workload": "read_only",
+    "knobs": {
+      "autovacuum_max_workers": 2,
+      "autovacuum_naptime": 90,
+      "autovacuum_vacuum_scale_factor": 0.3
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_threshold_high_scale_high_analyze_scale_imbalance",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "全局参数失衡：autovacuum_vacuum_threshold 偏低（小表易被频繁清理）+ autovacuum_vacuum_scale_factor 偏高（大表触发过晚）+ autovacuum_analyze_scale_factor 偏高（统计信息滞后）。典型现象：小表频繁 VACUUM 带来开销噪声；大表 n_dead_tup 与膨胀上升，查询对大表越来越慢；统计信息长期滞后导致优化器在大表上误选计划。优化方向：提高小表的 vacuum 阈值、降低大表的 scale_factor，并下调 analyze_scale_factor（可通过 per-table reloptions 精准匹配大小表差异）。",
+    "category": "vacuum",
+    "workload": "high_concurrency",
+    "knobs": {
+      "autovacuum_vacuum_threshold": 30,
+      "autovacuum_vacuum_scale_factor": 0.35,
+      "autovacuum_analyze_scale_factor": 0.2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_threshold_high_scale_high_analyze_scale_imbalance",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "全局参数失衡：autovacuum_vacuum_threshold 偏低（小表易被频繁清理）+ autovacuum_vacuum_scale_factor 偏高（大表触发过晚）+ autovacuum_analyze_scale_factor 偏高（统计信息滞后）。典型现象：小表频繁 VACUUM 带来开销噪声；大表 n_dead_tup 与膨胀上升，查询对大表越来越慢；统计信息长期滞后导致优化器在大表上误选计划。优化方向：提高小表的 vacuum 阈值、降低大表的 scale_factor，并下调 analyze_scale_factor（可通过 per-table reloptions 精准匹配大小表差异）。",
+    "category": "vacuum",
+    "workload": "mixed",
+    "knobs": {
+      "autovacuum_vacuum_threshold": 20,
+      "autovacuum_vacuum_scale_factor": 0.4,
+      "autovacuum_analyze_scale_factor": 0.25
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_analyze_threshold_scale_high_naptime_high_vacuum_threshold_staleness_bloat",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "autovacuum_analyze_threshold 与 autovacuum_analyze_scale_factor 偏高导致统计信息长期过时；同时 autovacuum_naptime 偏高与 autovacuum_vacuum_threshold 偏高使清理触发延迟。典型现象：优化器基于过时统计信息选择次优连接/访问路径，放大 I/O；写多读多表的 n_dead_tup 和膨胀持续上升；一旦触发 VACUUM/ANALYZE，出现周期性的重负载波峰。优化方向：降低 analyze_threshold/scale_factor 以更及时更新统计信息，缩短 naptime 并降低 vacuum_threshold，使清理与统计更新更均匀、更前置。",
+    "category": "vacuum",
+    "workload": "read_only",
+    "knobs": {
+      "autovacuum_analyze_threshold": 30,
+      "autovacuum_analyze_scale_factor": 0.05,
+      "autovacuum_naptime": 20,
+      "autovacuum_vacuum_threshold": 30,
+      "autovacuum_max_workers": 5
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_analyze_threshold_scale_high_naptime_high_vacuum_threshold_staleness_bloat",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "autovacuum_analyze_threshold 与 autovacuum_analyze_scale_factor 偏高导致统计信息长期过时；同时 autovacuum_naptime 偏高与 autovacuum_vacuum_threshold 偏高使清理触发延迟。典型现象：优化器基于过时统计信息选择次优连接/访问路径，放大 I/O；写多读多表的 n_dead_tup 和膨胀持续上升；一旦触发 VACUUM/ANALYZE，出现周期性的重负载波峰。优化方向：降低 analyze_threshold/scale_factor 以更及时更新统计信息，缩短 naptime 并降低 vacuum_threshold，使清理与统计更新更均匀、更前置。",
+    "category": "vacuum",
+    "workload": "read_only",
+    "knobs": {
+      "autovacuum_naptime": 15,
+      "autovacuum_vacuum_threshold": 20,
+      "autovacuum_analyze_threshold": 20,
+      "autovacuum_analyze_scale_factor": 0.05
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_per_gather_underutilized_scan",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "max_parallel_workers_per_gather 设置偏低（如 0~1），大表顺序扫描/聚合虽可并行但只能启动 0~1 个 worker。典型现象：EXPLAIN 中出现 Gather 但 Workers Planned/Launched 很小；CPU 利用率不高且单查询耗时长。通过上调 max_parallel_workers_per_gather（如 2→4/8）可显著缩短全表扫描与聚合时间。",
+    "category": "parallel",
+    "workload": "high_concurrency",
+    "knobs": {
+      "shared_buffers": "2GB",
+      "effective_io_concurrency": 4,
+      "max_parallel_workers_per_gather": 1,
+      "max_parallel_workers": 12
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_per_gather_underutilized_scan",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "max_parallel_workers_per_gather 设置偏低（如 0~1），大表顺序扫描/聚合虽可并行但只能启动 0~1 个 worker。典型现象：EXPLAIN 中出现 Gather 但 Workers Planned/Launched 很小；CPU 利用率不高且单查询耗时长。通过上调 max_parallel_workers_per_gather（如 2→4/8）可显著缩短全表扫描与聚合时间。",
+    "category": "parallel",
+    "workload": "read_only",
+    "knobs": {
+      "max_parallel_workers_per_gather": 1,
+      "work_mem": "16MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_global_worker_pool_capacity",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "max_parallel_workers 过低（例如仅 4~8）而实例有多并发分析查询，导致全局并行 worker 池不足。典型现象：多个查询 EXPLAIN 显示 Workers Planned > Workers Launched，日志偶见 parallel workers not available；CPU 核心空闲但查询执行接近串行。上调 max_parallel_workers（配合核心数）可提升整体吞吐。",
+    "category": "parallel",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_workers_per_gather": 4,
+      "max_parallel_maintenance_workers": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_global_worker_pool_capacity",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "max_parallel_workers 过低（例如仅 4~8）而实例有多并发分析查询，导致全局并行 worker 池不足。典型现象：多个查询 EXPLAIN 显示 Workers Planned > Workers Launched，日志偶见 parallel workers not available；CPU 核心空闲但查询执行接近串行。上调 max_parallel_workers（配合核心数）可提升整体吞吐。",
+    "category": "parallel",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_workers_per_gather": 3
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_parallel_maintenance_slow_index_vacuum",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "max_parallel_maintenance_workers 偏低（如 0~1），大型表 CREATE INDEX（btree）与并行 VACUUM 无法启用或仅启用极少 worker。典型现象：索引构建与 VACUUM 时长明显偏长，I/O 与 CPU 利用率不高。适度上调 max_parallel_maintenance_workers（如 2~4）可显著缩短维护作业时间。",
+    "category": "parallel",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB",
+      "effective_io_concurrency": 2,
+      "max_parallel_maintenance_workers": 1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_per_gather_cpu_hog_in_multi_tenant",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "max_parallel_workers_per_gather 设得较高（如 8~16），在多租户/多并发环境中单个大查询会占用过多 CPU，挤压其他会话。典型现象：该查询延迟下降但系统 P99 延迟上升，总体吞吐反而下降。通过下调 max_parallel_workers_per_gather 并（可选）小幅上调 max_parallel_workers，使单查询与整体并发更均衡。",
+    "category": "parallel",
+    "workload": "read_only",
+    "knobs": {
+      "max_parallel_workers_per_gather": 1,
+      "max_parallel_workers": 12
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_parallel_maintenance_slow_index_vacuum",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "max_parallel_maintenance_workers 偏低（如 0~1），大型表 CREATE INDEX（btree）与并行 VACUUM 无法启用或仅启用极少 worker。典型现象：索引构建与 VACUUM 时长明显偏长，I/O 与 CPU 利用率不高。适度上调 max_parallel_maintenance_workers（如 2~4）可显著缩短维护作业时间。",
+    "category": "parallel",
+    "workload": "high_concurrency",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "effective_cache_size": "16GB",
+      "effective_io_concurrency": 2,
+      "max_parallel_maintenance_workers": 1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_effective_io_concurrency_parallel_bitmap_scan",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "在 HDD/RAID 阵列上 effective_io_concurrency 维持默认/偏低（如 1~4），并行 Bitmap Heap Scan 的预取不足。典型现象：Workers Launched 数量尚可，但每个 worker I/O 等待时间高、吞吐偏低；整体查询受 I/O 限制。提升 effective_io_concurrency（如 32~128，视磁盘并发能力）能显著提高并行 bitmap 扫描效率。",
+    "category": "parallel",
+    "workload": "mixed",
+    "knobs": {
+      "effective_io_concurrency": 4,
+      "max_parallel_workers_per_gather": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_effective_io_concurrency_parallel_bitmap_scan",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "在 HDD/RAID 阵列上 effective_io_concurrency 维持默认/偏低（如 1~4），并行 Bitmap Heap Scan 的预取不足。典型现象：Workers Launched 数量尚可，但每个 worker I/O 等待时间高、吞吐偏低；整体查询受 I/O 限制。提升 effective_io_concurrency（如 32~128，视磁盘并发能力）能显著提高并行 bitmap 扫描效率。",
+    "category": "parallel",
+    "workload": "write_heavy",
+    "knobs": {
+      "effective_io_concurrency": 4,
+      "max_parallel_workers_per_gather": 4,
+      "max_parallel_workers": 12
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_per_gather_cpu_hog_in_multi_tenant",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "max_parallel_workers_per_gather 设得较高（如 8~16），在多租户/多并发环境中单个大查询会占用过多 CPU，挤压其他会话。典型现象：该查询延迟下降但系统 P99 延迟上升，总体吞吐反而下降。通过下调 max_parallel_workers_per_gather 并（可选）小幅上调 max_parallel_workers，使单查询与整体并发更均衡。",
+    "category": "parallel",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_parallel_workers_per_gather": 7,
+      "max_parallel_workers": 10
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "mismatch_high_per_gather_low_global_starvation",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "max_parallel_workers_per_gather 偏高（如 8），但 max_parallel_workers 偏低（如 8~10）。典型现象：查询计划想要较多 worker，但实际 Workers Launched 远小于计划，频繁回退近似串行；不同查询之间互相饥饿抢占 worker。通过降低 max_parallel_workers_per_gather 或提升 max_parallel_workers，消除不匹配导致的饥饿与回退。",
+    "category": "parallel",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_parallel_workers_per_gather": 7,
+      "max_parallel_workers": 9
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "ddl_vs_query_parallel_worker_contention",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "在线业务并行查询与后台 CREATE INDEX/VACUUM 同时进行，max_parallel_workers 偏低且 max_parallel_maintenance_workers 适中，导致维护作业与查询争用并行 worker。典型现象：业务查询 EXPLAIN 显示并行度下降、维持高延迟；维护作业也因抢不到足够 worker 拉长。通过提高 max_parallel_workers 或下调 max_parallel_workers_per_gather/合理限制 max_parallel_maintenance_workers，减轻争用。",
+    "category": "parallel",
+    "workload": "mixed",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_maintenance_workers": 1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "ddl_vs_query_parallel_worker_contention",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "在线业务并行查询与后台 CREATE INDEX/VACUUM 同时进行，max_parallel_workers 偏低且 max_parallel_maintenance_workers 适中，导致维护作业与查询争用并行 worker。典型现象：业务查询 EXPLAIN 显示并行度下降、维持高延迟；维护作业也因抢不到足够 worker 拉长。通过提高 max_parallel_workers 或下调 max_parallel_workers_per_gather/合理限制 max_parallel_maintenance_workers，减轻争用。",
+    "category": "parallel",
+    "workload": "read_only",
+    "knobs": {
+      "max_parallel_workers": 6,
+      "max_parallel_maintenance_workers": 4,
+      "max_parallel_workers_per_gather": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_io_concurrency_and_low_per_gather_bitmap_throughput",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "大表上经常触发并行 Bitmap Heap Scan，但 effective_io_concurrency 偏低（如 1）且 max_parallel_workers_per_gather 也偏低（如 1~2），I/O 与并行度同时受限。典型现象：EXPLAIN 有并行节点但整体吞吐仍低、iowait 偏高。同步提升 effective_io_concurrency 与 max_parallel_workers_per_gather，可叠加提升扫描吞吐。",
+    "category": "parallel",
+    "workload": "write_heavy",
+    "knobs": {
+      "effective_io_concurrency": 8,
+      "max_parallel_workers_per_gather": 6
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "pool_exhaustion_with_high_per_gather_and_maintenance_low_global",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "多核机器上 max_parallel_workers 偏低（如 8），而 max_parallel_workers_per_gather 偏高（如 8）且 max_parallel_maintenance_workers 也不低（如 4）。当并行查询与并行维护共存时，少量作业即可耗尽并行池。典型现象：Workers Planned 远大于 Launched，经常出现“没有足够的并行 worker”；系统吞吐波动大。需同时：提升 max_parallel_workers、下调每查询的 max_parallel_workers_per_gather，并根据时段/优先级调整 max_parallel_maintenance_workers。",
+    "category": "parallel",
+    "workload": "read_only",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_workers_per_gather": 3,
+      "max_parallel_maintenance_workers": 1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_io_concurrency_and_low_per_gather_bitmap_throughput",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "大表上经常触发并行 Bitmap Heap Scan，但 effective_io_concurrency 偏低（如 1）且 max_parallel_workers_per_gather 也偏低（如 1~2），I/O 与并行度同时受限。典型现象：EXPLAIN 有并行节点但整体吞吐仍低、iowait 偏高。同步提升 effective_io_concurrency 与 max_parallel_workers_per_gather，可叠加提升扫描吞吐。",
+    "category": "parallel",
+    "workload": "read_only",
+    "knobs": {
+      "effective_io_concurrency": 16,
+      "max_parallel_workers_per_gather": 4,
+      "max_parallel_workers": 12
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "mismatch_high_per_gather_low_global_starvation",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "max_parallel_workers_per_gather 偏高（如 8），但 max_parallel_workers 偏低（如 8~10）。典型现象：查询计划想要较多 worker，但实际 Workers Launched 远小于计划，频繁回退近似串行；不同查询之间互相饥饿抢占 worker。通过降低 max_parallel_workers_per_gather 或提升 max_parallel_workers，消除不匹配导致的饥饿与回退。",
+    "category": "parallel",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_parallel_workers_per_gather": 7,
+      "max_parallel_workers": 7
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "pool_exhaustion_with_high_per_gather_and_maintenance_low_global",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "多核机器上 max_parallel_workers 偏低（如 8），而 max_parallel_workers_per_gather 偏高（如 8）且 max_parallel_maintenance_workers 也不低（如 4）。当并行查询与并行维护共存时，少量作业即可耗尽并行池。典型现象：Workers Planned 远大于 Launched，经常出现“没有足够的并行 worker”；系统吞吐波动大。需同时：提升 max_parallel_workers、下调每查询的 max_parallel_workers_per_gather，并根据时段/优先级调整 max_parallel_maintenance_workers。",
+    "category": "parallel",
+    "workload": "read_only",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_workers_per_gather": 3,
+      "max_parallel_maintenance_workers": 1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "partitioned_aggregate_throttled_by_caps_and_io",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "分区表聚合/扫描利用 Parallel Append，但 max_parallel_workers 与 max_parallel_workers_per_gather 都较低（如 8 和 2），且底层为 HDD 时 effective_io_concurrency 偏低。典型现象：只能少量并行扫描分区，I/O 预取不足，CPU 与磁盘均未吃满。综合提升 max_parallel_workers、max_parallel_workers_per_gather 与 effective_io_concurrency，可显著加速跨分区汇总。",
+    "category": "parallel",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_workers_per_gather": 6,
+      "effective_io_concurrency": 8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "manycore_underutilization_due_to_conservative_parallel_caps",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "物理机 CPU 核心数较多（如 32~64），但 max_parallel_workers、max_parallel_workers_per_gather 与 max_parallel_maintenance_workers 都维持保守默认，导致 OLAP 与维护作业普遍低并行。典型现象：CPU 长期低利用（<40%），大型汇总与索引构建耗时长；EXPLAIN 显示并行度普遍不高。成体系地上调三项限制，可将多核能力转化为实际吞吐。",
+    "category": "parallel",
+    "workload": "mixed",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_workers_per_gather": 6,
+      "max_parallel_maintenance_workers": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "partitioned_aggregate_throttled_by_caps_and_io",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "分区表聚合/扫描利用 Parallel Append，但 max_parallel_workers 与 max_parallel_workers_per_gather 都较低（如 8 和 2），且底层为 HDD 时 effective_io_concurrency 偏低。典型现象：只能少量并行扫描分区，I/O 预取不足，CPU 与磁盘均未吃满。综合提升 max_parallel_workers、max_parallel_workers_per_gather 与 effective_io_concurrency，可显著加速跨分区汇总。",
+    "category": "parallel",
+    "workload": "read_only",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_workers_per_gather": 6,
+      "effective_io_concurrency": 6
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "autovacuum_parallel_starves_foreground_queries",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "高写入库中，autovacuum 触发并行 VACUUM；若 max_parallel_maintenance_workers 偏高而 max_parallel_workers 偏低，同时业务查询的 max_parallel_workers_per_gather 较高，前台与后台同时争抢有限并行池。典型现象：高峰期查询 Workers Launched 下滑、延迟抖动；VACUUM 周期拉长。通过降低高峰期的 max_parallel_maintenance_workers、合理下调每查询并行度并提高全局 max_parallel_workers，可缓和争用并稳定时延。",
+    "category": "parallel",
+    "workload": "mixed",
+    "knobs": {
+      "max_parallel_workers": 12,
+      "max_parallel_workers_per_gather": 1,
+      "max_parallel_maintenance_workers": 1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "manycore_underutilization_due_to_conservative_parallel_caps",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "物理机 CPU 核心数较多（如 32~64），但 max_parallel_workers、max_parallel_workers_per_gather 与 max_parallel_maintenance_workers 都维持保守默认，导致 OLAP 与维护作业普遍低并行。典型现象：CPU 长期低利用（<40%），大型汇总与索引构建耗时长；EXPLAIN 显示并行度普遍不高。成体系地上调三项限制，可将多核能力转化为实际吞吐。",
+    "category": "parallel",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_parallel_workers_per_gather": 4,
+      "max_parallel_maintenance_workers": 4,
+      "effective_io_concurrency": 2
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "autovacuum_parallel_starves_foreground_queries",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "高写入库中，autovacuum 触发并行 VACUUM；若 max_parallel_maintenance_workers 偏高而 max_parallel_workers 偏低，同时业务查询的 max_parallel_workers_per_gather 较高，前台与后台同时争抢有限并行池。典型现象：高峰期查询 Workers Launched 下滑、延迟抖动；VACUUM 周期拉长。通过降低高峰期的 max_parallel_maintenance_workers、合理下调每查询并行度并提高全局 max_parallel_workers，可缓和争用并稳定时延。",
+    "category": "parallel",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_parallel_workers": 6,
+      "max_parallel_maintenance_workers": 4,
+      "max_parallel_workers_per_gather": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "sleepy_bgwriter_backend_flushes",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "bgwriter_delay 偏高（如 800–1000ms），bgwriter 清理不够及时，脏页堆积。典型现象：pg_stat_bgwriter 中 buffers_backend 明显高于 buffers_clean，甚至存在 buffers_backend_fsync>0；业务在突发读取或淘汰缓冲时出现等待 DataFileWrite 的尾延迟，checkpoint 前后抖动更明显。可优化方向：降低 bgwriter_delay（如 100–200ms），让 bgwriter 更勤快地提前清理以减少后台被迫写。",
+    "category": "bgwriter",
+    "workload": "read_only",
+    "knobs": {
+      "bgwriter_delay": 150,
+      "bgwriter_lru_maxpages": 512,
+      "bgwriter_lru_multiplier": 3.0,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "3GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "sleepy_bgwriter_backend_flushes",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "bgwriter_delay 偏高（如 800–1000ms），bgwriter 清理不够及时，脏页堆积。典型现象：pg_stat_bgwriter 中 buffers_backend 明显高于 buffers_clean，甚至存在 buffers_backend_fsync>0；业务在突发读取或淘汰缓冲时出现等待 DataFileWrite 的尾延迟，checkpoint 前后抖动更明显。可优化方向：降低 bgwriter_delay（如 100–200ms），让 bgwriter 更勤快地提前清理以减少后台被迫写。",
+    "category": "bgwriter",
+    "workload": "high_concurrency",
+    "knobs": {
+      "bgwriter_delay": 150,
+      "bgwriter_lru_maxpages": 400,
+      "bgwriter_lru_multiplier": 3.0,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "3GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "overly_frequent_bgwriter_wakes",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "bgwriter_delay 设得很低（如 10–20ms），bgwriter 过于活跃，频繁唤醒小批量清理 LRU。典型现象：在写入并不密集的时段也持续有磁盘写 IOPS，iostat/监控上写队列深度周期性升高，WAL fsync 和查询读 I/O 延迟偶发抖动；pg_stat_bgwriter 中 buffers_clean 稳定偏高但 buffers_backend 不高。可优化方向：适度增大 bgwriter_delay（如 100–250ms），平滑后台写入，释放 I/O 带宽给前台与 WAL。",
+    "category": "bgwriter",
+    "workload": "write_heavy",
+    "knobs": {
+      "bgwriter_delay": 220,
+      "bgwriter_lru_multiplier": 1.5,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "overly_frequent_bgwriter_wakes",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "bgwriter_delay 设得很低（如 10–20ms），bgwriter 过于活跃，频繁唤醒小批量清理 LRU。典型现象：在写入并不密集的时段也持续有磁盘写 IOPS，iostat/监控上写队列深度周期性升高，WAL fsync 和查询读 I/O 延迟偶发抖动；pg_stat_bgwriter 中 buffers_clean 稳定偏高但 buffers_backend 不高。可优化方向：适度增大 bgwriter_delay（如 100–250ms），平滑后台写入，释放 I/O 带宽给前台与 WAL。",
+    "category": "bgwriter",
+    "workload": "high_concurrency",
+    "knobs": {
+      "bgwriter_delay": 250,
+      "bgwriter_lru_multiplier": 1.5,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "capped_lru_batch_cleaning_lag",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "bgwriter_lru_maxpages 设置过低（如 32–64），每轮能清理的页数过少，跟不上脏页产生速度。典型现象：pg_stat_bgwriter 的 maxwritten_clean 持续增加（频繁达到本轮清理上限），buffers_backend 上升；高并发读写时，后台会话偶发被迫写脏页导致响应时间拉长。可优化方向：提高 bgwriter_lru_maxpages，使单轮清理覆盖量与写入速率匹配。",
+    "category": "bgwriter",
+    "workload": "mixed",
+    "knobs": {
+      "shared_buffers": "4GB",
+      "bgwriter_lru_maxpages": 400,
+      "bgwriter_lru_multiplier": 2.5,
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "capped_lru_batch_cleaning_lag",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "bgwriter_lru_maxpages 设置过低（如 32–64），每轮能清理的页数过少，跟不上脏页产生速度。典型现象：pg_stat_bgwriter 的 maxwritten_clean 持续增加（频繁达到本轮清理上限），buffers_backend 上升；高并发读写时，后台会话偶发被迫写脏页导致响应时间拉长。可优化方向：提高 bgwriter_lru_maxpages，使单轮清理覆盖量与写入速率匹配。",
+    "category": "bgwriter",
+    "workload": "read_only",
+    "knobs": {
+      "bgwriter_lru_maxpages": 512,
+      "bgwriter_lru_multiplier": 2.5,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_lru_batch_write_bursts",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "bgwriter_lru_maxpages 设得偏高（如 1024+），单轮清理过多页，形成写入尖峰。典型现象：写 IOPS 呈锯齿状、队列深度周期性冲高；读延迟在尖峰期抬升；pg_stat_bgwriter 中 buffers_clean 呈波峰式增长。可优化方向：下调 bgwriter_lru_maxpages，使清理批次更小、更平滑，降低对读和 WAL 的瞬时挤压。",
+    "category": "bgwriter",
+    "workload": "high_concurrency",
+    "knobs": {
+      "bgwriter_lru_maxpages": 64,
+      "bgwriter_lru_multiplier": 1.5,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_delay_low_maxpages_dirty_backlog",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "bgwriter_delay 偏高 + bgwriter_lru_maxpages 偏低的组合，导致清理既不及时又不够多。典型现象：脏页长期积压，pg_stat_bgwriter 中 buffers_backend 长期高于 buffers_clean，checkpoint 附近出现较大的写放大和延迟尖峰；后台偶尔出现 DataFileWrite 等 I/O 等待。可优化方向：同时下调 bgwriter_delay、上调 bgwriter_lru_maxpages，提升清理频率与覆盖量，降低前台被迫写的概率。",
+    "category": "bgwriter",
+    "workload": "write_heavy",
+    "knobs": {
+      "bgwriter_delay": 75,
+      "bgwriter_lru_maxpages": 400,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_lru_batch_write_bursts",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "bgwriter_lru_maxpages 设得偏高（如 1024+），单轮清理过多页，形成写入尖峰。典型现象：写 IOPS 呈锯齿状、队列深度周期性冲高；读延迟在尖峰期抬升；pg_stat_bgwriter 中 buffers_clean 呈波峰式增长。可优化方向：下调 bgwriter_lru_maxpages，使清理批次更小、更平滑，降低对读和 WAL 的瞬时挤压。",
+    "category": "bgwriter",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "6GB",
+      "effective_cache_size": "24GB",
+      "bgwriter_lru_maxpages": 900
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_delay_high_maxpages_bgwriter_storm",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "bgwriter_delay 很低 + bgwriter_lru_maxpages 较高，bgwriter 形成“清理风暴”。典型现象：后台持续大量顺序/随机写，iowait 增高，WAL fsync 延迟和查询尾延迟上升；pg_stat_bgwriter 显示 buffers_clean 很高但业务吞吐并未改善。可优化方向：适度增大 bgwriter_delay 并下调 bgwriter_lru_maxpages，使后台清理更平滑，避免与 WAL/读 I/O 争抢带宽。",
+    "category": "bgwriter",
+    "workload": "mixed",
+    "knobs": {
+      "bgwriter_delay": 400,
+      "bgwriter_lru_maxpages": 40,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_delay_low_maxpages_dirty_backlog",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "bgwriter_delay 偏高 + bgwriter_lru_maxpages 偏低的组合，导致清理既不及时又不够多。典型现象：脏页长期积压，pg_stat_bgwriter 中 buffers_backend 长期高于 buffers_clean，checkpoint 附近出现较大的写放大和延迟尖峰；后台偶尔出现 DataFileWrite 等 I/O 等待。可优化方向：同时下调 bgwriter_delay、上调 bgwriter_lru_maxpages，提升清理频率与覆盖量，降低前台被迫写的概率。",
+    "category": "bgwriter",
+    "workload": "high_concurrency",
+    "knobs": {
+      "bgwriter_delay": 50,
+      "bgwriter_lru_maxpages": 600,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_delay_high_maxpages_bgwriter_storm",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "bgwriter_delay 很低 + bgwriter_lru_maxpages 较高，bgwriter 形成“清理风暴”。典型现象：后台持续大量顺序/随机写，iowait 增高，WAL fsync 延迟和查询尾延迟上升；pg_stat_bgwriter 显示 buffers_clean 很高但业务吞吐并未改善。可优化方向：适度增大 bgwriter_delay 并下调 bgwriter_lru_maxpages，使后台清理更平滑，避免与 WAL/读 I/O 争抢带宽。",
+    "category": "bgwriter",
+    "workload": "read_only",
+    "knobs": {
+      "bgwriter_delay": 400,
+      "bgwriter_lru_maxpages": 50,
+      "bgwriter_lru_multiplier": 1.5,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_delay_low_multiplier_eviction_stalls",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "bgwriter_delay 偏高 + bgwriter_lru_multiplier 偏低，预测不足且清理不及时。典型现象：负载切换到读多或扫描时，出现可用空闲干净页不足，后台会话在淘汰脏页时被迫同步写；pg_stat_bgwriter 中 buffers_backend 明显上升，响应时间在数据换入时段抖动。可优化方向：降低 bgwriter_delay 并适度上调 bgwriter_lru_multiplier（例如从 1.0 提到 1.5–2.0），加强预清理与预测。",
+    "category": "bgwriter",
+    "workload": "mixed",
+    "knobs": {
+      "bgwriter_delay": 1000,
+      "bgwriter_lru_multiplier": 1.0
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_delay_low_multiplier_eviction_stalls",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "bgwriter_delay 偏高 + bgwriter_lru_multiplier 偏低，预测不足且清理不及时。典型现象：负载切换到读多或扫描时，出现可用空闲干净页不足，后台会话在淘汰脏页时被迫同步写；pg_stat_bgwriter 中 buffers_backend 明显上升，响应时间在数据换入时段抖动。可优化方向：降低 bgwriter_delay 并适度上调 bgwriter_lru_multiplier（例如从 1.0 提到 1.5–2.0），加强预清理与预测。",
+    "category": "bgwriter",
+    "workload": "mixed",
+    "knobs": {
+      "bgwriter_delay": 800,
+      "bgwriter_lru_multiplier": 1.0
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_delay_high_multiplier_overclean",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "bgwriter_delay 偏低 + bgwriter_lru_multiplier 偏高，过度预测导致过清理。典型现象：bgwriter 频繁清理近期热点页，这些页很快再次被修改，产生写放大；pg_stat_bgwriter 中 buffers_clean 很高但 buffers_backend 不高，磁盘总体写量上升且读延迟偶发抬升。可优化方向：增大 bgwriter_delay、下调 bgwriter_lru_multiplier，减少对热点页的无效清理。",
+    "category": "bgwriter",
+    "workload": "high_concurrency",
+    "knobs": {
+      "bgwriter_delay": 600,
+      "bgwriter_lru_multiplier": 1.2,
+      "bgwriter_lru_maxpages": 64,
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_delay_high_multiplier_overclean",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "bgwriter_delay 偏低 + bgwriter_lru_multiplier 偏高，过度预测导致过清理。典型现象：bgwriter 频繁清理近期热点页，这些页很快再次被修改，产生写放大；pg_stat_bgwriter 中 buffers_clean 很高但 buffers_backend 不高，磁盘总体写量上升且读延迟偶发抬升。可优化方向：增大 bgwriter_delay、下调 bgwriter_lru_multiplier，减少对热点页的无效清理。",
+    "category": "bgwriter",
+    "workload": "high_concurrency",
+    "knobs": {
+      "bgwriter_delay": 600,
+      "bgwriter_lru_multiplier": 1.2,
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_multiplier_low_maxpages_cleaner_thrash",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "bgwriter_lru_multiplier 偏高但 bgwriter_lru_maxpages 偏低，预测很多却每轮清理页数受限，导致抖动与饥饿交替。典型现象：pg_stat_bgwriter 的 maxwritten_clean 持续攀升（轮次受限），后台周期性出现脏页积压→被迫写→延迟尖峰的循环；磁盘写呈周期性冲高。可优化方向：同步降低 lru_multiplier 或提高 lru_maxpages，并配合适中 bgwriter_delay，使预测与执行能力匹配。",
+    "category": "bgwriter",
+    "workload": "high_concurrency",
+    "knobs": {
+      "bgwriter_lru_multiplier": 1.2,
+      "bgwriter_lru_maxpages": 400,
+      "bgwriter_delay": 150,
+      "checkpoint_completion_target": 0.7
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "big_buffers_default_bgwriter_undercoverage",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "shared_buffers 较大（如数十 GB）但使用默认 bgwriter 参数（bgwriter_delay≈200ms、bgwriter_lru_maxpages≈100、bgwriter_lru_multiplier≈2.0），在持续更新+扫描的负载下清理覆盖不足。典型现象：高峰期 buffers_backend 显著升高，checkpoint 前后出现写入拥塞与尾延迟；平峰时 bgwriter 又显得清理过慢。可优化方向：降低 bgwriter_delay、上调 lru_maxpages，并按缓存规模适度提高 lru_multiplier，使单位时间的预清理量与缓存规模/写入速率相匹配。",
+    "category": "bgwriter",
+    "workload": "read_only",
+    "knobs": {
+      "shared_buffers": "6GB",
+      "bgwriter_delay": 50,
+      "bgwriter_lru_maxpages": 500,
+      "bgwriter_lru_multiplier": 3.0,
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_multiplier_low_maxpages_cleaner_thrash",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "bgwriter_lru_multiplier 偏高但 bgwriter_lru_maxpages 偏低，预测很多却每轮清理页数受限，导致抖动与饥饿交替。典型现象：pg_stat_bgwriter 的 maxwritten_clean 持续攀升（轮次受限），后台周期性出现脏页积压→被迫写→延迟尖峰的循环；磁盘写呈周期性冲高。可优化方向：同步降低 lru_multiplier 或提高 lru_maxpages，并配合适中 bgwriter_delay，使预测与执行能力匹配。",
+    "category": "bgwriter",
+    "workload": "mixed",
+    "knobs": {
+      "bgwriter_lru_multiplier": 1.5,
+      "bgwriter_lru_maxpages": 400,
+      "bgwriter_delay": 150,
+      "checkpoint_completion_target": 0.7
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "read_heavy_aggressive_bgwriter_hurts_latency",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "读为主、更新较少的场景中，bgwriter 设置偏激进（bgwriter_delay 很低、bgwriter_lru_maxpages 较高、bgwriter_lru_multiplier 较高），后台清理吞噬 I/O，影响读性能。典型现象：读延迟 p95/p99 在写入小抖动时显著上升，磁盘写 IOPS 不成比例偏高；pg_stat_bgwriter 显示 buffers_clean 高但业务吞吐无明显收益。可优化方向：提高 bgwriter_delay、下调 lru_maxpages 与 lru_multiplier，让清理更克制，优先保障读 I/O。",
+    "category": "bgwriter",
+    "workload": "read_only",
+    "knobs": {
+      "bgwriter_delay": 600,
+      "bgwriter_lru_maxpages": 64,
+      "bgwriter_lru_multiplier": 1.2,
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "read_heavy_aggressive_bgwriter_hurts_latency",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "读为主、更新较少的场景中，bgwriter 设置偏激进（bgwriter_delay 很低、bgwriter_lru_maxpages 较高、bgwriter_lru_multiplier 较高），后台清理吞噬 I/O，影响读性能。典型现象：读延迟 p95/p99 在写入小抖动时显著上升，磁盘写 IOPS 不成比例偏高；pg_stat_bgwriter 显示 buffers_clean 高但业务吞吐无明显收益。可优化方向：提高 bgwriter_delay、下调 lru_maxpages 与 lru_multiplier，让清理更克制，优先保障读 I/O。",
+    "category": "bgwriter",
+    "workload": "high_concurrency",
+    "knobs": {
+      "bgwriter_delay": 600,
+      "bgwriter_lru_maxpages": 50,
+      "bgwriter_lru_multiplier": 1.2,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "iops_capped_env_bgwriter_needs_smoothing",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "在云盘/容器环境（IOPS 限额）下，默认 bgwriter（如 delay≈200ms、lru_maxpages≈100、lru_multiplier≈2.0）形成阶梯式清理负载，周期性顶到 IOPS 上限，挤占 WAL 与查询。典型现象：写入阶段性触发 iowait 峰值，WAL fsync/commit 尾延迟显著；pg_stat_bgwriter 中 buffers_clean 呈批量式增长。可优化方向：增加 bgwriter_delay、下调 lru_maxpages 并将 lru_multiplier 调低至 1.0–1.5，使后台清理更细水长流，避免碰撞 IOPS 上限。",
+    "category": "bgwriter",
+    "workload": "read_only",
+    "knobs": {
+      "bgwriter_delay": 400,
+      "bgwriter_lru_maxpages": 40,
+      "bgwriter_lru_multiplier": 1.3,
+      "checkpoint_completion_target": 0.8,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "iops_capped_env_bgwriter_needs_smoothing",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "在云盘/容器环境（IOPS 限额）下，默认 bgwriter（如 delay≈200ms、lru_maxpages≈100、lru_multiplier≈2.0）形成阶梯式清理负载，周期性顶到 IOPS 上限，挤占 WAL 与查询。典型现象：写入阶段性触发 iowait 峰值，WAL fsync/commit 尾延迟显著；pg_stat_bgwriter 中 buffers_clean 呈批量式增长。可优化方向：增加 bgwriter_delay、下调 lru_maxpages 并将 lru_multiplier 调低至 1.0–1.5，使后台清理更细水长流，避免碰撞 IOPS 上限。",
+    "category": "bgwriter",
+    "workload": "read_only",
+    "knobs": {
+      "bgwriter_delay": 600,
+      "bgwriter_lru_maxpages": 32,
+      "bgwriter_lru_multiplier": 1.2,
+      "checkpoint_completion_target": 0.85,
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "big_buffers_default_bgwriter_undercoverage",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "shared_buffers 较大（如数十 GB）但使用默认 bgwriter 参数（bgwriter_delay≈200ms、bgwriter_lru_maxpages≈100、bgwriter_lru_multiplier≈2.0），在持续更新+扫描的负载下清理覆盖不足。典型现象：高峰期 buffers_backend 显著升高，checkpoint 前后出现写入拥塞与尾延迟；平峰时 bgwriter 又显得清理过慢。可优化方向：降低 bgwriter_delay、上调 lru_maxpages，并按缓存规模适度提高 lru_multiplier，使单位时间的预清理量与缓存规模/写入速率相匹配。",
+    "category": "bgwriter",
+    "workload": "write_heavy",
+    "knobs": {
+      "shared_buffers": "6GB",
+      "effective_cache_size": "24GB",
+      "max_wal_size": "2GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "conservative_max_connections_caps_concurrency",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "max_connections 偏低（如仅 100），而业务高峰并发在 120–150。平时运行正常，但峰值偶发报错 “too many clients already” 或 “remaining connection slots are reserved for superuser connections”，应用端出现排队/超时，p95 延迟抬升。优化方向：在评估内存与连接开销后，适度上调 max_connections 以覆盖高峰并发。",
+    "category": "connections",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_connections": 200,
+      "superuser_reserved_connections": 5,
+      "shared_buffers": "6GB",
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "conservative_max_connections_caps_concurrency",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "max_connections 偏低（如仅 100），而业务高峰并发在 120–150。平时运行正常，但峰值偶发报错 “too many clients already” 或 “remaining connection slots are reserved for superuser connections”，应用端出现排队/超时，p95 延迟抬升。优化方向：在评估内存与连接开销后，适度上调 max_connections 以覆盖高峰并发。",
+    "category": "connections",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_connections": 200,
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB",
+      "idle_in_transaction_session_timeout": 300000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_max_connections_memory_waste",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "max_connections 设得过高（如 1000+），实际活跃连接远低于此。大量空闲连接每个消耗约 5–15MB，导致实例 RSS 偏高、偶发 swap、上下文切换增多，尾延迟升高。优化方向：将 max_connections 下调到接近 95 百分位实际并发的水平，释放内存并降低调度开销。",
+    "category": "connections",
+    "workload": "mixed",
+    "knobs": {
+      "max_connections": 150,
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB",
+      "idle_in_transaction_session_timeout": 300000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "over_reserved_connections_reduce_user_capacity",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "superuser_reserved_connections 设置过高（如 20）且 max_connections=200，普通用户可用槽位仅 180。高峰更容易出现“剩余连接保留给超级用户”的拒连，吞吐受限但系统仍可用。优化方向：将 superuser_reserved_connections 调整为 3–5，避免不必要的保留挤占业务容量。",
+    "category": "connections",
+    "workload": "read_only",
+    "knobs": {
+      "max_connections": 200,
+      "superuser_reserved_connections": 4,
+      "idle_in_transaction_session_timeout": 60000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "oversized_max_connections_memory_waste",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "max_connections 设得过高（如 1000+），实际活跃连接远低于此。大量空闲连接每个消耗约 5–15MB，导致实例 RSS 偏高、偶发 swap、上下文切换增多，尾延迟升高。优化方向：将 max_connections 下调到接近 95 百分位实际并发的水平，释放内存并降低调度开销。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_connections": 200,
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB",
+      "idle_in_transaction_session_timeout": 300000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "over_reserved_connections_reduce_user_capacity",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "superuser_reserved_connections 设置过高（如 20）且 max_connections=200，普通用户可用槽位仅 180。高峰更容易出现“剩余连接保留给超级用户”的拒连，吞吐受限但系统仍可用。优化方向：将 superuser_reserved_connections 调整为 3–5，避免不必要的保留挤占业务容量。",
+    "category": "connections",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_connections": 200,
+      "superuser_reserved_connections": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "no_idle_in_transaction_timeout_lock_bloat",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "未配置 idle_in_transaction_session_timeout，应用偶发长时间保持未提交事务。pg_stat_activity 中出现大量 “idle in transaction”，持有锁阻塞写入，autovacuum 无法清理导致表/索引膨胀。优化方向：为 OLTP 设定合理超时（如 5–15 分钟），自动清理长闲事务，缩短锁持有时间。",
+    "category": "connections",
+    "workload": "read_only",
+    "knobs": {
+      "idle_in_transaction_session_timeout": 480000,
+      "autovacuum_naptime": 30,
+      "autovacuum_vacuum_scale_factor": 0.1,
+      "autovacuum_max_workers": 4
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_max_conn_no_idle_timeout_lock_and_memory_pressure",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "max_connections 很高（如 800）且未设置 idle_in_transaction_session_timeout。连接泄漏与长闲事务叠加，既占用大量内存又长期持锁，出现阻塞链和活跃查询等待，CPU 在上下文切换上消耗明显。优化方向：下调 max_connections 至合理范围，并启用 idle_in_transaction_session_timeout 以清理长闲事务。",
+    "category": "connections",
+    "workload": "read_only",
+    "knobs": {
+      "max_connections": 300,
+      "idle_in_transaction_session_timeout": 300000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_reserved_vs_low_maxconn_client_starvation",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "max_connections 偏低（如 150）而 superuser_reserved_connections 偏高（如 15），业务高峰时普通连接更早被耗尽，应用端排队/超时增多；保留槽位多数时间空闲。优化方向：适度上调 max_connections 或下调 superuser_reserved_connections，以平衡业务容量与维护保留。",
+    "category": "connections",
+    "workload": "read_only",
+    "knobs": {
+      "max_connections": 300,
+      "superuser_reserved_connections": 2,
+      "shared_buffers": "6GB",
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "no_idle_in_transaction_timeout_lock_bloat",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "未配置 idle_in_transaction_session_timeout，应用偶发长时间保持未提交事务。pg_stat_activity 中出现大量 “idle in transaction”，持有锁阻塞写入，autovacuum 无法清理导致表/索引膨胀。优化方向：为 OLTP 设定合理超时（如 5–15 分钟），自动清理长闲事务，缩短锁持有时间。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "idle_in_transaction_session_timeout": 300000,
+      "autovacuum_max_workers": 5,
+      "autovacuum_naptime": 30,
+      "autovacuum_vacuum_scale_factor": 0.1,
+      "lock_timeout": 5000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_max_conn_no_idle_timeout_lock_and_memory_pressure",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "max_connections 很高（如 800）且未设置 idle_in_transaction_session_timeout。连接泄漏与长闲事务叠加，既占用大量内存又长期持锁，出现阻塞链和活跃查询等待，CPU 在上下文切换上消耗明显。优化方向：下调 max_connections 至合理范围，并启用 idle_in_transaction_session_timeout 以清理长闲事务。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_connections": 200,
+      "idle_in_transaction_session_timeout": 300000,
+      "shared_buffers": "6GB",
+      "effective_cache_size": "24GB",
+      "work_mem": "8MB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_reserved_vs_low_maxconn_client_starvation",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "max_connections 偏低（如 150）而 superuser_reserved_connections 偏高（如 15），业务高峰时普通连接更早被耗尽，应用端排队/超时增多；保留槽位多数时间空闲。优化方向：适度上调 max_connections 或下调 superuser_reserved_connections，以平衡业务容量与维护保留。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_connections": 150,
+      "superuser_reserved_connections": 9
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_maxconn_and_aggressive_idle_timeout_retry_storm",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "max_connections 较低（如 100）且 idle_in_transaction_session_timeout 过于激进（30–60s）。交互式或微服务事务在用户思考时间/网络抖动下被杀，应用端频繁重试，形成连接风暴与抖动性延迟。优化方向：放宽 idle_in_transaction_session_timeout 至数分钟，并酌情上调 max_connections 提供缓冲。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_connections": 200,
+      "idle_in_transaction_session_timeout": 300000,
+      "shared_buffers": "6GB",
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_reserved_under_high_utilization_autovacuum_starvation",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "连接利用率常年 90%+，superuser_reserved_connections 过低（或为 0）。偶发满槽时 autovacuum/DBA 无法接入，清理延迟积累导致表膨胀、索引效率下降，查询变慢。优化方向：将 superuser_reserved_connections 提升到 3–5，确保维护与自动任务可进场。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "superuser_reserved_connections": 5,
+      "idle_in_transaction_session_timeout": 180000,
+      "autovacuum_naptime": 30,
+      "autovacuum_vacuum_scale_factor": 0.1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_maxconn_and_aggressive_idle_timeout_retry_storm",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "max_connections 较低（如 100）且 idle_in_transaction_session_timeout 过于激进（30–60s）。交互式或微服务事务在用户思考时间/网络抖动下被杀，应用端频繁重试，形成连接风暴与抖动性延迟。优化方向：放宽 idle_in_transaction_session_timeout 至数分钟，并酌情上调 max_connections 提供缓冲。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_connections": 200,
+      "idle_in_transaction_session_timeout": 300000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_reserved_under_high_utilization_autovacuum_starvation",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "连接利用率常年 90%+，superuser_reserved_connections 过低（或为 0）。偶发满槽时 autovacuum/DBA 无法接入，清理延迟积累导致表膨胀、索引效率下降，查询变慢。优化方向：将 superuser_reserved_connections 提升到 3–5，确保维护与自动任务可进场。",
+    "category": "connections",
+    "workload": "write_heavy",
+    "knobs": {
+      "superuser_reserved_connections": 5,
+      "idle_in_transaction_session_timeout": 300000,
+      "autovacuum_vacuum_scale_factor": 0.1,
+      "autovacuum_analyze_scale_factor": 0.05,
+      "autovacuum_naptime": 30
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "overprovisioned_maxconn_overreserved_and_no_idle_timeout_triple_whammy",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "max_connections 过高（如 1000）、superuser_reserved_connections 偏多（如 20），且未设置 idle_in_transaction_session_timeout。大量空闲连接浪费内存，普通用户可用槽位被保留挤占，少量 idle in transaction 长期持锁造成热点表阻塞。优化方向：三管齐下——下调 max_connections、将 reserved 调整至 3–5，并启用适度的 idle_in_transaction_session_timeout。",
+    "category": "connections",
+    "workload": "mixed",
+    "knobs": {
+      "max_connections": 900,
+      "superuser_reserved_connections": 8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "overprovisioned_maxconn_overreserved_and_no_idle_timeout_triple_whammy",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "max_connections 过高（如 1000）、superuser_reserved_connections 偏多（如 20），且未设置 idle_in_transaction_session_timeout。大量空闲连接浪费内存，普通用户可用槽位被保留挤占，少量 idle in transaction 长期持锁造成热点表阻塞。优化方向：三管齐下——下调 max_connections、将 reserved 调整至 3–5，并启用适度的 idle_in_transaction_session_timeout。",
+    "category": "connections",
+    "workload": "read_only",
+    "knobs": {
+      "max_connections": 300,
+      "superuser_reserved_connections": 4,
+      "idle_in_transaction_session_timeout": 180000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_maxconn_high_reserved_aggressive_idle_timeout_deadlock_of_policies",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "max_connections 偏低（如 120）+ superuser_reserved_connections 偏高（如 10）+ idle_in_transaction_session_timeout 过短（如 45s）。普通连接容量被挤压、剩余连接又因短事务被频繁中断而重试，吞吐与延迟剧烈波动。优化方向：降低 reserved、提高 max_connections，并将 idle 超时放宽到几分钟以稳定事务行为。",
+    "category": "connections",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_connections": 300,
+      "superuser_reserved_connections": 2,
+      "idle_in_transaction_session_timeout": 240000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "bursty_login_high_maxconn_low_reserved_slow_vacuum_bloat_feedback",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "为应对登录潮将 max_connections 提得很高（如 800），但 superuser_reserved_connections 过低且未设置 idle_in_transaction_session_timeout。峰值打满时 autovacuum 无法接入，期间出现 idle in transaction 长时间保留旧版本，查询变慢→更慢释放连接形成负反馈。优化方向：下调 max_connections、提高 reserved 至 3–5、并启用 idle_in_transaction_session_timeout 清理长闲事务。",
+    "category": "connections",
+    "workload": "write_heavy",
+    "knobs": {
+      "max_connections": 300,
+      "superuser_reserved_connections": 5,
+      "idle_in_transaction_session_timeout": 180000,
+      "autovacuum_max_workers": 5
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_maxconn_high_reserved_aggressive_idle_timeout_deadlock_of_policies",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "max_connections 偏低（如 120）+ superuser_reserved_connections 偏高（如 10）+ idle_in_transaction_session_timeout 过短（如 45s）。普通连接容量被挤压、剩余连接又因短事务被频繁中断而重试，吞吐与延迟剧烈波动。优化方向：降低 reserved、提高 max_connections，并将 idle 超时放宽到几分钟以稳定事务行为。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_connections": 200,
+      "superuser_reserved_connections": 2,
+      "idle_in_transaction_session_timeout": 240000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "bursty_login_high_maxconn_low_reserved_slow_vacuum_bloat_feedback",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "为应对登录潮将 max_connections 提得很高（如 800），但 superuser_reserved_connections 过低且未设置 idle_in_transaction_session_timeout。峰值打满时 autovacuum 无法接入，期间出现 idle in transaction 长时间保留旧版本，查询变慢→更慢释放连接形成负反馈。优化方向：下调 max_connections、提高 reserved 至 3–5、并启用 idle_in_transaction_session_timeout 清理长闲事务。",
+    "category": "connections",
+    "workload": "high_concurrency",
+    "knobs": {
+      "max_connections": 300,
+      "superuser_reserved_connections": 5,
+      "idle_in_transaction_session_timeout": 300000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "etl_long_tx_no_timeout_high_maxconn_vacuum_backlog_and_lock_waits",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "夜间 ETL 长事务偶发挂起，实例为多租户将 max_connections 设高（600+），idle_in_transaction_session_timeout 未启用。白天业务出现锁等待、autovacuum 积压、表膨胀与内存占用升高。优化方向：启用适度 idle_in_transaction_session_timeout 终止挂起事务，将 max_connections 下调到与实际并发匹配，并保留 3–5 个 superuser_reserved_connections 保障维护接入。",
+    "category": "connections",
+    "workload": "mixed",
+    "knobs": {
+      "max_connections": 200,
+      "superuser_reserved_connections": 4,
+      "idle_in_transaction_session_timeout": 300000,
+      "autovacuum_naptime": 30,
+      "autovacuum_vacuum_scale_factor": 0.1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_deadlock_timeout_cpu_churn",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "deadlock_timeout 设得过低（如 10–50ms）。常规的短暂锁等待（行级冲突、FK 校验、轻微 DDL 探测）也会频繁触发死锁检测，增加锁管理器检查开销并产生抖动。典型现象：CPU 使用率偏高但吞吐不升、pg_stat_activity 中等待时间多为几十到数百毫秒的 Lock 等待。优化方向：将 deadlock_timeout 提升到更稳健的阈值（如 200–500ms），只在“异常长”等待时才触发死锁检测。",
+    "category": "locks",
+    "workload": "write_heavy",
+    "knobs": {
+      "deadlock_timeout": 300,
+      "effective_io_concurrency": 4,
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "etl_long_tx_no_timeout_high_maxconn_vacuum_backlog_and_lock_waits",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "夜间 ETL 长事务偶发挂起，实例为多租户将 max_connections 设高（600+），idle_in_transaction_session_timeout 未启用。白天业务出现锁等待、autovacuum 积压、表膨胀与内存占用升高。优化方向：启用适度 idle_in_transaction_session_timeout 终止挂起事务，将 max_connections 下调到与实际并发匹配，并保留 3–5 个 superuser_reserved_connections 保障维护接入。",
+    "category": "connections",
+    "workload": "mixed",
+    "knobs": {
+      "max_connections": 200,
+      "superuser_reserved_connections": 4,
+      "idle_in_transaction_session_timeout": 300000,
+      "autovacuum_max_workers": 5,
+      "autovacuum_vacuum_scale_factor": 0.1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "low_deadlock_timeout_cpu_churn",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "deadlock_timeout 设得过低（如 10–50ms）。常规的短暂锁等待（行级冲突、FK 校验、轻微 DDL 探测）也会频繁触发死锁检测，增加锁管理器检查开销并产生抖动。典型现象：CPU 使用率偏高但吞吐不升、pg_stat_activity 中等待时间多为几十到数百毫秒的 Lock 等待。优化方向：将 deadlock_timeout 提升到更稳健的阈值（如 200–500ms），只在“异常长”等待时才触发死锁检测。",
+    "category": "locks",
+    "workload": "mixed",
+    "knobs": {
+      "deadlock_timeout": 300,
+      "lock_timeout": 2000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_deadlock_timeout_blocking_tail",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "deadlock_timeout 设得过高（如 2–5s）。遇到真实死锁或长锁链时，死锁检测与打破链条被延迟，导致事务长时间阻塞。典型现象：P95/P99 延迟出现多秒“台阶”，日志偶见 deadlock detected 但已造成显著尾延迟。优化方向：下调 deadlock_timeout（如 200–500ms），更快发现并化解死锁，缩短阻塞尾部。",
+    "category": "locks",
+    "workload": "high_concurrency",
+    "knobs": {
+      "deadlock_timeout": 3000,
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB"
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "short_lock_timeout_retry_storm",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "lock_timeout 过短（如 50–100ms）以为“快速失败”。在常见的 OLTP 行锁竞争下，语句频繁因锁超时被取消，应用层立刻重试引发重试风暴，反而放大竞争。典型现象：日志中“canceling statement due to lock timeout”密集出现，吞吐振荡、响应时间抖动。优化方向：适度提高 lock_timeout（如 300–1000ms），或针对低优先级语句单独设置更短阈值，避免全局过敏感。",
+    "category": "locks",
+    "workload": "high_concurrency",
+    "knobs": {
+      "lock_timeout": 500,
+      "idle_in_transaction_session_timeout": 60000,
+      "deadlock_timeout": 800
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "high_deadlock_timeout_blocking_tail",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "deadlock_timeout 设得过高（如 2–5s）。遇到真实死锁或长锁链时，死锁检测与打破链条被延迟，导致事务长时间阻塞。典型现象：P95/P99 延迟出现多秒“台阶”，日志偶见 deadlock detected 但已造成显著尾延迟。优化方向：下调 deadlock_timeout（如 200–500ms），更快发现并化解死锁，缩短阻塞尾部。",
+    "category": "locks",
+    "workload": "write_heavy",
+    "knobs": {
+      "deadlock_timeout": 300,
+      "lock_timeout": 4000,
+      "idle_in_transaction_session_timeout": 60000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "zero_lock_timeout_unbounded_waits",
+    "variant": 0,
+    "difficulty": 1,
+    "description": "lock_timeout 维持默认 0（无限等待）。在有长事务/偶发 DDL 的库中，较低优先级语句可能等待数分钟，拉长尾延迟并占用连接。典型现象：pg_stat_activity 中大量 sessions 长时间 wait_event_type=Lock；用户请求偶发“卡死”。优化方向：为非关键会话/查询设置有限的 lock_timeout（如 1–3s）以有界等待，关键语句可维持较长或单独策略。",
+    "category": "locks",
+    "workload": "mixed",
+    "knobs": {
+      "lock_timeout": 2000,
+      "deadlock_timeout": 500,
+      "idle_in_transaction_session_timeout": 60000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "short_lock_timeout_retry_storm",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "lock_timeout 过短（如 50–100ms）以为“快速失败”。在常见的 OLTP 行锁竞争下，语句频繁因锁超时被取消，应用层立刻重试引发重试风暴，反而放大竞争。典型现象：日志中“canceling statement due to lock timeout”密集出现，吞吐振荡、响应时间抖动。优化方向：适度提高 lock_timeout（如 300–1000ms），或针对低优先级语句单独设置更短阈值，避免全局过敏感。",
+    "category": "locks",
+    "workload": "mixed",
+    "knobs": {
+      "lock_timeout": 100,
+      "shared_buffers": "2GB",
+      "effective_cache_size": "24GB",
+      "effective_io_concurrency": 1
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "zero_lock_timeout_unbounded_waits",
+    "variant": 1,
+    "difficulty": 1,
+    "description": "lock_timeout 维持默认 0（无限等待）。在有长事务/偶发 DDL 的库中，较低优先级语句可能等待数分钟，拉长尾延迟并占用连接。典型现象：pg_stat_activity 中大量 sessions 长时间 wait_event_type=Lock；用户请求偶发“卡死”。优化方向：为非关键会话/查询设置有限的 lock_timeout（如 1–3s）以有界等待，关键语句可维持较长或单独策略。",
+    "category": "locks",
+    "workload": "read_only",
+    "knobs": {
+      "lock_timeout": 2000,
+      "idle_in_transaction_session_timeout": 120000,
+      "deadlock_timeout": 500
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "ddl_migration_flapping_with_short_lock_timeout",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "迁移工具将全局或会话 lock_timeout 设得很短（如 100–200ms），执行需要 AccessExclusive 的 ALTER TABLE/ADD COLUMN/ADD FK 时在正常写入流量下几乎必然超时并重试，迁移窗被无谓拉长。典型现象：迁移作业长时间“试→超时→重试”，业务无明显进展但元数据相关开销上升。优化方向：仅对迁移会话提高 lock_timeout 到秒级，并确保 deadlock_timeout 低于该阈值，使真实死锁能被及时检测；在低峰时段执行。",
+    "category": "locks",
+    "workload": "read_only",
+    "knobs": {
+      "deadlock_timeout": 500,
+      "lock_timeout": 3000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "ddl_migration_flapping_with_short_lock_timeout",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "迁移工具将全局或会话 lock_timeout 设得很短（如 100–200ms），执行需要 AccessExclusive 的 ALTER TABLE/ADD COLUMN/ADD FK 时在正常写入流量下几乎必然超时并重试，迁移窗被无谓拉长。典型现象：迁移作业长时间“试→超时→重试”，业务无明显进展但元数据相关开销上升。优化方向：仅对迁移会话提高 lock_timeout 到秒级，并确保 deadlock_timeout 低于该阈值，使真实死锁能被及时检测；在低峰时段执行。",
+    "category": "locks",
+    "workload": "read_only",
+    "knobs": {
+      "lock_timeout": 3000,
+      "deadlock_timeout": 500
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "advisory_lock_scheduler_short_lock_timeout",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "任务调度使用 pg_advisory_lock 实现互斥，但全局/该会话 lock_timeout 很短（如 100ms）。轻微并发重叠即触发锁超时，任务被频繁取消并快速重试，队列抖动。典型现象：调度日志频繁出现 lock timeout，任务重复提交，实际吞吐下降。优化方向：仅为调度会话提高 lock_timeout（如 1–5s）或改用 try 锁并指数退避；避免全局过短的 lock_timeout。",
+    "category": "locks",
+    "workload": "high_concurrency",
+    "knobs": {
+      "shared_buffers": "2GB",
+      "effective_cache_size": "16GB",
+      "effective_io_concurrency": 2,
+      "lock_timeout": 100
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "misordered_timeouts_lock_timeout_lt_deadlock_timeout",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "lock_timeout（如 300ms）小于 deadlock_timeout（如 1s）。出现真实死锁时，语句往往先因锁超时被取消，死锁检测尚未触发，导致持锁方不被终止，等待方不断重试，死锁长期存在。典型现象：明显的竞争下很少看到 deadlock detected 日志，却有大量 lock timeout 取消。优化方向：保证 deadlock_timeout 明显低于 lock_timeout（例如 deadlock_timeout≈200–400ms，lock_timeout≥1s），先做死锁判定再考虑超时失败。",
+    "category": "locks",
+    "workload": "write_heavy",
+    "knobs": {
+      "deadlock_timeout": 300,
+      "lock_timeout": 2000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "advisory_lock_scheduler_short_lock_timeout",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "任务调度使用 pg_advisory_lock 实现互斥，但全局/该会话 lock_timeout 很短（如 100ms）。轻微并发重叠即触发锁超时，任务被频繁取消并快速重试，队列抖动。典型现象：调度日志频繁出现 lock timeout，任务重复提交，实际吞吐下降。优化方向：仅为调度会话提高 lock_timeout（如 1–5s）或改用 try 锁并指数退避；避免全局过短的 lock_timeout。",
+    "category": "locks",
+    "workload": "high_concurrency",
+    "knobs": {
+      "shared_buffers": "512MB",
+      "lock_timeout": 100
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "readers_canceled_by_short_lock_timeout_during_ddl",
+    "variant": 0,
+    "difficulty": 2,
+    "description": "为“快失败”，线上 SELECT 统一设置较短 lock_timeout（如 100–200ms）。偶发 DDL（RENAME/SET NOT NULL/ATTACH PARTITION 等）短暂需要重锁时，大量读请求在极短等待后被取消，形成读请求错误尖峰。典型现象：DDL 时段 P95/P99 波动、客户端报错率瞬时升高。优化方向：适度提高读会话的 lock_timeout（如 300–500ms），同时对 DDL 会话设置更短的 lock_timeout 以拿不到锁就快速放弃，减少对前台的冲击。",
+    "category": "locks",
+    "workload": "mixed",
+    "knobs": {
+      "lock_timeout": 400,
+      "idle_in_transaction_session_timeout": 60000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "misordered_timeouts_lock_timeout_lt_deadlock_timeout",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "lock_timeout（如 300ms）小于 deadlock_timeout（如 1s）。出现真实死锁时，语句往往先因锁超时被取消，死锁检测尚未触发，导致持锁方不被终止，等待方不断重试，死锁长期存在。典型现象：明显的竞争下很少看到 deadlock detected 日志，却有大量 lock timeout 取消。优化方向：保证 deadlock_timeout 明显低于 lock_timeout（例如 deadlock_timeout≈200–400ms，lock_timeout≥1s），先做死锁判定再考虑超时失败。",
+    "category": "locks",
+    "workload": "mixed",
+    "knobs": {
+      "deadlock_timeout": 300,
+      "lock_timeout": 2000,
+      "shared_buffers": "4GB",
+      "effective_cache_size": "24GB",
+      "checkpoint_completion_target": 0.8
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "readers_canceled_by_short_lock_timeout_during_ddl",
+    "variant": 1,
+    "difficulty": 2,
+    "description": "为“快失败”，线上 SELECT 统一设置较短 lock_timeout（如 100–200ms）。偶发 DDL（RENAME/SET NOT NULL/ATTACH PARTITION 等）短暂需要重锁时，大量读请求在极短等待后被取消，形成读请求错误尖峰。典型现象：DDL 时段 P95/P99 波动、客户端报错率瞬时升高。优化方向：适度提高读会话的 lock_timeout（如 300–500ms），同时对 DDL 会话设置更短的 lock_timeout 以拿不到锁就快速放弃，减少对前台的冲击。",
+    "category": "locks",
+    "workload": "read_only",
+    "knobs": {
+      "lock_timeout": 400,
+      "deadlock_timeout": 500,
+      "idle_in_transaction_session_timeout": 60000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "mixed_priority_one_size_timeouts",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "全局采用“一刀切”的锁策略（如 lock_timeout=500ms，deadlock_timeout=500ms）。对 OLTP 来说等待过长/失败不可控；对维护任务又过于敏感、易超时。典型现象：前台尾延迟抖动、后台任务反复失败；不同负载的满意度都不佳。优化方向：按角色/工作负载分层设置（会话/用户级）lock_timeout（前台适中、低优先任务更短、维护更长），并统一约束 deadlock_timeout 小于各类 lock_timeout 的最小值以优先做死锁判定。",
+    "category": "locks",
+    "workload": "high_concurrency",
+    "knobs": {
+      "lock_timeout": 800,
+      "deadlock_timeout": 200,
+      "idle_in_transaction_session_timeout": 180000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "hot_row_contention_with_high_deadlock_and_short_lock",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "热点行更新（计数/库存等）下，deadlock_timeout 偏高（如 2s）且 lock_timeout 偏短（如 200ms）。发生循环等待时，语句常在死锁检测前超时并重试，持锁者持续运行、吞吐下降，几乎看不到 deadlock 日志。典型现象：锁超时大量出现、成功吞吐低于预期单线程水平。优化方向：降低 deadlock_timeout 至 200–400ms，并将 lock_timeout 提高到高于 deadlock_timeout 的阈值，让系统先打破死锁再考虑失败重试；同时结合应用重试退避。",
+    "category": "locks",
+    "workload": "mixed",
+    "knobs": {
+      "deadlock_timeout": 300,
+      "lock_timeout": 800
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "mixed_priority_one_size_timeouts",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "全局采用“一刀切”的锁策略（如 lock_timeout=500ms，deadlock_timeout=500ms）。对 OLTP 来说等待过长/失败不可控；对维护任务又过于敏感、易超时。典型现象：前台尾延迟抖动、后台任务反复失败；不同负载的满意度都不佳。优化方向：按角色/工作负载分层设置（会话/用户级）lock_timeout（前台适中、低优先任务更短、维护更长），并统一约束 deadlock_timeout 小于各类 lock_timeout 的最小值以优先做死锁判定。",
+    "category": "locks",
+    "workload": "write_heavy",
+    "knobs": {
+      "lock_timeout": 1500,
+      "deadlock_timeout": 250,
+      "idle_in_transaction_session_timeout": 60000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "hot_row_contention_with_high_deadlock_and_short_lock",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "热点行更新（计数/库存等）下，deadlock_timeout 偏高（如 2s）且 lock_timeout 偏短（如 200ms）。发生循环等待时，语句常在死锁检测前超时并重试，持锁者持续运行、吞吐下降，几乎看不到 deadlock 日志。典型现象：锁超时大量出现、成功吞吐低于预期单线程水平。优化方向：降低 deadlock_timeout 至 200–400ms，并将 lock_timeout 提高到高于 deadlock_timeout 的阈值，让系统先打破死锁再考虑失败重试；同时结合应用重试退避。",
+    "category": "locks",
+    "workload": "mixed",
+    "knobs": {
+      "deadlock_timeout": 300,
+      "lock_timeout": 800
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "partition_maintenance_misaligned_timeouts",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "分区维护（ATTACH/DETACH PARTITION）会话设置较长 lock_timeout（如 5s），deadlock_timeout 也偏高。白天流量下维护会话长时间等待并在偶发空窗抢到锁，瞬间阻塞写入，引发短暂全站抖动。典型现象：不可预期的写入尖峰阻塞、请求尾延迟突增。优化方向：将维护会话 lock_timeout 设短（拿不到锁即退出重试），并将 deadlock_timeout 下调以尽快识别异常锁链；选择低峰时段重试。",
+    "category": "locks",
+    "workload": "write_heavy",
+    "knobs": {
+      "deadlock_timeout": 200,
+      "lock_timeout": 300
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "partition_maintenance_misaligned_timeouts",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "分区维护（ATTACH/DETACH PARTITION）会话设置较长 lock_timeout（如 5s），deadlock_timeout 也偏高。白天流量下维护会话长时间等待并在偶发空窗抢到锁，瞬间阻塞写入，引发短暂全站抖动。典型现象：不可预期的写入尖峰阻塞、请求尾延迟突增。优化方向：将维护会话 lock_timeout 设短（拿不到锁即退出重试），并将 deadlock_timeout 下调以尽快识别异常锁链；选择低峰时段重试。",
+    "category": "locks",
+    "workload": "mixed",
+    "knobs": {
+      "deadlock_timeout": 200,
+      "lock_timeout": 300,
+      "idle_in_transaction_session_timeout": 60000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "long_wait_chain_with_high_timeouts",
+    "variant": 0,
+    "difficulty": 3,
+    "description": "混合负载下形成长锁等待链（更新→触发器/外键→DDL 等）。lock_timeout 过高或为 0，deadlock_timeout 也偏高，导致等待链长期不被打破，连接堆积、吞吐大幅下降。典型现象：pg_stat_activity 中长时间 Lock 等待、队列增长但几乎无取消/死锁日志。优化方向：下调 deadlock_timeout（如 200–500ms）以更快探测复杂死锁/循环等待，并为低优先级查询设置有限的 lock_timeout 以主动“出队”，缩短等待链长度。",
+    "category": "locks",
+    "workload": "read_only",
+    "knobs": {
+      "deadlock_timeout": 400,
+      "lock_timeout": 3000
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  },
+  {
+    "name": "long_wait_chain_with_high_timeouts",
+    "variant": 1,
+    "difficulty": 3,
+    "description": "混合负载下形成长锁等待链（更新→触发器/外键→DDL 等）。lock_timeout 过高或为 0，deadlock_timeout 也偏高，导致等待链长期不被打破，连接堆积、吞吐大幅下降。典型现象：pg_stat_activity 中长时间 Lock 等待、队列增长但几乎无取消/死锁日志。优化方向：下调 deadlock_timeout（如 200–500ms）以更快探测复杂死锁/循环等待，并为低优先级查询设置有限的 lock_timeout 以主动“出队”，缩短等待链长度。",
+    "category": "locks",
+    "workload": "write_heavy",
+    "knobs": {
+      "deadlock_timeout": 3000,
+      "lock_timeout": 30000,
+      "max_connections": 200
+    },
+    "hardware_hint": {
+      "cpu_count": 16,
+      "total_memory_gb": 32,
+      "disk_type": "HDD"
+    }
+  }
+]

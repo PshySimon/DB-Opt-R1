@@ -260,7 +260,7 @@ def main():
     parser.add_argument("--num-workers", type=int, default=1, help="单棵树内并发 simulation 线程数（1=串行）")
 
     # LLM
-    parser.add_argument("--model", default="gpt-4", help="LLM 模型名称")
+    parser.add_argument("--model", default="gpt-5", help="LLM 模型名称")
     parser.add_argument("--api-key", default=None, help="API Key")
     parser.add_argument("--api-base", default=None, help="API Base URL")
 

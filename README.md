@@ -183,7 +183,7 @@ python3 -m datasets.synthesis.mcts.run_search \
     --knob-space configs/knob_space.yaml \
     --cost-model cost_model/saved/model.pkl \
     --output-dir datasets/data \
-    --model gpt-4 \
+    --model gpt-5 \
     --api-key $OPENAI_API_KEY \
     --api-base $OPENAI_API_BASE \
     --num-envs 100 \
