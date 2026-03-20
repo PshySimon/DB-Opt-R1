@@ -182,8 +182,24 @@ python3 -m datasets.synthesis.mcts.run_search \
     --scenarios datasets/data/scenarios/collected.json \
     --knob-space configs/knob_space.yaml \
     --cost-model cost_model/saved/model.pkl \
-    --output-dir datasets/data
+    --output-dir datasets/data \
+    --model gpt-4 \
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE \
+    --num-envs 100 \
+    --parallel 4 \
+    --num-workers 2 \
+    --simulations 50
 ```
+
+**并行参数**：
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--parallel` | 多环境并行数（同时搜索 N 个场景） | 1 |
+| `--num-workers` | 单棵树内并发 simulation 线程数 | 1 |
+| `--num-envs` | 搜索的环境总数 | 100 |
+| `--simulations` | 每棵树 MCTS 迭代次数 | 50 |
 
 输出：
 - `datasets/data/sft_data.jsonl` — SFT 训练数据
