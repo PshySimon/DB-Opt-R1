@@ -178,15 +178,15 @@ kill $(cat logs/scenarios/running.pid)
 基于采集的场景数据，MCTS 搜索最优调优轨迹，生成 SFT + 对比对数据。
 
 ```bash
+# --scenarios 传目录，自动合并所有 collected_*.json
 python3 -m datasets.synthesis.mcts.run_search \
-    --scenarios datasets/data/scenarios/collected.json \
+    --scenarios datasets/data/scenarios/ \
     --knob-space configs/knob_space.yaml \
     --cost-model cost_model/saved/model.pkl \
     --output-dir datasets/data \
     --model gpt-5 \
     --api-key $OPENAI_API_KEY \
     --api-base $OPENAI_API_BASE \
-    --num-envs 100 \
     --parallel 4 \
     --num-workers 2 \
     --simulations 50
@@ -196,9 +196,10 @@ python3 -m datasets.synthesis.mcts.run_search \
 
 | 参数 | 说明 | 默认 |
 |------|------|------|
+| `--scenarios` | 场景数据源（单文件或目录，目录下自动合并 `collected_*.json`） | - |
+| `--num-envs` | 搜索环境数（0=全量） | 0 |
 | `--parallel` | 多环境并行数（同时搜索 N 个场景） | 1 |
 | `--num-workers` | 单棵树内并发 simulation 线程数 | 1 |
-| `--num-envs` | 搜索的环境总数 | 100 |
 | `--simulations` | 每棵树 MCTS 迭代次数 | 50 |
 
 输出：

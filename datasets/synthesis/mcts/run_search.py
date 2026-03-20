@@ -121,18 +121,21 @@ def run_mcts(args):
 
     # 对每个环境样本搜索
     if args.scenarios:
-        # 新模式：单文件或目录
+        # 新模式：单文件或目录（自动合并 collected_*.json）
         env_tmp = DBToolEnv(
             mode="train", scenario_dir=args.scenarios,
             max_turns=args.depth, knob_space_path=args.knob_space,
         )
-        num_samples = min(args.num_envs, env_tmp.num_samples)
+        total = env_tmp.num_samples
         del env_tmp
     else:
         # 旧模式：CSV
         import pandas as pd
         dataset = pd.read_csv(args.dataset, on_bad_lines="skip")
-        num_samples = min(args.num_envs, len(dataset))
+        total = len(dataset)
+
+    num_samples = min(args.num_envs, total) if args.num_envs > 0 else total
+    logger.info(f"场景总数: {total}，本次搜索: {num_samples}")
 
     def search_one_env(i):
         """搜索单个环境，返回 (sft_items, contrastive_items)"""
@@ -255,7 +258,7 @@ def main():
     parser.add_argument("--cost-model", default=None, help="Cost Model 路径")
     parser.add_argument("--knob-space", default="configs/knob_space.yaml", help="knob_space.yaml 路径")
     parser.add_argument("--output-dir", default="datasets/data", help="输出目录（datasets/data/）")
-    parser.add_argument("--num-envs", type=int, default=100, help="搜索的环境数")
+    parser.add_argument("--num-envs", type=int, default=0, help="搜索的环境数（0=全量）")
     parser.add_argument("--parallel", type=int, default=1, help="多环境并行数（1=串行）")
     parser.add_argument("--num-workers", type=int, default=1, help="单棵树内并发 simulation 线程数（1=串行）")
 

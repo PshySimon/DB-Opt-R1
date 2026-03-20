@@ -91,23 +91,43 @@ class DBToolEnv(ToolEnv):
 
     @staticmethod
     def _load_scenarios(source: str) -> list:
-        """加载场景：支持单个 JSON 文件（数组）或目录"""
+        """加载场景：支持单 JSON 文件、目录（自动合并 collected_*.json）"""
+        import glob
         from datasets.synthesis.scenarios.schema import ScenarioState
+
+        def _parse_items(items):
+            return [ScenarioState(**{k: v for k, v in item.items()
+                    if k in ScenarioState.__dataclass_fields__})
+                    for item in items]
 
         if os.path.isfile(source):
             # 单文件（JSON 数组）
             with open(source, "r", encoding="utf-8") as f:
                 items = json.load(f)
-            return [ScenarioState(**{k: v for k, v in item.items()
-                    if k in ScenarioState.__dataclass_fields__})
-                    for item in items]
-        elif os.path.isdir(source):
-            # 目录（每个 .json 一个场景）
-            scenarios = []
-            for fname in sorted(os.listdir(source)):
-                if fname.endswith(".json"):
-                    scenarios.append(ScenarioState.from_json(os.path.join(source, fname)))
+            scenarios = _parse_items(items)
+            logger.info(f"  加载 {source}: {len(scenarios)} 个场景")
             return scenarios
+
+        elif os.path.isdir(source):
+            # 目录：优先匹配 collected_*.json（每个是数组），否则逐个 .json
+            collected_files = sorted(glob.glob(os.path.join(source, "collected_*.json")))
+            if collected_files:
+                scenarios = []
+                for fpath in collected_files:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        items = json.load(f)
+                    batch = _parse_items(items)
+                    logger.info(f"  加载 {os.path.basename(fpath)}: {len(batch)} 个场景")
+                    scenarios.extend(batch)
+                return scenarios
+            else:
+                # 每个 .json 是单个场景
+                scenarios = []
+                for fname in sorted(os.listdir(source)):
+                    if fname.endswith(".json"):
+                        scenarios.append(ScenarioState.from_json(os.path.join(source, fname)))
+                return scenarios
+
         return []
 
     @property
