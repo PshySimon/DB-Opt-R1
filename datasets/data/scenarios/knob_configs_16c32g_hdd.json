@@ -16,7 +16,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_work_mem_sort_spill",
@@ -35,7 +36,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "tiny_shared_buffers",
@@ -54,7 +56,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_work_mem_sort_spill",
@@ -73,7 +76,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "tiny_shared_buffers",
@@ -93,7 +97,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "small_wal_buffers_flush_stalls",
@@ -113,7 +118,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_temp_buffers_temp_spill",
@@ -131,7 +137,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_temp_buffers_temp_spill",
@@ -149,7 +156,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_shared_buffers_os_cache_pressure",
@@ -169,7 +177,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_shared_buffers_os_cache_pressure",
@@ -189,7 +198,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "overestimated_effective_cache_size_plan_misses",
@@ -208,7 +218,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "overestimated_effective_cache_size_plan_misses",
@@ -226,7 +237,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_maintenance_work_mem_parallel_ddl_pressure",
@@ -244,7 +256,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_work_mem_concurrency_bloat",
@@ -264,7 +277,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_maintenance_work_mem_parallel_ddl_pressure",
@@ -282,7 +296,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_work_mem_concurrency_bloat",
@@ -301,7 +316,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_maintenance_mem_and_small_buffers_autovacuum_bloat",
@@ -320,7 +336,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_cache_and_work_mem_join_sort_spills",
@@ -337,7 +354,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_cache_and_work_mem_join_sort_spills",
@@ -355,7 +373,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_maintenance_mem_and_small_buffers_autovacuum_bloat",
@@ -375,7 +394,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_temp_and_work_mem_connection_spike_pressure",
@@ -392,7 +412,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "planner_bias_with_cache_misestimate_and_spill",
@@ -410,7 +431,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_temp_and_work_mem_connection_spike_pressure",
@@ -429,7 +451,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "planner_bias_with_cache_misestimate_and_spill",
@@ -446,7 +469,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_random_page_cost_index_scan_bias",
@@ -464,7 +488,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_random_page_cost_index_scan_bias",
@@ -481,7 +506,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_random_page_cost_seq_scan_bias",
@@ -499,7 +525,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_random_page_cost_seq_scan_bias",
@@ -518,7 +545,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_cpu_tuple_cost_row_heavy_plans",
@@ -537,7 +565,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_cpu_tuple_cost_row_heavy_plans",
@@ -555,7 +584,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "unbalanced_seq_random_cost_ratio_misplan",
@@ -574,7 +604,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_cpu_operator_cost_expression_avoidance",
@@ -591,7 +622,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_cpu_operator_cost_expression_avoidance",
@@ -610,7 +642,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "unbalanced_seq_random_cost_ratio_misplan",
@@ -628,7 +661,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_cpu_index_tuple_cost_seq_scan_preference",
@@ -646,7 +680,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_cpu_index_tuple_cost_seq_scan_preference",
@@ -665,7 +700,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_default_statistics_target_skew_misestimation",
@@ -684,7 +720,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_default_statistics_target_skew_misestimation",
@@ -703,7 +740,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_join_collapse_limit_fixed_join_order",
@@ -721,7 +759,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_join_collapse_limit_fixed_join_order",
@@ -740,7 +779,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_stats_and_join_collapse_planning_bloat",
@@ -758,7 +798,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_from_collapse_plus_low_stats_join_misorder",
@@ -778,7 +819,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_stats_and_join_collapse_planning_bloat",
@@ -796,7 +838,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_geqo_threshold_planning_time_explosion",
@@ -813,7 +856,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_from_collapse_plus_low_stats_join_misorder",
@@ -833,7 +877,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_random_page_cost_plus_low_stats_nested_loop_overfetch",
@@ -850,7 +895,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_geqo_threshold_planning_time_explosion",
@@ -868,7 +914,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_random_page_cost_plus_low_stats_nested_loop_overfetch",
@@ -885,7 +932,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_max_wal_size_checkpoint_storm",
@@ -904,7 +952,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_max_wal_size_checkpoint_storm",
@@ -924,7 +973,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_min_wal_size_wal_churn",
@@ -943,7 +993,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_min_wal_size_wal_churn",
@@ -961,7 +1012,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "excessive_commit_delay_latency_penalty",
@@ -980,7 +1032,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "excessive_commit_delay_latency_penalty",
@@ -999,7 +1052,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "no_wal_compression_fpi_bandwidth_pressure",
@@ -1018,7 +1072,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "no_wal_compression_fpi_bandwidth_pressure",
@@ -1037,7 +1092,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "short_checkpoint_timeout_fpi_burst",
@@ -1054,7 +1110,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "zero_commit_delay_no_group_commit_benefit",
@@ -1073,7 +1130,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "short_checkpoint_timeout_fpi_burst",
@@ -1090,7 +1148,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "sync_commit_remote_apply_tail_latency",
@@ -1110,7 +1169,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "zero_commit_delay_no_group_commit_benefit",
@@ -1129,7 +1189,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "sync_commit_remote_apply_tail_latency",
@@ -1149,7 +1210,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_checkpoint_completion_target_io_spikes",
@@ -1169,7 +1231,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_checkpoint_completion_target_io_spikes",
@@ -1188,7 +1251,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_max_wal_size_long_recovery",
@@ -1207,7 +1271,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_max_wal_size_long_recovery",
@@ -1226,7 +1291,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "checkpoint_stalls_with_sync_commit_and_small_maxwal",
@@ -1245,7 +1311,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "checkpoint_stalls_with_sync_commit_and_small_maxwal",
@@ -1262,7 +1329,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "cpu_bound_with_wal_compression_on",
@@ -1281,7 +1349,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "cpu_bound_with_wal_compression_on",
@@ -1300,7 +1369,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "etl_burst_with_small_maxwal_and_strict_durability",
@@ -1317,7 +1387,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "etl_burst_with_small_maxwal_and_strict_durability",
@@ -1334,7 +1405,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_workers_vacuum_queueing",
@@ -1354,7 +1426,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_workers_vacuum_queueing",
@@ -1374,7 +1447,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_workers_io_contention",
@@ -1391,7 +1465,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_workers_io_contention",
@@ -1408,7 +1483,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "long_naptime_slow_autovacuum",
@@ -1427,7 +1503,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "long_naptime_slow_autovacuum",
@@ -1446,7 +1523,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_analyze_scale_stale_stats",
@@ -1465,7 +1543,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_analyze_scale_stale_stats",
@@ -1482,7 +1561,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_naptime_low_vacuum_threshold_chatter",
@@ -1501,7 +1581,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_naptime_low_vacuum_threshold_chatter",
@@ -1520,7 +1601,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_scale_low_threshold_hot_table_overvacuum",
@@ -1538,7 +1620,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_scale_low_threshold_hot_table_overvacuum",
@@ -1556,7 +1639,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_scale_high_threshold_deadtuple_bloat",
@@ -1575,7 +1659,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_analyze_scale_low_threshold_overanalyze",
@@ -1592,7 +1677,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_scale_high_threshold_deadtuple_bloat",
@@ -1611,7 +1697,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_analyze_scale_low_threshold_overanalyze",
@@ -1630,7 +1717,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_workers_long_naptime_high_scale_burst_backlog",
@@ -1648,7 +1736,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_workers_long_naptime_high_scale_burst_backlog",
@@ -1666,7 +1755,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_workers_low_naptime_low_scale_storm",
@@ -1684,7 +1774,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_workers_low_naptime_low_scale_storm",
@@ -1702,7 +1793,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_threshold_high_scale_high_analyze_scale_imbalance",
@@ -1720,7 +1812,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_threshold_high_scale_high_analyze_scale_imbalance",
@@ -1738,7 +1831,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_analyze_threshold_scale_high_naptime_high_vacuum_threshold_staleness_bloat",
@@ -1758,7 +1852,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_analyze_threshold_scale_high_naptime_high_vacuum_threshold_staleness_bloat",
@@ -1777,7 +1872,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_per_gather_underutilized_scan",
@@ -1796,7 +1892,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_per_gather_underutilized_scan",
@@ -1813,7 +1910,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_global_worker_pool_capacity",
@@ -1831,7 +1929,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_global_worker_pool_capacity",
@@ -1848,7 +1947,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_parallel_maintenance_slow_index_vacuum",
@@ -1867,7 +1967,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_per_gather_cpu_hog_in_multi_tenant",
@@ -1884,7 +1985,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_parallel_maintenance_slow_index_vacuum",
@@ -1903,7 +2005,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_effective_io_concurrency_parallel_bitmap_scan",
@@ -1920,7 +2023,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_effective_io_concurrency_parallel_bitmap_scan",
@@ -1938,7 +2042,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_per_gather_cpu_hog_in_multi_tenant",
@@ -1955,7 +2060,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "mismatch_high_per_gather_low_global_starvation",
@@ -1972,7 +2078,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "ddl_vs_query_parallel_worker_contention",
@@ -1989,7 +2096,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "ddl_vs_query_parallel_worker_contention",
@@ -2007,7 +2115,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_io_concurrency_and_low_per_gather_bitmap_throughput",
@@ -2024,7 +2133,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "pool_exhaustion_with_high_per_gather_and_maintenance_low_global",
@@ -2042,7 +2152,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_io_concurrency_and_low_per_gather_bitmap_throughput",
@@ -2060,7 +2171,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "mismatch_high_per_gather_low_global_starvation",
@@ -2077,7 +2189,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "pool_exhaustion_with_high_per_gather_and_maintenance_low_global",
@@ -2095,7 +2208,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "partitioned_aggregate_throttled_by_caps_and_io",
@@ -2113,7 +2227,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "manycore_underutilization_due_to_conservative_parallel_caps",
@@ -2131,7 +2246,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "partitioned_aggregate_throttled_by_caps_and_io",
@@ -2149,7 +2265,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "autovacuum_parallel_starves_foreground_queries",
@@ -2167,7 +2284,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "manycore_underutilization_due_to_conservative_parallel_caps",
@@ -2185,7 +2303,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "autovacuum_parallel_starves_foreground_queries",
@@ -2203,7 +2322,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "sleepy_bgwriter_backend_flushes",
@@ -2223,7 +2343,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "sleepy_bgwriter_backend_flushes",
@@ -2243,7 +2364,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "overly_frequent_bgwriter_wakes",
@@ -2262,7 +2384,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "overly_frequent_bgwriter_wakes",
@@ -2281,7 +2404,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "capped_lru_batch_cleaning_lag",
@@ -2300,7 +2424,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "capped_lru_batch_cleaning_lag",
@@ -2319,7 +2444,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_lru_batch_write_bursts",
@@ -2338,7 +2464,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_delay_low_maxpages_dirty_backlog",
@@ -2357,7 +2484,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_lru_batch_write_bursts",
@@ -2375,7 +2503,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_delay_high_maxpages_bgwriter_storm",
@@ -2394,7 +2523,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_delay_low_maxpages_dirty_backlog",
@@ -2413,7 +2543,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_delay_high_maxpages_bgwriter_storm",
@@ -2433,7 +2564,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_delay_low_multiplier_eviction_stalls",
@@ -2450,7 +2582,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_delay_low_multiplier_eviction_stalls",
@@ -2467,7 +2600,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_delay_high_multiplier_overclean",
@@ -2486,7 +2620,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_delay_high_multiplier_overclean",
@@ -2504,7 +2639,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_multiplier_low_maxpages_cleaner_thrash",
@@ -2523,7 +2659,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "big_buffers_default_bgwriter_undercoverage",
@@ -2543,7 +2680,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_multiplier_low_maxpages_cleaner_thrash",
@@ -2562,7 +2700,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "read_heavy_aggressive_bgwriter_hurts_latency",
@@ -2581,7 +2720,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "read_heavy_aggressive_bgwriter_hurts_latency",
@@ -2601,7 +2741,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "iops_capped_env_bgwriter_needs_smoothing",
@@ -2621,7 +2762,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "iops_capped_env_bgwriter_needs_smoothing",
@@ -2641,7 +2783,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "big_buffers_default_bgwriter_undercoverage",
@@ -2659,7 +2802,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "conservative_max_connections_caps_concurrency",
@@ -2678,7 +2822,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "conservative_max_connections_caps_concurrency",
@@ -2697,7 +2842,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_max_connections_memory_waste",
@@ -2716,7 +2862,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "over_reserved_connections_reduce_user_capacity",
@@ -2734,7 +2881,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "oversized_max_connections_memory_waste",
@@ -2753,7 +2901,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "over_reserved_connections_reduce_user_capacity",
@@ -2770,7 +2919,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "no_idle_in_transaction_timeout_lock_bloat",
@@ -2789,7 +2939,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_max_conn_no_idle_timeout_lock_and_memory_pressure",
@@ -2806,7 +2957,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_reserved_vs_low_maxconn_client_starvation",
@@ -2825,7 +2977,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "no_idle_in_transaction_timeout_lock_bloat",
@@ -2845,7 +2998,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_max_conn_no_idle_timeout_lock_and_memory_pressure",
@@ -2865,7 +3019,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_reserved_vs_low_maxconn_client_starvation",
@@ -2882,7 +3037,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_maxconn_and_aggressive_idle_timeout_retry_storm",
@@ -2901,7 +3057,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_reserved_under_high_utilization_autovacuum_starvation",
@@ -2920,7 +3077,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_maxconn_and_aggressive_idle_timeout_retry_storm",
@@ -2937,7 +3095,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_reserved_under_high_utilization_autovacuum_starvation",
@@ -2957,7 +3116,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "overprovisioned_maxconn_overreserved_and_no_idle_timeout_triple_whammy",
@@ -2974,7 +3134,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "overprovisioned_maxconn_overreserved_and_no_idle_timeout_triple_whammy",
@@ -2992,7 +3153,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_maxconn_high_reserved_aggressive_idle_timeout_deadlock_of_policies",
@@ -3010,7 +3172,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "bursty_login_high_maxconn_low_reserved_slow_vacuum_bloat_feedback",
@@ -3029,7 +3192,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_maxconn_high_reserved_aggressive_idle_timeout_deadlock_of_policies",
@@ -3047,7 +3211,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "bursty_login_high_maxconn_low_reserved_slow_vacuum_bloat_feedback",
@@ -3065,7 +3230,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "etl_long_tx_no_timeout_high_maxconn_vacuum_backlog_and_lock_waits",
@@ -3085,7 +3251,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_deadlock_timeout_cpu_churn",
@@ -3103,7 +3270,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "etl_long_tx_no_timeout_high_maxconn_vacuum_backlog_and_lock_waits",
@@ -3123,7 +3291,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "low_deadlock_timeout_cpu_churn",
@@ -3140,7 +3309,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_deadlock_timeout_blocking_tail",
@@ -3158,7 +3328,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "short_lock_timeout_retry_storm",
@@ -3176,7 +3347,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "high_deadlock_timeout_blocking_tail",
@@ -3194,7 +3366,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "zero_lock_timeout_unbounded_waits",
@@ -3212,7 +3385,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "short_lock_timeout_retry_storm",
@@ -3231,7 +3405,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "zero_lock_timeout_unbounded_waits",
@@ -3249,7 +3424,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "ddl_migration_flapping_with_short_lock_timeout",
@@ -3266,7 +3442,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "ddl_migration_flapping_with_short_lock_timeout",
@@ -3283,7 +3460,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "advisory_lock_scheduler_short_lock_timeout",
@@ -3302,7 +3480,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "misordered_timeouts_lock_timeout_lt_deadlock_timeout",
@@ -3319,7 +3498,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "advisory_lock_scheduler_short_lock_timeout",
@@ -3336,7 +3516,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "readers_canceled_by_short_lock_timeout_during_ddl",
@@ -3353,7 +3534,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "misordered_timeouts_lock_timeout_lt_deadlock_timeout",
@@ -3373,7 +3555,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "readers_canceled_by_short_lock_timeout_during_ddl",
@@ -3391,7 +3574,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "mixed_priority_one_size_timeouts",
@@ -3409,7 +3593,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "hot_row_contention_with_high_deadlock_and_short_lock",
@@ -3426,7 +3611,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "mixed_priority_one_size_timeouts",
@@ -3444,7 +3630,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "hot_row_contention_with_high_deadlock_and_short_lock",
@@ -3461,7 +3648,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "partition_maintenance_misaligned_timeouts",
@@ -3478,7 +3666,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "partition_maintenance_misaligned_timeouts",
@@ -3496,7 +3685,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "long_wait_chain_with_high_timeouts",
@@ -3513,7 +3703,8 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   },
   {
     "name": "long_wait_chain_with_high_timeouts",
@@ -3531,6 +3722,7 @@
       "cpu_count": 16,
       "total_memory_gb": 32,
       "disk_type": "HDD"
-    }
+    },
+    "source": "llm_generated"
   }
 ]

@@ -1,6 +1,6 @@
 """
 Cost Model 训练脚本
-用法: python3 -m cost_model.train --data datasets/data/cost_model/dataset.csv
+用法: python3 -m cost_model.train --data datasets/data/scenarios/collected.json
 """
 
 import argparse
@@ -196,7 +196,7 @@ def train(data_path: str, knob_space_path: str, output_dir: str,
 
 def main():
     parser = argparse.ArgumentParser(description="训练 Cost Model")
-    parser.add_argument("--data", required=True, help="CSV 数据路径")
+    parser.add_argument("--data", required=True, help="数据路径（CSV 或 JSON）")
     parser.add_argument("--knob-space", default="configs/knob_space.yaml",
                         help="knob_space.yaml 路径")
     parser.add_argument("--output", default="cost_model/checkpoints/v1/",

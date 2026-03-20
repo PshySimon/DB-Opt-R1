@@ -1,6 +1,6 @@
 """
 Cost Model 特征预处理 Pipeline
-原始 CSV → 特征筛选 → 单位解析 → 缺失填充 → 变换 → 编码 → X, y
+原始 CSV / JSON → 特征筛选 → 单位解析 → 缺失填充 → 变换 → 编码 → X, y
 """
 
 import re
@@ -80,7 +80,7 @@ class KnobPreprocessor:
 
     用法：
         prep = KnobPreprocessor("configs/knob_space.yaml")
-        X, y, meta = prep.fit_transform("datasets/data/cost_model/dataset.csv")
+        X, y, meta = prep.fit_transform("datasets/data/scenarios/collected.json")
         prep.save("cost_model/checkpoints/v1/")
 
         # 推理
@@ -160,10 +160,9 @@ class KnobPreprocessor:
         for name, spec in config.get("knobs", {}).items():
             self.knob_defaults[name] = spec.get("default")
 
-    def fit_transform(self, csv_path: str):
-        """训练时：加载 CSV，拟合 + 变换，返回 X, y, meta"""
-        logger.info(f"加载数据: {csv_path}")
-        df = pd.read_csv(csv_path, on_bad_lines="skip")
+    def fit_transform(self, data_path: str):
+        """训练时：加载数据（CSV 或 JSON），拟合 + 变换，返回 X, y, meta"""
+        df = self._load_data(data_path)
         logger.info(f"  原始: {df.shape[0]} 行 × {df.shape[1]} 列")
 
         # 保存 status 和 workload 信息
@@ -198,6 +197,61 @@ class KnobPreprocessor:
         logger.info(f"  样本: {X.shape[0]} (成功 {success_mask.sum()}, 失败 {(~success_mask).sum()})")
 
         return X, y, meta
+
+    def _load_data(self, data_path: str) -> pd.DataFrame:
+        """加载数据：自动检测 CSV 或 JSON（ScenarioState 格式）"""
+        path = str(data_path)
+        logger.info(f"加载数据: {path}")
+
+        if path.endswith(".json"):
+            return self._load_json(path)
+        else:
+            return pd.read_csv(path, on_bad_lines="skip")
+
+    def _load_json(self, json_path: str) -> pd.DataFrame:
+        """将 ScenarioState JSON 数组展平为 CSV 等价的 DataFrame
+
+        JSON 格式:
+          [{"knobs": {"shared_buffers": "2GB", ...},
+            "hardware": {"cpu_count": 8, ...},
+            "workload": {"type": "mixed", "tps_current": 3127, ...},
+            ...}, ...]
+
+        展平为:
+          knob_shared_buffers | hw_cpu_count | workload | tps | status
+        """
+        import json as json_mod
+        with open(json_path, "r", encoding="utf-8") as f:
+            items = json_mod.load(f)
+
+        rows = []
+        for item in items:
+            row = {}
+
+            # knobs → knob_* 列
+            for k, v in item.get("knobs", {}).items():
+                row[f"knob_{k}"] = v
+
+            # hardware → hw_* 列
+            for k, v in item.get("hardware", {}).items():
+                row[f"hw_{k}"] = v
+
+            # workload
+            wl = item.get("workload", {})
+            if isinstance(wl, dict):
+                row["workload"] = wl.get("type", "mixed")
+                row["tps"] = wl.get("tps_current", 0)
+                row["latency_avg"] = wl.get("latency_avg_ms", 0)
+            else:
+                row["workload"] = str(wl)
+                row["tps"] = 0
+
+            row["status"] = "success"  # collected.json 里都是成功的
+            rows.append(row)
+
+        df = pd.DataFrame(rows)
+        logger.info(f"  JSON 加载: {len(rows)} 条，{len(df.columns)} 列")
+        return df
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """从原始 df 提取并变换特征"""
@@ -359,8 +413,8 @@ class KnobPreprocessor:
         return prep
 
 
-def load_dataset(csv_path: str, knob_space_path: str):
-    """快捷函数: CSV + knob_space → X, y, meta, preprocessor"""
+def load_dataset(data_path: str, knob_space_path: str):
+    """快捷函数: CSV/JSON + knob_space → X, y, meta, preprocessor"""
     prep = KnobPreprocessor(knob_space_path)
-    X, y, meta = prep.fit_transform(csv_path)
+    X, y, meta = prep.fit_transform(data_path)
     return X, y, meta, prep

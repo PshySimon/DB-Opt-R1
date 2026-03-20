@@ -39,23 +39,21 @@
 ├── environment/
 │   └── tools/                          # 12 个 DB 调优工具（real/simulated 双模式）
 ├── cost_model/
-│   ├── data/                           # Cost Model 数据采集 pipeline
+│   ├── knob_generator.py               # Knob 随机采样（random/near_default/LHS/mixed）
 │   ├── train.py                        # 训练脚本
-│   └── preprocess.py                   # 特征工程
+│   ├── model.py                        # 模型定义
+│   └── preprocess.py                   # 特征工程（支持 CSV/JSON 输入）
 ├── datasets/
-│   ├── data/                           # 所有数据集统一存放
-│   │   ├── cost_model/                 # Cost Model 采集数据
-│   │   └── scenarios/                  # 种子 + knob 配置 + 采集结果
+│   ├── data/scenarios/                 # 种子 + knob 配置 + 采集结果（统一 JSON）
 │   └── synthesis/
-│       ├── scenarios/                  # 场景生成 pipeline
+│       ├── scenarios/                  # 场景生成 + 采集 pipeline
 │       └── mcts/                       # MCTS 轨迹合成
 ├── configs/
 │   ├── config.yaml                     # 全局配置
 │   ├── knob_space.yaml                 # 45 个可调 knob 定义
 │   └── knob_effects.yaml              # Knob 效果知识库（瓶颈方向 + 效果描述）
 └── scripts/
-    ├── setup_env.sh                    # 环境准备
-    └── collect_costmodel.sh            # Cost Model 数据采集
+    └── setup_env.sh                    # 环境准备
 ```
 
 ## 环境准备
