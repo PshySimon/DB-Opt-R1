@@ -152,37 +152,54 @@ python3 -m datasets.synthesis.scenarios.pipeline generate \
     --api-base $OPENAI_API_BASE
 ```
 
-#### Step 2: 真机采集（需要 PG）
+#### Step 2: 随机采样 knob 配置（Cost Model 数据）
 
-将 knob 配置应用到 PG → pgbench → 采集完整指标（CPU/IO/等待事件/慢查询/日志）。
+纯本地生成，不需要 LLM。采样策略 `mixed` = 40% 随机 + 40% 默认值附近 + 20% LHS。
 
 ```bash
-# 后台执行（日志 + PID 保存到 logs/scenarios/）
+python3 -m datasets.synthesis.scenarios.pipeline random-sample \
+    --knob-space configs/knob_space.yaml \
+    --output datasets/data/scenarios/knob_configs_random.json \
+    --count 200 --strategy mixed
+```
+
+#### Step 3: 统一真机采集（需要 PG）
+
+`collect` 支持 glob，自动合并所有 `knob_configs_*.json`（LLM 生成 + 随机采样），一次采集。
+
+```bash
+# 后台执行
 mkdir -p logs/scenarios
 nohup python3 -m datasets.synthesis.scenarios.pipeline collect \
-    --input datasets/data/scenarios/knob_configs_8c16g_hdd.json \
+    --input "datasets/data/scenarios/knob_configs_*.json" \
     --output datasets/data/scenarios/collected.json \
     --host 127.0.0.1 --port 5432 \
     --user postgres --database benchmark \
     > logs/scenarios/$(date +%Y%m%d_%H%M%S).log 2>&1 &
 echo $! > logs/scenarios/running.pid
-
-# 查看进度
-tail -f logs/scenarios/*.log
-# 停止采集
-kill $(cat logs/scenarios/running.pid)
 ```
 
-#### Step 3: MCTS 轨迹合成
+数据带 `source` 标签：`llm_generated`（MCTS + Cost Model）、`random_sampled`（仅 Cost Model）。
 
-基于采集的场景数据，MCTS 搜索最优调优轨迹，生成 SFT + 对比对数据。
+#### Step 4: Cost Model 训练
+
+使用全量 `collected.json` 数据训练 Cost Model。
 
 ```bash
-# --scenarios 传目录，自动合并所有 collected_*.json
+python3 -m cost_model.train \
+    --data datasets/data/scenarios/collected.json \
+    --output cost_model/checkpoints/v3
+```
+
+#### Step 5: MCTS 轨迹合成
+
+基于 `source=llm_generated` 场景 + Cost Model，搜索最优调优轨迹。每次运行输出到带时间戳的子目录。
+
+```bash
 python3 -m datasets.synthesis.mcts.run_search \
     --scenarios datasets/data/scenarios/ \
     --knob-space configs/knob_space.yaml \
-    --cost-model cost_model/saved/model.pkl \
+    --cost-model cost_model/checkpoints/v3 \
     --output-dir datasets/data \
     --model gpt-5 \
     --api-key $OPENAI_API_KEY \
@@ -192,19 +209,20 @@ python3 -m datasets.synthesis.mcts.run_search \
     --simulations 5
 ```
 
-**并行参数**：
+**参数说明**：
 
 | 参数 | 说明 | 默认 |
 |------|------|------|
-| `--scenarios` | 场景数据源（单文件或目录，目录下自动合并 `collected_*.json`） | - |
+| `--scenarios` | 场景数据源（目录或文件，自动过滤 `source=llm_generated`） | - |
 | `--num-envs` | 搜索环境数（0=全量） | 0 |
 | `--parallel` | 多环境并行数（同时搜索 N 个场景） | 1 |
 | `--num-workers` | 单棵树内并发 simulation 线程数 | 1 |
 | `--simulations` | 每棵树 MCTS 迭代次数 | 5 |
 
-输出：
-- `datasets/data/sft_data.jsonl` — SFT 训练数据
-- `datasets/data/contrastive_pairs.jsonl` — DPO/对比学习数据
+输出（在 `datasets/data/run_YYYYMMDD_HHMMSS/` 下）：
+- `sft_trajectories.jsonl` — SFT 训练数据
+- `contrastive_pairs.jsonl` — DPO/对比学习数据
+- `mcts_trees/` — 搜索树 debug 文件
 
 ---
 
