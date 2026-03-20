@@ -329,7 +329,12 @@ def collect_scenarios(input_path: str, output_path: str,
                       pg_user: str = "postgres", pg_password: str = "",
                       pg_database: str = "postgres", pg_data_dir: str = None,
                       knob_space_path: str = "configs/knob_space.yaml"):
-    """读取 knob 配置 JSON，逐个应用到 PG，跑 benchmark，采集完整指标"""
+    """读取 knob 配置 JSON，逐个应用到 PG，跑 benchmark，采集完整指标
+
+    input_path 支持 glob 模式（如 knob_configs_*.json），会合并所有匹配文件。
+    """
+    import glob as glob_mod
+
     pg_ctl = PGConfigurator(
         pg_host=pg_host, pg_port=pg_port,
         pg_user=pg_user, pg_password=pg_password,
@@ -337,8 +342,19 @@ def collect_scenarios(input_path: str, output_path: str,
     )
     knob_space = KnobSpace(knob_space_path)
 
-    with open(input_path, "r", encoding="utf-8") as f:
-        configs = json.load(f)
+    # 支持 glob 合并多个文件
+    matched_files = sorted(glob_mod.glob(input_path))
+    if not matched_files:
+        # 不是 glob 模式，当作单文件
+        matched_files = [input_path]
+
+    configs = []
+    for fpath in matched_files:
+        with open(fpath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        logger.info(f"  加载 {fpath}: {len(data)} 条")
+        configs.extend(data)
+    logger.info(f"合计加载 {len(configs)} 条配置")
 
     # 按 knobs 内容去重
     seen_knobs = set()
@@ -419,6 +435,7 @@ def collect_scenarios(input_path: str, output_path: str,
             from dataclasses import asdict
             state = ScenarioState(
                 name=config["name"],
+                source=config.get("source", "llm_generated"),
                 difficulty=config.get("difficulty", 1),
                 description=config.get("description", ""),
                 hardware={k: v for k, v in hardware.items() if v is not None},
@@ -429,7 +446,7 @@ def collect_scenarios(input_path: str, output_path: str,
                 slow_queries=scenario_data.get("slow_queries", []),
                 logs=scenario_data.get("logs", []),
                 workload={
-                    "type": "mixed",
+                    "type": workload,
                     "tps_current": perf.get("tps", 0),
                     "latency_avg_ms": perf.get("latency_avg", 0),
                     "benchmark": "pgbench",
@@ -461,6 +478,56 @@ def collect_scenarios(input_path: str, output_path: str,
     logger.info(f"采集完成: {len(results)} 条，耗时 {int(elapsed)}s → {output_path}")
 
 
+# ==================== Step 3: 随机采样 knob 配置 ====================
+
+def random_sample_knobs(knob_space_path: str, output_path: str,
+                        count: int = 200, strategy: str = "mixed"):
+    """随机采样 knob 配置，输出与 generate 相同格式的 JSON
+
+    Args:
+        knob_space_path: knob_space.yaml 路径
+        output_path: 输出 JSON 路径
+        count: 采样数量
+        strategy: random / near_default / lhs / mixed
+    """
+    from cost_model.data.knob_generator import KnobGenerator
+    import random as rand_mod
+
+    knob_space = KnobSpace(knob_space_path)
+    gen = KnobGenerator(knob_space)
+
+    logger.info(f"随机采样 {count} 条 knob 配置，策略: {strategy}")
+
+    if strategy == "mixed":
+        configs_raw = gen.sample_mixed(count)
+    elif strategy == "near_default":
+        configs_raw = [gen.sample_near_default() for _ in range(count)]
+    elif strategy == "lhs":
+        configs_raw = gen.sample_lhs(count)
+    else:  # random
+        configs_raw = [gen.sample_random() for _ in range(count)]
+
+    # 随机分配 workload 类型
+    workloads = ["mixed", "read_only", "high_concurrency", "write_heavy"]
+
+    results = []
+    for i, knobs in enumerate(configs_raw):
+        results.append({
+            "name": f"random_{i:04d}",
+            "source": "random_sampled",
+            "knobs": knobs,
+            "description": f"随机采样配置（策略: {strategy}）",
+            "difficulty": 0,
+            "workload": rand_mod.choice(workloads),
+        })
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+
+    logger.info(f"已保存 {len(results)} 条随机配置 → {output_path}")
+
+
 # ==================== CLI ====================
 
 if __name__ == "__main__":
@@ -482,7 +549,7 @@ if __name__ == "__main__":
     # Step 1: generate（LLM 生成 knob 配置）
     gen = subparsers.add_parser("generate", help="LLM 生成可用但有优化空间的 knob 配置")
     gen.add_argument("--seeds", default="datasets/data/scenarios/seeds.json")
-    gen.add_argument("--output", default="datasets/data/scenarios/knob_configs.json")
+    gen.add_argument("--output", default="datasets/data/scenarios/knob_configs_llm.json")
     gen.add_argument("--config", default="configs/knob_space.yaml")
     gen.add_argument("--model", default="gpt-5")
     gen.add_argument("--api-key", default=None)
@@ -493,9 +560,19 @@ if __name__ == "__main__":
     gen.add_argument("--memory", type=int, default=16, help="内存 GB")
     gen.add_argument("--disk", default="SSD", choices=["SSD", "HDD", "NVMe"], help="磁盘类型")
 
-    # Step 2: collect
-    col = subparsers.add_parser("collect", help="真机采集完整指标（需要 PG）")
-    col.add_argument("--input", default="datasets/data/scenarios/knob_configs.json")
+    # Step 2: random-sample（随机采样 knob 配置）
+    rs = subparsers.add_parser("random-sample", help="随机采样 knob 配置（Cost Model 训练数据）")
+    rs.add_argument("--knob-space", default="configs/knob_space.yaml")
+    rs.add_argument("--output", default="datasets/data/scenarios/knob_configs_random.json")
+    rs.add_argument("--count", type=int, default=200, help="采样数量")
+    rs.add_argument("--strategy", default="mixed",
+                    choices=["random", "near_default", "lhs", "mixed"],
+                    help="采样策略：random/near_default/lhs/mixed（默认 mixed=40%%random+40%%near_default+20%%lhs）")
+
+    # Step 3: collect（统一真机采集）
+    col = subparsers.add_parser("collect", help="统一真机采集（支持 glob 合并多个 knob_configs_*.json）")
+    col.add_argument("--input", default="datasets/data/scenarios/knob_configs_*.json",
+                     help="输入 JSON 路径，支持 glob 模式")
     col.add_argument("--output", default="datasets/data/scenarios/collected.json")
     col.add_argument("--config", default="configs/knob_space.yaml")
     col.add_argument("--host", default="127.0.0.1")
@@ -538,6 +615,14 @@ if __name__ == "__main__":
             variants=args.variants,
             workers=args.workers,
             hardware={"cpu_count": args.cpu, "total_memory_gb": args.memory, "disk_type": args.disk},
+        )
+
+    elif args.command == "random-sample":
+        random_sample_knobs(
+            knob_space_path=args.knob_space,
+            output_path=args.output,
+            count=args.count,
+            strategy=args.strategy,
         )
 
     elif args.command == "collect":

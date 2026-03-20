@@ -91,7 +91,10 @@ class DBToolEnv(ToolEnv):
 
     @staticmethod
     def _load_scenarios(source: str) -> list:
-        """加载场景：支持单 JSON 文件、目录（自动合并 collected_*.json）"""
+        """加载场景：支持单 JSON 文件、目录（自动合并 collected_*.json）
+
+        只加载 source=llm_generated 的场景（random_sampled 仅用于 Cost Model）。
+        """
         import glob
         from datasets.synthesis.scenarios.schema import ScenarioState
 
@@ -100,13 +103,20 @@ class DBToolEnv(ToolEnv):
                     if k in ScenarioState.__dataclass_fields__})
                     for item in items]
 
+        def _filter_llm(scenarios):
+            """过滤只保留 llm_generated 场景"""
+            filtered = [s for s in scenarios if getattr(s, 'source', 'llm_generated') == 'llm_generated']
+            if len(filtered) < len(scenarios):
+                logger.info(f"  过滤: {len(scenarios)} → {len(filtered)} 条 (仅 llm_generated)")
+            return filtered
+
         if os.path.isfile(source):
             # 单文件（JSON 数组）
             with open(source, "r", encoding="utf-8") as f:
                 items = json.load(f)
             scenarios = _parse_items(items)
             logger.info(f"  加载 {source}: {len(scenarios)} 个场景")
-            return scenarios
+            return _filter_llm(scenarios)
 
         elif os.path.isdir(source):
             # 目录：优先匹配 collected_*.json（每个是数组），否则逐个 .json
@@ -119,14 +129,14 @@ class DBToolEnv(ToolEnv):
                     batch = _parse_items(items)
                     logger.info(f"  加载 {os.path.basename(fpath)}: {len(batch)} 个场景")
                     scenarios.extend(batch)
-                return scenarios
+                return _filter_llm(scenarios)
             else:
                 # 每个 .json 是单个场景
                 scenarios = []
                 for fname in sorted(os.listdir(source)):
                     if fname.endswith(".json"):
                         scenarios.append(ScenarioState.from_json(os.path.join(source, fname)))
-                return scenarios
+                return _filter_llm(scenarios)
 
         return []
 

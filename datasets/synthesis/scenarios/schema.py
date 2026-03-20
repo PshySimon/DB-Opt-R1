@@ -19,6 +19,7 @@ class ScenarioState:
 
     # 元信息
     name: str = ""
+    source: str = "llm_generated"  # llm_generated | random_sampled
     difficulty: int = 1
     root_cause: List[str] = field(default_factory=list)
     description: str = ""

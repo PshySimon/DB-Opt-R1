@@ -53,6 +53,79 @@ class KnobGenerator:
 
         return configs
 
+    def sample_near_default(self) -> dict:
+        """在默认值附近高斯扰动（±30%），让 Cost Model 见过'正常'配置"""
+        config = {}
+        for name, info in self.space.knobs.items():
+            config[name] = self._sample_knob_near_default(info)
+        return config
+
+    def sample_mixed(self, n: int) -> list[dict]:
+        """混合采样：40% random + 40% near_default + 20% LHS"""
+        n_random = int(n * 0.4)
+        n_near = int(n * 0.4)
+        n_lhs = n - n_random - n_near
+
+        configs = []
+        # 纯随机
+        for _ in range(n_random):
+            configs.append(self.sample_random())
+        # 默认值附近
+        for _ in range(n_near):
+            configs.append(self.sample_near_default())
+        # LHS
+        if n_lhs > 0:
+            configs.extend(self.sample_lhs(n_lhs))
+
+        random.shuffle(configs)
+        return configs
+
+    def _sample_knob_near_default(self, info: dict):
+        """在默认值附近高斯扰动（sigma=0.15，即 ±30% 内覆盖 95%）"""
+        knob_type = info["type"]
+        default = info.get("default")
+
+        if knob_type == "memory":
+            min_kb = parse_memory(str(info["min"]))
+            max_kb = parse_memory(str(info["max"]))
+            def_kb = parse_memory(str(default)) if default else min_kb
+            log_min = math.log2(max(min_kb, 1))
+            log_max = math.log2(max(max_kb, 1))
+            log_def = math.log2(max(def_kb, 1))
+            # 高斯扰动
+            span = log_max - log_min
+            ratio = (log_def - log_min) / span if span > 0 else 0.5
+            ratio = max(0, min(1, random.gauss(ratio, 0.15)))
+            return self._sample_knob_at_ratio(info, ratio)
+
+        elif knob_type == "integer":
+            min_val = int(info["min"])
+            max_val = int(info["max"])
+            def_val = int(default) if default is not None else min_val
+            span = max_val - min_val
+            ratio = (def_val - min_val) / span if span > 0 else 0.5
+            ratio = max(0, min(1, random.gauss(ratio, 0.15)))
+            return min_val + int(ratio * span)
+
+        elif knob_type == "float":
+            min_val = float(info["min"])
+            max_val = float(info["max"])
+            def_val = float(default) if default is not None else min_val
+            span = max_val - min_val
+            ratio = (def_val - min_val) / span if span > 0 else 0.5
+            ratio = max(0, min(1, random.gauss(ratio, 0.15)))
+            return round(min_val + ratio * span, 3)
+
+        elif knob_type == "enum":
+            # 枚举类型 80% 返回默认值，20% 随机
+            values = info["values"]
+            if random.random() < 0.8 and default in values:
+                return default
+            return random.choice(values)
+
+        else:
+            return default
+
     def _sample_knob(self, info: dict):
         """根据类型随机采样一个 knob 值"""
         ratio = random.random()
