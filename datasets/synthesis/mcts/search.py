@@ -26,7 +26,7 @@ class MCTSSearch:
         self.llm_generate = llm_generate
 
         cfg = config or {}
-        self.num_simulations = cfg.get("num_simulations", 50)
+        self.num_simulations = cfg.get("num_simulations", 5)
         self.max_children = cfg.get("max_children", 3)
         self.max_depth = cfg.get("max_depth", 10)
         self.ucb_c = cfg.get("ucb_c", 1.414)

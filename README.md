@@ -189,7 +189,7 @@ python3 -m datasets.synthesis.mcts.run_search \
     --api-base $OPENAI_API_BASE \
     --parallel 4 \
     --num-workers 2 \
-    --simulations 50
+    --simulations 5
 ```
 
 **并行参数**：
@@ -200,7 +200,7 @@ python3 -m datasets.synthesis.mcts.run_search \
 | `--num-envs` | 搜索环境数（0=全量） | 0 |
 | `--parallel` | 多环境并行数（同时搜索 N 个场景） | 1 |
 | `--num-workers` | 单棵树内并发 simulation 线程数 | 1 |
-| `--simulations` | 每棵树 MCTS 迭代次数 | 50 |
+| `--simulations` | 每棵树 MCTS 迭代次数 | 5 |
 
 输出：
 - `datasets/data/sft_data.jsonl` — SFT 训练数据

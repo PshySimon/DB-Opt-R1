@@ -268,7 +268,7 @@ def main():
     parser.add_argument("--api-base", default=None, help="API Base URL")
 
     # MCTS
-    parser.add_argument("--simulations", type=int, default=50, help="每棵树 MCTS 迭代次数")
+    parser.add_argument("--simulations", type=int, default=5, help="每棵树 MCTS 迭代次数")
     parser.add_argument("--children", type=int, default=3, help="最大子节点数")
     parser.add_argument("--depth", type=int, default=10, help="最大深度")
     parser.add_argument("--ucb-c", type=float, default=1.414, help="UCB1 探索系数")
