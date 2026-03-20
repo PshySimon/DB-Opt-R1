@@ -78,39 +78,9 @@ bash scripts/setup_env.sh
 
 ## 使用流程
 
-### 1. Cost Model 数据采集
+### 统一数据 Pipeline（Step 0 → 5）
 
-在真机上随机采样 knob 配置 → pgbench → 采集指标，输出 CSV。
-
-```bash
-# 默认后台执行（日志 + PID 保存到 logs/costmodel/）
-bash scripts/collect_costmodel.sh --rounds 1500 --database benchmark --workload all
-
-# 调试时前台执行
-bash scripts/collect_costmodel.sh --rounds 10 --foreground
-```
-
-**负载类型**：
-
-| 类型 | 说明 |
-|------|------|
-| `mixed` | TPC-B 读写混合（默认） |
-| `read_only` | 只读查询 |
-| `high_concurrency` | 64 并发连接 |
-| `write_heavy` | 写密集 |
-| `all` | 每种各跑一批（推荐） |
-
-### 2. Cost Model 训练
-
-```bash
-python3 -m cost_model.train \
-    --data datasets/data/cost_model/dataset.csv \
-    --save-dir cost_model/saved
-```
-
-### 3. SFT 数据合成（场景驱动）
-
-三步流程，每步独立，支持断点续跑：
+所有数据采集、Cost Model 训练、MCTS 轨迹合成合并为一条流水线：
 
 #### Step 0: 按瓶颈方向生成种子
 
