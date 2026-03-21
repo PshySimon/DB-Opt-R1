@@ -8,14 +8,38 @@ PG_VERSION="${PG_VERSION:-16}"
 PG_DATABASE="${PG_DATABASE:-benchmark}"
 PG_USER="${PG_USER:-postgres}"
 
-# 自动检测是否需要 sudo
+# 自动检测权限模式：root / sudo / 直连
+# 确定 SUDO（用于 apt/systemctl 等系统命令）和 run_psql/run_pgbench（用于 PG 命令）
 if [ "$(id -u)" -eq 0 ]; then
     SUDO=""
+    PG_MODE="root"
     echo "检测到 root 用户，无需 sudo"
-else
+elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
     SUDO="sudo"
+    PG_MODE="sudo"
     echo "非 root 用户，使用 sudo"
+else
+    SUDO=""
+    PG_MODE="direct"
+    echo "无 sudo 权限，尝试直连 PostgreSQL"
 fi
+
+# PG 命令适配器：根据模式自动选择执行方式
+run_psql() {
+    case $PG_MODE in
+        root)   psql -U postgres "$@" ;;
+        sudo)   sudo -u postgres psql "$@" ;;
+        direct) psql -U postgres "$@" ;;
+    esac
+}
+
+run_pgbench() {
+    case $PG_MODE in
+        root)   pgbench -U postgres "$@" ;;
+        sudo)   sudo -u postgres pgbench "$@" ;;
+        direct) pgbench -U postgres "$@" ;;
+    esac
+}
 
 echo "=========================================="
 echo "  db-opt-r1 环境准备"
@@ -141,7 +165,7 @@ echo "[4/5] 创建 benchmark 数据库..."
 
 # 创建数据库
 echo "  → 创建数据库 $PG_DATABASE..."
-if $SUDO -u postgres psql -c "CREATE DATABASE $PG_DATABASE;"; then
+if run_psql -c "CREATE DATABASE $PG_DATABASE;"; then
     echo "  ✓ 数据库 $PG_DATABASE 创建成功"
 else
     echo "  ⚠ 数据库 $PG_DATABASE 已存在或创建失败（见上方输出）"
@@ -149,7 +173,7 @@ fi
 
 # 设置密码
 echo "  → 设置用户 $PG_USER 密码..."
-if $SUDO -u postgres psql -c "ALTER USER $PG_USER WITH PASSWORD 'postgres';"; then
+if run_psql -c "ALTER USER $PG_USER WITH PASSWORD 'postgres';"; then
     echo "  ✓ 密码设置成功"
 else
     echo "  ❌ 密码设置失败（见上方输出）"
@@ -157,18 +181,18 @@ fi
 
 # 创建 pg_stat_statements 扩展
 echo "  → 创建 pg_stat_statements 扩展..."
-$SUDO -u postgres psql -d $PG_DATABASE -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;" 2>&1 || true
+run_psql -d $PG_DATABASE -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements;" 2>&1 || true
 
 echo "  数据库: $PG_DATABASE"
 echo "  用户:   $PG_USER / postgres"
 
 # 初始化 pgbench 数据（仅在未初始化时执行）
 echo "  → 检查 pgbench 是否已初始化..."
-if $SUDO -u postgres psql -d $PG_DATABASE -tc "SELECT 1 FROM pg_tables WHERE tablename = 'pgbench_accounts'" | grep -q 1; then
+if run_psql -d $PG_DATABASE -tc "SELECT 1 FROM pg_tables WHERE tablename = 'pgbench_accounts'" | grep -q 1; then
     echo "  ✓ pgbench 已初始化，跳过"
 else
     echo "  → 初始化 pgbench (scale factor = 10)..."
-    if $SUDO -u postgres pgbench -i -s 10 $PG_DATABASE; then
+    if run_pgbench -i -s 10 $PG_DATABASE; then
         echo "  ✓ pgbench 初始化完成"
     else
         echo "  ❌ pgbench 初始化失败"
