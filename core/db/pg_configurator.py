@@ -13,6 +13,22 @@ RESTART_TIMEOUT = 30  # 秒
 READY_CHECK_INTERVAL = 1  # 秒
 
 
+def _detect_sudo():
+    """检测是否可用 sudo（只检测一次，缓存结果）"""
+    import os, shutil
+    if os.getuid() == 0:
+        return False  # root 不需要 sudo
+    if not shutil.which('sudo'):
+        return False
+    try:
+        r = subprocess.run(['sudo', '-n', 'true'], capture_output=True, timeout=3)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+_HAS_SUDO = None  # 延迟初始化
+
+
 class PGConfigurator:
     """管理 PostgreSQL 配置的应用和重启"""
 
@@ -25,6 +41,19 @@ class PGConfigurator:
         self.pg_password = pg_password
         self.pg_database = pg_database
         self.pg_data_dir = pg_data_dir
+
+    @staticmethod
+    def _has_sudo() -> bool:
+        global _HAS_SUDO
+        if _HAS_SUDO is None:
+            _HAS_SUDO = _detect_sudo()
+        return _HAS_SUDO
+
+    def _sudo_run(self, cmd_list: list, **kwargs):
+        """执行可能需要 sudo 的命令，自动适配"""
+        if self._has_sudo():
+            cmd_list = ['sudo'] + cmd_list
+        return subprocess.run(cmd_list, **kwargs)
 
     def apply(self, knob_config: dict, needs_restart: bool = False):
         """应用 knob 配置
@@ -71,8 +100,8 @@ class PGConfigurator:
 
         # 清空日志文件，确保每个场景只采集自己的日志
         try:
-            subprocess.run(
-                ["sudo", "truncate", "-s", "0", self.PG_LOG_PATH],
+            self._sudo_run(
+                ["truncate", "-s", "0", self.PG_LOG_PATH],
                 capture_output=True, timeout=5
             )
         except Exception:
@@ -98,11 +127,13 @@ class PGConfigurator:
         else:
             import shutil
             if self._is_systemd_managed():
-                self._run_cmd("sudo systemctl restart postgresql")
+                prefix = "sudo " if self._has_sudo() else ""
+                self._run_cmd(f"{prefix}systemctl restart postgresql")
             elif shutil.which("pg_ctlcluster"):
                 self._run_cmd("pg_ctlcluster 16 main restart")
             else:
-                self._run_cmd("sudo systemctl restart postgresql")
+                prefix = "sudo " if self._has_sudo() else ""
+                self._run_cmd(f"{prefix}systemctl restart postgresql")
 
     def safe_restart(self):
         """安全重启：先 force_reset 清配置，再重启（PG 挂掉时的恢复入口）"""
@@ -136,9 +167,8 @@ class PGConfigurator:
                 continue
             for path in glob.glob(pattern):
                 try:
-                    # 用 sudo truncate，因为文件属于 postgres 用户
-                    result = subprocess.run(
-                        ['sudo', 'truncate', '-s', '0', path],
+                    result = self._sudo_run(
+                        ['truncate', '-s', '0', path],
                         capture_output=True, text=True, timeout=5
                     )
                     if result.returncode != 0:
