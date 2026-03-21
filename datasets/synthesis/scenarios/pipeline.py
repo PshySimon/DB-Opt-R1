@@ -435,6 +435,7 @@ def collect_scenarios(input_path: str, output_path: str,
             from dataclasses import asdict
             state = ScenarioState(
                 name=config["name"],
+                variant=config.get("variant", 0),
                 source=config.get("source", "llm_generated"),
                 difficulty=config.get("difficulty", 1),
                 description=config.get("description", ""),

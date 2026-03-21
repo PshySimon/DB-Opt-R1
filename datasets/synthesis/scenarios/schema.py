@@ -19,6 +19,7 @@ class ScenarioState:
 
     # 元信息
     name: str = ""
+    variant: int = 0  # 同名配置的变体编号（用于断点续采匹配）
     source: str = "llm_generated"  # llm_generated | random_sampled
     difficulty: int = 1
     root_cause: List[str] = field(default_factory=list)
