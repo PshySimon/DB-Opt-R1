@@ -192,7 +192,28 @@ python3 -m datasets.synthesis.mcts.run_search \
 - `contrastive_pairs.jsonl` — DPO/对比学习数据
 - `mcts_trees/` — 搜索树 debug 文件
 
----
+#### Step 6: SFT 训练
+
+将 MCTS 轨迹转为 verl 训练格式，进行 SFT 冷启动训练。
+
+```bash
+# 数据预处理（JSONL → Parquet）
+python3 -m datasets.preprocess_sft \
+    --input_files datasets/data/run_*/sft_trajectories.jsonl \
+    --output_dir datasets/sft/
+
+# SFT 训练（默认 Qwen2.5-3B-Instruct，2 GPU）
+bash scripts/train_sft.sh
+
+# 自定义参数
+BASE_MODEL=Qwen/Qwen2.5-1.5B-Instruct \
+EPOCHS=5 LR=2e-6 N_GPUS=1 \
+bash scripts/train_sft.sh
+```
+
+训练完成后 checkpoint 保存在 `model_save/sft/`。
+
+
 
 ## 配置
 
