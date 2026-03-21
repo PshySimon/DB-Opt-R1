@@ -457,9 +457,18 @@ def collect_scenarios(input_path: str, output_path: str,
             results.append(asdict(state))
             logger.info(f"  ✅ {label}")
 
-            # 每条保存一次（防丢失）
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
+            # 每条保存一次（原子写入，防崩溃时文件损坏）
+            import tempfile
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                suffix='.json', dir=os.path.dirname(output_path) or '.'
+            )
+            try:
+                with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                    json.dump(results, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, output_path)
+            except Exception:
+                os.unlink(tmp_path)
+                raise
 
         except Exception as e:
             logger.error(f"  ❌ {label}: {e}")
