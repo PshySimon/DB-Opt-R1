@@ -463,10 +463,11 @@ def collect_scenarios(input_path: str, output_path: str,
         except Exception as e:
             logger.error(f"  ❌ {label}: {e}")
             try:
-                pg_ctl.reset_to_default()
-                pg_ctl.restart()
-            except Exception:
-                pass
+                pg_ctl.safe_restart()  # force_reset → restart（不依赖 SQL）
+                logger.info(f"  PG 已恢复，继续采集")
+            except Exception as e2:
+                logger.error(f"  PG 恢复失败: {e2}，后续采集可能全部失败")
+
 
     try:
         pg_ctl.reset_to_default()

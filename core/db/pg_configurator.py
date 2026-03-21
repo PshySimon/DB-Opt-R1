@@ -78,10 +78,24 @@ class PGConfigurator:
         except Exception:
             pass
 
+        self._do_restart()
+
+        # 等待 PG 就绪
+        try:
+            self._wait_ready()
+        except TimeoutError:
+            logger.warning("重启超时，尝试 force_reset 后再重启")
+            self.force_reset()
+            self._do_restart()
+            self._wait_ready()  # 再次超时就真的抛异常
+
+        logger.info("PostgreSQL 已重启")
+
+    def _do_restart(self):
+        """执行实际重启命令"""
         if self.pg_data_dir:
             self._run_cmd(f"pg_ctl -D {self.pg_data_dir} restart -w -t {RESTART_TIMEOUT}")
         else:
-            # 优先 systemctl（systemd 管理的集群），其次 pg_ctlcluster（容器）
             import shutil
             if self._is_systemd_managed():
                 self._run_cmd("sudo systemctl restart postgresql")
@@ -90,9 +104,13 @@ class PGConfigurator:
             else:
                 self._run_cmd("sudo systemctl restart postgresql")
 
-        # 等待 PG 就绪
+    def safe_restart(self):
+        """安全重启：先 force_reset 清配置，再重启（PG 挂掉时的恢复入口）"""
+        logger.info("执行安全重启：force_reset → restart")
+        self.force_reset()
+        self._do_restart()
         self._wait_ready()
-        logger.info("PostgreSQL 已重启")
+        logger.info("安全重启完成")
 
     def reset_to_default(self):
         """重置所有 knob 到默认值"""
@@ -118,13 +136,15 @@ class PGConfigurator:
                 continue
             for path in glob.glob(pattern):
                 try:
-                    with open(path, 'w') as f:
-                        f.write('# auto-generated - cleared by force_reset\n')
-                    # 修复权限
-                    import subprocess
-                    subprocess.run(['chown', 'postgres:postgres', path],
-                                   capture_output=True, timeout=5)
-                    logger.info(f"已清空 {path}")
+                    # 用 sudo truncate，因为文件属于 postgres 用户
+                    result = subprocess.run(
+                        ['sudo', 'truncate', '-s', '0', path],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode != 0:
+                        logger.error(f"truncate {path} 失败: {result.stderr}")
+                    else:
+                        logger.info(f"已清空 {path}")
                 except Exception as e:
                     logger.error(f"清空 {path} 失败: {e}")
 

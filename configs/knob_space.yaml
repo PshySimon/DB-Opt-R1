@@ -48,7 +48,7 @@ knobs:
 
   huge_pages:
     type: enum
-    values: ["off", "on", "try"]
+    values: ["off", "try"]   # 不包含 "on"：系统未配 hugepages 时 on 会导致 PG 启动失败
     default: "try"
     restart: true
 
