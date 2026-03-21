@@ -4,6 +4,7 @@
 用于在真机上采集完整的故障场景数据。
 """
 
+import os
 import logging
 import subprocess
 
