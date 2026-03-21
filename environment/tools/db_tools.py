@@ -8,12 +8,34 @@ execute() 根据 mode 自动分发。
 import os
 import json
 import time
+import shutil
 import subprocess
 import logging
 
 from core.tool.tool_base import Tool
 
 logger = logging.getLogger(__name__)
+
+
+def _has_sudo():
+    """检测是否可用 sudo（免密）"""
+    if os.getuid() == 0:
+        return False
+    if not shutil.which('sudo'):
+        return False
+    try:
+        r = subprocess.run(['sudo', '-n', 'true'], capture_output=True, timeout=3)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+_SUDO_AVAILABLE = _has_sudo()
+
+
+def _sudo_cmd(cmd_list):
+    """自动加 sudo 前缀"""
+    return (['sudo'] + cmd_list) if _SUDO_AVAILABLE else cmd_list
 
 
 class DBTool(Tool):
@@ -306,7 +328,7 @@ class GetRecentLogsTool(DBTool):
         log_path = self.config.get("tools.database.log_path",
                                    "/var/log/postgresql/postgresql-16-main.log")
         try:
-            result = subprocess.run(["sudo", "cat", log_path],
+            result = subprocess.run(_sudo_cmd(["cat", log_path]),
                                     capture_output=True, text=True, timeout=5)
             lines = result.stdout.strip().split("\n")
 
@@ -413,7 +435,8 @@ class RestartPGTool(DBTool):
         timeout = self.config.get("tools.pg_control.restart_timeout", 30)
         try:
             start = time.time()
-            cmd = f"pg_ctl -D {data_dir} restart -w -t {timeout}" if data_dir else "sudo systemctl restart postgresql"
+            prefix = "sudo " if _SUDO_AVAILABLE else ""
+            cmd = f"pg_ctl -D {data_dir} restart -w -t {timeout}" if data_dir else f"{prefix}systemctl restart postgresql"
             subprocess.run(cmd, shell=True, capture_output=True, timeout=timeout)
             return json.dumps({"success": True, "duration_seconds": round(time.time() - start, 1)})
         except Exception as e:

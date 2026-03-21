@@ -151,8 +151,11 @@ class ScenarioCollector(DataCollector):
         ]
 
         try:
+            import shutil as _shutil
+            _use_sudo = (os.getuid() != 0 and _shutil.which('sudo') is not None)
+            cmd = ["sudo", "cat", log_path] if _use_sudo else ["cat", log_path]
             result = subprocess.run(
-                ["sudo", "cat", log_path],
+                cmd,
                 capture_output=True, text=True, timeout=5
             )
             logs = []
