@@ -574,5 +574,203 @@
     "difficulty": 3,
     "description": "混合负载下形成长锁等待链（更新→触发器/外键→DDL 等）。lock_timeout 过高或为 0，deadlock_timeout 也偏高，导致等待链长期不被打破，连接堆积、吞吐大幅下降。典型现象：pg_stat_activity 中长时间 Lock 等待、队列增长但几乎无取消/死锁日志。优化方向：下调 deadlock_timeout（如 200–500ms）以更快探测复杂死锁/循环等待，并为低优先级查询设置有限的 lock_timeout 以主动“出队”，缩短等待链长度。",
     "category": "locks"
+  },
+  {
+    "name": "jit_always_on_oltp_overhead",
+    "difficulty": 1,
+    "description": "jit=on 且 jit_above_cost 设得过低（如 1000~5000），大量简单 OLTP 短查询也被 JIT 编译，编译开销远超实际执行收益。典型现象：Planning+JIT Time 占总时间 50%+，CPU 使用率升高但 TPS 不升反降，EXPLAIN ANALYZE 显示 JIT Generation/Optimization/Emission 耗时数毫秒而 Execution 仅微秒级。优化方向：提高 jit_above_cost（如 100000~500000）使 JIT 仅对真正复杂的查询生效，或对 OLTP 会话关闭 jit。",
+    "category": "jit"
+  },
+  {
+    "name": "jit_off_olap_missed_opportunity",
+    "difficulty": 1,
+    "description": "jit=off（或 jit_above_cost 极高），大型分析/聚合查询无法利用 JIT 加速表达式求值与元组解码。典型现象：复杂聚合/窗口函数/大量 WHERE 表达式的查询 CPU 密集但未达到硬件极限，EXPLAIN 无 JIT 相关输出。优化方向：启用 jit 并设置合理的 jit_above_cost（如 100000），使大查询受益于 JIT 编译。",
+    "category": "jit"
+  },
+  {
+    "name": "jit_inline_too_aggressive_compilation_bloat",
+    "difficulty": 2,
+    "description": "jit_inline_above_cost 设得很低（如 1000），几乎所有 JIT 编译的查询都进行函数内联，编译时间显著增加。典型现象：JIT Inlining Time 在 EXPLAIN 中占比很高（数十到上百毫秒），首次执行延迟大；对于中等复杂度的查询，JIT 带来的执行加速不足以弥补内联编译开销。优化方向：提高 jit_inline_above_cost（如 500000），仅对极复杂查询启用内联；或同时上调 jit_optimize_above_cost 以减少高级优化开销。",
+    "category": "jit"
+  },
+  {
+    "name": "jit_optimize_above_cost_too_low_llvm_overhead",
+    "difficulty": 2,
+    "description": "jit_optimize_above_cost 偏低，中等成本查询也触发 LLVM 优化 pass，编译时间从毫秒级膨胀到数十毫秒。典型现象：JIT Optimization Time 在 EXPLAIN 中很高，CPU 花在 LLVM 优化上；批量运行相似查询时整体吞吐显著低于 jit=off。优化方向：提高 jit_optimize_above_cost（如 500000），使 LLVM 优化仅用于真正昂贵的查询。",
+    "category": "jit"
+  },
+  {
+    "name": "jit_all_thresholds_low_mixed_workload_regression",
+    "difficulty": 3,
+    "description": "jit_above_cost、jit_inline_above_cost、jit_optimize_above_cost 都设得很低，混合 OLTP+OLAP 负载下几乎所有查询都经历完整的 JIT 编译+内联+优化流程。典型现象：OLTP 短查询延迟翻倍，CPU 大量消耗在 LLVM 编译阶段；OLAP 查询略有改善但被编译开销部分抵消。优化方向：大幅提高三个阈值，使 JIT 仅对成本极高的分析查询生效。",
+    "category": "jit"
+  },
+  {
+    "name": "jit_high_thresholds_with_cpu_bound_analytics",
+    "difficulty": 3,
+    "description": "大型分析集群上 jit_above_cost 设得极高（如 10000000），即使成本数百万的聚合查询也无法触发 JIT，CPU 密集型表达式求值全走解释执行。典型现象：CPU 利用率 90%+ 但吞吐不再提升，EXPLAIN 无 JIT 输出，profiling 显示热点在 ExecEvalExpr/slot_getattr。优化方向：适度下调 jit_above_cost（如 100000~500000），让真正重型的分析查询受益于 JIT；同时控制 inline/optimize 阈值避免编译时间过长。",
+    "category": "jit"
+  },
+  {
+    "name": "hashjoin_disabled_nested_loop_explosion",
+    "difficulty": 1,
+    "description": "enable_hashjoin=off（或因 work_mem 极低导致 Hash Join 被规避），大表连接被迫使用 Nested Loop + Index Scan，在选择性不佳时产生大量随机 IO。典型现象：两大表连接 EXPLAIN 显示 Nested Loop，外层行数数万+，每行一次索引查找；IO 等待严重，查询耗时数分钟。优化方向：启用 enable_hashjoin 并确保 work_mem 足以容纳 hash 表，使优化器可以选择 Hash Join。",
+    "category": "planner_switches"
+  },
+  {
+    "name": "seqscan_disabled_forced_index_on_large_scan",
+    "difficulty": 1,
+    "description": "enable_seqscan=off 试图强制走索引，但对低选择性查询（如全表 80%+ 行满足条件），Index Scan 反而产生大量随机堆读，远比 Seq Scan 慢。典型现象：EXPLAIN 显示 Index Scan + heap fetch 数百万次，IO 随机读飙升；同一查询 enable_seqscan=on 后用 Seq Scan 快数倍。优化方向：恢复 enable_seqscan=on，让优化器根据成本自行选择。",
+    "category": "planner_switches"
+  },
+  {
+    "name": "mergejoin_disabled_sort_heavy_workload",
+    "difficulty": 1,
+    "description": "enable_mergejoin=off，在已排序数据或有序索引的场景下，优化器无法选择 Merge Join，被迫使用 Hash Join（需要额外哈希表内存）或 Nested Loop。典型现象：明明两表都有相同排序列索引，却用 Hash Join 消耗大量 work_mem；或用 Nested Loop 导致慢查询。优化方向：恢复 enable_mergejoin=on，让优化器在已排序数据上利用 Merge Join 优势。",
+    "category": "planner_switches"
+  },
+  {
+    "name": "bitmapscan_disabled_range_query_penalty",
+    "difficulty": 2,
+    "description": "enable_bitmapscan=off，中等选择性的范围查询（如日期范围 5%~20%）无法使用 Bitmap Index Scan，退化为 Seq Scan 或大量随机 Index Scan。典型现象：范围查询扫描全表或走高开销的逐行索引访问；恢复 bitmapscan=on 后查询快 3~10 倍。优化方向：恢复 enable_bitmapscan=on，它是中等选择性查询的最优访问方式。",
+    "category": "planner_switches"
+  },
+  {
+    "name": "all_joins_disabled_except_nestloop",
+    "difficulty": 2,
+    "description": "enable_hashjoin=off + enable_mergejoin=off，所有连接被迫使用 Nested Loop。典型现象：多表连接查询性能极差，小表驱动大表时可能还行，但大表互连时延迟爆炸；优化器选择非常受限。优化方向：恢复两者为 on，让优化器根据数据特征自由选择最优连接策略。",
+    "category": "planner_switches"
+  },
+  {
+    "name": "indexonlyscan_disabled_covering_index_waste",
+    "difficulty": 2,
+    "description": "enable_indexonlyscan=off，覆盖索引无法发挥作用，即使查询列全在索引中也必须回表。典型现象：有 INCLUDE 列的索引或完全覆盖的复合索引，查询仍走 Index Scan + heap fetch；visibility map 维护的收益被浪费。优化方向：恢复 enable_indexonlyscan=on，充分利用覆盖索引减少 IO。",
+    "category": "planner_switches"
+  },
+  {
+    "name": "multiple_switches_off_optimizer_crippled",
+    "difficulty": 3,
+    "description": "多个 enable_* 开关被关闭（如 enable_hashjoin=off + enable_seqscan=off + enable_bitmapscan=off），优化器可选策略极其有限。典型现象：几乎所有查询都走 Nested Loop + Index Scan，无论数据分布如何；查询性能高度不可预测，部分慢上百倍。优化方向：将所有 enable_* 恢复为 on，优化器需要完整的策略空间才能做出最优选择。",
+    "category": "planner_switches"
+  },
+  {
+    "name": "low_hash_mem_multiplier_hash_spill",
+    "difficulty": 1,
+    "description": "hash_mem_multiplier 设为 1.0（默认）或更低，Hash Join/Hash Aggregate 的内存上限与 work_mem 相同。在大表 Hash Join 场景下，hash 表超过 work_mem 即溢写磁盘。典型现象：EXPLAIN ANALYZE 显示 Hash Batches > 1，temp_files 产生；查询时间比内存内 hash 慢数倍。优化方向：提高 hash_mem_multiplier（如 2.0~8.0），允许 hash 操作使用更多内存。",
+    "category": "hash_sort"
+  },
+  {
+    "name": "high_hash_mem_multiplier_memory_bloat",
+    "difficulty": 2,
+    "description": "hash_mem_multiplier 设得很高（如 8.0~16.0）且 work_mem 也不低，在高并发 Hash Join 场景下单个查询的 hash 操作可能占用数 GB 内存。典型现象：高并发时内存水位急剧上升，OS 开始回收页缓存；其他查询/后台进程内存不足。优化方向：适度下调 hash_mem_multiplier（如 2.0~4.0），或降低全局 work_mem 后为特定会话单独提高。",
+    "category": "hash_sort"
+  },
+  {
+    "name": "low_work_mem_high_multiplier_sort_spill_hash_ok",
+    "difficulty": 2,
+    "description": "work_mem 很低（如 4MB）但 hash_mem_multiplier 很高（如 8.0），导致 Hash Join 可用 32MB 但 Sort 只有 4MB，Sort 频繁溢写而 Hash 不溢写。典型现象：ORDER BY/GROUP BY 走外部排序（external merge Disk），但同一查询的 Hash Join 阶段在内存内完成；temp_files 主要来自排序而非 hash。优化方向：适度提高 work_mem（如 16~32MB）以覆盖排序需求，同时下调 hash_mem_multiplier 到 2.0~4.0 以平衡。",
+    "category": "hash_sort"
+  },
+  {
+    "name": "high_work_mem_low_multiplier_hash_bottleneck",
+    "difficulty": 3,
+    "description": "work_mem 已较高（如 64MB）但 hash_mem_multiplier=1.0，大表 Hash Join 的 hash 表恰好超出 64MB 触发多批次溢写。典型现象：EXPLAIN ANALYZE 显示 Hash Batches=2~4，Peak Memory 接近 work_mem 上限；提高 hash_mem_multiplier 到 2.0 即可消除溢写，查询快 2~5 倍。优化方向：将 hash_mem_multiplier 提高到 2.0~4.0，让 hash 操作在内存内完成。",
+    "category": "hash_sort"
+  },
+  {
+    "name": "verbose_logging_io_overhead",
+    "difficulty": 1,
+    "description": "log_statement='all' 且 log_min_duration_statement=-1（记录所有语句），高并发 OLTP 下日志写入量巨大。典型现象：pg_log 目录增长极快（GB/小时），磁盘 IO 被日志占用，WAL 和数据文件 IO 受挤压；TPS 下降 10%~30%。优化方向：将 log_statement 设为 'ddl' 或 'none'，用 log_min_duration_statement（如 500ms）仅记录慢查询。",
+    "category": "logging"
+  },
+  {
+    "name": "low_log_min_duration_log_noise",
+    "difficulty": 1,
+    "description": "log_min_duration_statement 设得过低（如 10~50ms），在正常负载下大量查询被记录，日志充斥正常查询，难以定位真正的慢查询。典型现象：日志文件膨胀，grep 慢查询如大海捞针；磁盘 IO 增加。优化方向：提高 log_min_duration_statement（如 200~1000ms），仅记录真正异常的慢查询。",
+    "category": "logging"
+  },
+  {
+    "name": "no_slow_query_logging_blind_spot",
+    "difficulty": 1,
+    "description": "log_min_duration_statement=-1（不记录任何慢查询）且未启用 pg_stat_statements。典型现象：系统出现间歇性慢查询但无法追溯；DBA 无法识别 top SQL 也无法做性能分析。优化方向：设置 log_min_duration_statement（如 500ms~1s）或启用 pg_stat_statements 扩展以捕获查询性能数据。",
+    "category": "logging"
+  },
+  {
+    "name": "log_checkpoints_off_checkpoint_blind",
+    "difficulty": 2,
+    "description": "log_checkpoints=off，checkpoint 的时机、耗时、写入量等关键信息不可见。典型现象：TPS 周期性波动但无法关联到 checkpoint；无法判断 checkpoint_timeout/max_wal_size 配置是否合理。优化方向：开启 log_checkpoints=on（几乎无性能开销），获取 checkpoint 的监控信息用于调优。",
+    "category": "logging"
+  },
+  {
+    "name": "excessive_logging_with_connections_and_disconnections",
+    "difficulty": 2,
+    "description": "log_connections=on + log_disconnections=on 在短连接高频场景下（如无连接池的 PHP/Serverless），每次连接/断开都写日志。典型现象：日志中连接/断开记录占 90%+，真正有用的信息被淹没；日志写入 IO 显著。优化方向：在有连接池的环境中关闭 log_connections/log_disconnections，或仅在排查连接问题时临时开启。",
+    "category": "logging"
+  },
+  {
+    "name": "no_statement_timeout_runaway_queries",
+    "difficulty": 1,
+    "description": "statement_timeout=0（无限等待），偶发的低效查询（如笛卡尔积、全表扫描大表）长时间占用连接和 CPU/IO，影响其他会话。典型现象：pg_stat_activity 中出现运行数小时的查询；连接被占用导致可用连接不足。优化方向：设置合理的全局 statement_timeout（如 30s~60s），对需要长时间的报表/ETL 会话单独提高。",
+    "category": "resource_limits"
+  },
+  {
+    "name": "aggressive_statement_timeout_report_killed",
+    "difficulty": 1,
+    "description": "statement_timeout 设得过短（如 3~5s），复杂报表和批量操作频繁被终止。典型现象：应用日志大量 canceling statement due to statement timeout，业务报表无法完成，用户反复重试加重系统负载。优化方向：提高全局 statement_timeout（如 30~60s），或对报表用户/角色单独设置更长超时。",
+    "category": "resource_limits"
+  },
+  {
+    "name": "no_temp_file_limit_disk_fill",
+    "difficulty": 2,
+    "description": "temp_file_limit=-1（不限制），低效查询的排序/hash 溢写可能耗尽磁盘空间。典型现象：偶发查询产生数十 GB 临时文件，磁盘使用率突然跳到 100%；WAL 写入失败导致数据库 panic。优化方向：设置 temp_file_limit（如 1~5GB）限制单会话的临时文件使用，防止磁盘被耗尽。",
+    "category": "resource_limits"
+  },
+  {
+    "name": "low_temp_file_limit_analytics_failure",
+    "difficulty": 2,
+    "description": "temp_file_limit 设得过低（如 100MB），合理的分析查询因排序/hash 溢写超限而被取消。典型现象：大表 GROUP BY/ORDER BY 报错 temporary file size exceeds temp_file_limit，但查询本身是合理的业务需求。优化方向：根据磁盘空间和业务需求适度提高 temp_file_limit（如 2~10GB），同时提高 work_mem 减少溢写。",
+    "category": "resource_limits"
+  },
+  {
+    "name": "no_limits_combined_resource_exhaustion",
+    "difficulty": 3,
+    "description": "statement_timeout=0 + temp_file_limit=-1 + idle_in_transaction_session_timeout=0 的三无配置。典型现象：系统长期运行后逐渐退化——一个失控查询吃满磁盘，一个闲置事务锁住 autovacuum，一个长连接占用连接槽位——多重问题叠加导致系统不可用。优化方向：同时配置三项超时/限制，形成多层防护。",
+    "category": "resource_limits"
+  },
+  {
+    "name": "memory_wal_interaction_high_shared_buffers_frequent_checkpoint",
+    "difficulty": 2,
+    "description": "shared_buffers 很大（占内存 40%+）但 max_wal_size 偏小，大量脏页在 checkpoint 时集中刷盘。典型现象：checkpoint 期间 IO 带宽被大量脏页刷写占满，前台查询 IO 等待显著升高；pg_stat_bgwriter 的 buffers_checkpoint 与 checkpoint_write_time 偏高。优化方向：增大 max_wal_size 以降低 checkpoint 频率，同时调整 checkpoint_completion_target 使写入更平滑。",
+    "category": "mixed"
+  },
+  {
+    "name": "optimizer_memory_interaction_low_stats_low_work_mem",
+    "difficulty": 2,
+    "description": "default_statistics_target 偏低导致行数估计不准，优化器选择了需要大量排序的计划（如 Merge Join），但 work_mem 偏低又导致排序溢写。典型现象：EXPLAIN 中估计行数与实际差 10 倍以上，选择了 Merge Join + Sort（而 Hash Join 更优），Sort 又发生外部排序。优化方向：提高 default_statistics_target 改善基数估计，同时适度提高 work_mem 减少溢写。",
+    "category": "mixed"
+  },
+  {
+    "name": "connections_vacuum_interaction_pool_exhaustion_bloat",
+    "difficulty": 2,
+    "description": "max_connections 设满且无 idle_in_transaction_session_timeout，长闲事务阻止 autovacuum 清理；同时 autovacuum_max_workers 偏低，清理积压加剧。典型现象：连接池满、表膨胀加速、查询越来越慢形成恶性循环。优化方向：启用 idle_in_transaction_session_timeout + 提高 autovacuum_max_workers + 下调 max_connections 到合理水平。",
+    "category": "mixed"
+  },
+  {
+    "name": "parallel_memory_interaction_high_gather_high_work_mem",
+    "difficulty": 3,
+    "description": "max_parallel_workers_per_gather 偏高（如 8）且 work_mem 较大（如 128MB），每个并行 worker 都独立分配 work_mem，实际内存使用 = workers x work_mem x 算子数，可能远超预期。典型现象：单个并行查询消耗数 GB 内存，OS 开始回收缓存，其他查询性能下降。优化方向：降低 max_parallel_workers_per_gather 或下调 work_mem，确保并行度乘以 work_mem 在内存预算内。",
+    "category": "mixed"
+  },
+  {
+    "name": "bgwriter_wal_checkpoint_interaction_triple_io_storm",
+    "difficulty": 3,
+    "description": "bgwriter_delay 偏低（激进清理）+ max_wal_size 偏小（频繁 checkpoint）+ checkpoint_completion_target 偏低（集中写入），三者叠加形成 IO 风暴。典型现象：bgwriter 持续写入 + checkpoint 突发写入同时发生，IO 带宽饱和；前台查询 IO 等待严重，TPS 呈周期性深跌。优化方向：增大 bgwriter_delay 减少背景清理、增大 max_wal_size 降低 checkpoint 频率、提高 checkpoint_completion_target 平滑写入。",
+    "category": "mixed"
+  },
+  {
+    "name": "jit_parallel_interaction_compilation_per_worker",
+    "difficulty": 3,
+    "description": "jit_above_cost 偏低 + max_parallel_workers_per_gather 较高，每个并行 worker 都独立进行 JIT 编译，编译开销倍增。典型现象：EXPLAIN ANALYZE 显示 JIT 时间很长，Workers Launched=8 时 JIT 编译总时间是串行的 8 倍；对于中等复杂度查询，并行+JIT 反而比串行无 JIT 更慢。优化方向：提高 jit_above_cost 使中等查询不触发 JIT，或降低并行度以减少重复编译。",
+    "category": "mixed"
   }
 ]
