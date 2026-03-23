@@ -42,12 +42,6 @@
     "category": "memory"
   },
   {
-    "name": "oversized_work_mem_concurrency_bloat",
-    "difficulty": 2,
-    "description": "work_mem 设置偏大（如 128~256MB），在 50~200 的并发分析查询下，同一查询包含多个排序/哈希节点，导致实际可分配内存远超预估。典型现象：总体内存水位在高并发时急剧上升，OS 回收缓存、系统 IO 上升，延迟抖动；仍可能出现个别节点溢写。优化方向：下调全局 work_mem，针对少量重查询在会话/事务级单独提高；控制并发，避免“高 work_mem × 多算子 × 高并发”的乘法放大。",
-    "category": "memory"
-  },
-  {
     "name": "low_cache_and_work_mem_join_sort_spills",
     "difficulty": 3,
     "description": "effective_cache_size 估计偏低使优化器倾向于 Merge Join/Seq Scan，而全局 work_mem 偏小又使必须的排序/去重溢写。典型现象：大表连接选择 Merge Join + Sort，EXPLAIN ANALYZE 显示多个 external merge Disk；temp_files 激增，I/O 放大明显。优化方向：同时提升 effective_cache_size（更贴近真实可用缓存）与 work_mem（或对目标语句 SET LOCAL），让优化器可选择更少磁盘操作的计划、减少外部排序。",
@@ -57,12 +51,6 @@
     "name": "low_maintenance_mem_and_small_buffers_autovacuum_bloat",
     "difficulty": 3,
     "description": "maintenance_work_mem 较低且 shared_buffers 较小，导致 autovacuum/vacuum 在大表上多次扫描、索引清理效率低，缓冲复用差。典型现象：autovacuum 运行时间长、n_dead_tup 长期偏高，表/索引膨胀导致查询退化（回表与索引层级增加），IO 较为持续而低效。优化方向：提高 maintenance_work_mem 以加速清理与索引重建，适度提升 shared_buffers 以改善热块复用；在低峰期执行针对性的 VACUUM/REINDEX。",
-    "category": "memory"
-  },
-  {
-    "name": "high_temp_and_work_mem_connection_spike_pressure",
-    "difficulty": 3,
-    "description": "temp_buffers 设置过大（如每会话 256~512MB）且 work_mem 也不低（如 64MB），在连接数量瞬时上升时，即使未被完全使用也会造成高内存保留与碎片，挤压 OS page cache。典型现象：连接激增阶段整体内存水位抬升、缓存命中下降、磁盘读写抖动，查询尾延迟升高。优化方向：下调全局 temp_buffers 与 work_mem，将高内存需求限制在特定会话；尽量复用连接，避免大量短会话持有高 temp_buffers。",
     "category": "memory"
   },
   {
@@ -312,12 +300,6 @@
     "category": "parallel"
   },
   {
-    "name": "high_per_gather_cpu_hog_in_multi_tenant",
-    "difficulty": 2,
-    "description": "max_parallel_workers_per_gather 设得较高（如 8~16），在多租户/多并发环境中单个大查询会占用过多 CPU，挤压其他会话。典型现象：该查询延迟下降但系统 P99 延迟上升，总体吞吐反而下降。通过下调 max_parallel_workers_per_gather 并（可选）小幅上调 max_parallel_workers，使单查询与整体并发更均衡。",
-    "category": "parallel"
-  },
-  {
     "name": "mismatch_high_per_gather_low_global_starvation",
     "difficulty": 2,
     "description": "max_parallel_workers_per_gather 偏高（如 8），但 max_parallel_workers 偏低（如 8~10）。典型现象：查询计划想要较多 worker，但实际 Workers Launched 远小于计划，频繁回退近似串行；不同查询之间互相饥饿抢占 worker。通过降低 max_parallel_workers_per_gather 或提升 max_parallel_workers，消除不匹配导致的饥饿与回退。",
@@ -345,12 +327,6 @@
     "name": "partitioned_aggregate_throttled_by_caps_and_io",
     "difficulty": 3,
     "description": "分区表聚合/扫描利用 Parallel Append，但 max_parallel_workers 与 max_parallel_workers_per_gather 都较低（如 8 和 2），且底层为 HDD 时 effective_io_concurrency 偏低。典型现象：只能少量并行扫描分区，I/O 预取不足，CPU 与磁盘均未吃满。综合提升 max_parallel_workers、max_parallel_workers_per_gather 与 effective_io_concurrency，可显著加速跨分区汇总。",
-    "category": "parallel"
-  },
-  {
-    "name": "manycore_underutilization_due_to_conservative_parallel_caps",
-    "difficulty": 3,
-    "description": "物理机 CPU 核心数较多（如 32~64），但 max_parallel_workers、max_parallel_workers_per_gather 与 max_parallel_maintenance_workers 都维持保守默认，导致 OLAP 与维护作业普遍低并行。典型现象：CPU 长期低利用（<40%），大型汇总与索引构建耗时长；EXPLAIN 显示并行度普遍不高。成体系地上调三项限制，可将多核能力转化为实际吞吐。",
     "category": "parallel"
   },
   {
@@ -414,12 +390,6 @@
     "category": "bgwriter"
   },
   {
-    "name": "big_buffers_default_bgwriter_undercoverage",
-    "difficulty": 3,
-    "description": "shared_buffers 较大（如数十 GB）但使用默认 bgwriter 参数（bgwriter_delay≈200ms、bgwriter_lru_maxpages≈100、bgwriter_lru_multiplier≈2.0），在持续更新+扫描的负载下清理覆盖不足。典型现象：高峰期 buffers_backend 显著升高，checkpoint 前后出现写入拥塞与尾延迟；平峰时 bgwriter 又显得清理过慢。可优化方向：降低 bgwriter_delay、上调 lru_maxpages，并按缓存规模适度提高 lru_multiplier，使单位时间的预清理量与缓存规模/写入速率相匹配。",
-    "category": "bgwriter"
-  },
-  {
     "name": "read_heavy_aggressive_bgwriter_hurts_latency",
     "difficulty": 3,
     "description": "读为主、更新较少的场景中，bgwriter 设置偏激进（bgwriter_delay 很低、bgwriter_lru_maxpages 较高、bgwriter_lru_multiplier 较高），后台清理吞噬 I/O，影响读性能。典型现象：读延迟 p95/p99 在写入小抖动时显著上升，磁盘写 IOPS 不成比例偏高；pg_stat_bgwriter 显示 buffers_clean 高但业务吞吐无明显收益。可优化方向：提高 bgwriter_delay、下调 lru_maxpages 与 lru_multiplier，让清理更克制，优先保障读 I/O。",
@@ -438,12 +408,6 @@
     "category": "connections"
   },
   {
-    "name": "oversized_max_connections_memory_waste",
-    "difficulty": 1,
-    "description": "max_connections 设得过高（如 1000+），实际活跃连接远低于此。大量空闲连接每个消耗约 5–15MB，导致实例 RSS 偏高、偶发 swap、上下文切换增多，尾延迟升高。优化方向：将 max_connections 下调到接近 95 百分位实际并发的水平，释放内存并降低调度开销。",
-    "category": "connections"
-  },
-  {
     "name": "over_reserved_connections_reduce_user_capacity",
     "difficulty": 1,
     "description": "superuser_reserved_connections 设置过高（如 20）且 max_connections=200，普通用户可用槽位仅 180。高峰更容易出现“剩余连接保留给超级用户”的拒连，吞吐受限但系统仍可用。优化方向：将 superuser_reserved_connections 调整为 3–5，避免不必要的保留挤占业务容量。",
@@ -453,12 +417,6 @@
     "name": "no_idle_in_transaction_timeout_lock_bloat",
     "difficulty": 1,
     "description": "未配置 idle_in_transaction_session_timeout，应用偶发长时间保持未提交事务。pg_stat_activity 中出现大量 “idle in transaction”，持有锁阻塞写入，autovacuum 无法清理导致表/索引膨胀。优化方向：为 OLTP 设定合理超时（如 5–15 分钟），自动清理长闲事务，缩短锁持有时间。",
-    "category": "connections"
-  },
-  {
-    "name": "high_max_conn_no_idle_timeout_lock_and_memory_pressure",
-    "difficulty": 2,
-    "description": "max_connections 很高（如 800）且未设置 idle_in_transaction_session_timeout。连接泄漏与长闲事务叠加，既占用大量内存又长期持锁，出现阻塞链和活跃查询等待，CPU 在上下文切换上消耗明显。优化方向：下调 max_connections 至合理范围，并启用 idle_in_transaction_session_timeout 以清理长闲事务。",
     "category": "connections"
   },
   {
@@ -480,27 +438,9 @@
     "category": "connections"
   },
   {
-    "name": "overprovisioned_maxconn_overreserved_and_no_idle_timeout_triple_whammy",
-    "difficulty": 3,
-    "description": "max_connections 过高（如 1000）、superuser_reserved_connections 偏多（如 20），且未设置 idle_in_transaction_session_timeout。大量空闲连接浪费内存，普通用户可用槽位被保留挤占，少量 idle in transaction 长期持锁造成热点表阻塞。优化方向：三管齐下——下调 max_connections、将 reserved 调整至 3–5，并启用适度的 idle_in_transaction_session_timeout。",
-    "category": "connections"
-  },
-  {
     "name": "low_maxconn_high_reserved_aggressive_idle_timeout_deadlock_of_policies",
     "difficulty": 3,
     "description": "max_connections 偏低（如 120）+ superuser_reserved_connections 偏高（如 10）+ idle_in_transaction_session_timeout 过短（如 45s）。普通连接容量被挤压、剩余连接又因短事务被频繁中断而重试，吞吐与延迟剧烈波动。优化方向：降低 reserved、提高 max_connections，并将 idle 超时放宽到几分钟以稳定事务行为。",
-    "category": "connections"
-  },
-  {
-    "name": "bursty_login_high_maxconn_low_reserved_slow_vacuum_bloat_feedback",
-    "difficulty": 3,
-    "description": "为应对登录潮将 max_connections 提得很高（如 800），但 superuser_reserved_connections 过低且未设置 idle_in_transaction_session_timeout。峰值打满时 autovacuum 无法接入，期间出现 idle in transaction 长时间保留旧版本，查询变慢→更慢释放连接形成负反馈。优化方向：下调 max_connections、提高 reserved 至 3–5、并启用 idle_in_transaction_session_timeout 清理长闲事务。",
-    "category": "connections"
-  },
-  {
-    "name": "etl_long_tx_no_timeout_high_maxconn_vacuum_backlog_and_lock_waits",
-    "difficulty": 3,
-    "description": "夜间 ETL 长事务偶发挂起，实例为多租户将 max_connections 设高（600+），idle_in_transaction_session_timeout 未启用。白天业务出现锁等待、autovacuum 积压、表膨胀与内存占用升高。优化方向：启用适度 idle_in_transaction_session_timeout 终止挂起事务，将 max_connections 下调到与实际并发匹配，并保留 3–5 个 superuser_reserved_connections 保障维护接入。",
     "category": "connections"
   },
   {
@@ -753,12 +693,6 @@
     "name": "connections_vacuum_interaction_pool_exhaustion_bloat",
     "difficulty": 2,
     "description": "max_connections 设满且无 idle_in_transaction_session_timeout，长闲事务阻止 autovacuum 清理；同时 autovacuum_max_workers 偏低，清理积压加剧。典型现象：连接池满、表膨胀加速、查询越来越慢形成恶性循环。优化方向：启用 idle_in_transaction_session_timeout + 提高 autovacuum_max_workers + 下调 max_connections 到合理水平。",
-    "category": "mixed"
-  },
-  {
-    "name": "parallel_memory_interaction_high_gather_high_work_mem",
-    "difficulty": 3,
-    "description": "max_parallel_workers_per_gather 偏高（如 8）且 work_mem 较大（如 128MB），每个并行 worker 都独立分配 work_mem，实际内存使用 = workers x work_mem x 算子数，可能远超预期。典型现象：单个并行查询消耗数 GB 内存，OS 开始回收缓存，其他查询性能下降。优化方向：降低 max_parallel_workers_per_gather 或下调 work_mem，确保并行度乘以 work_mem 在内存预算内。",
     "category": "mixed"
   },
   {
