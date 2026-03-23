@@ -136,15 +136,17 @@ fi
 
 # 启动 PostgreSQL（兼容 systemd 和 pg_ctl）
 echo "  → 启动 PostgreSQL..."
-if command -v systemctl &>/dev/null && systemctl is-system-running &>/dev/null 2>&1; then
+if command -v systemctl &>/dev/null && systemctl list-unit-files 'postgresql*' &>/dev/null 2>&1; then
+    # systemd 可用且有 postgresql 服务单元（包括 degraded 状态）
     echo "  → systemd 模式"
     $SUDO systemctl restart postgresql
     $SUDO systemctl enable postgresql
 else
+    # 无 systemd 或无 postgresql 服务单元（纯容器环境）
     echo "  → 容器模式（pg_ctlcluster）"
     $SUDO mkdir -p /var/log/postgresql
-    pg_ctlcluster $PG_VERSION main stop 2>/dev/null || true
-    pg_ctlcluster $PG_VERSION main start
+    $SUDO pg_ctlcluster $PG_VERSION main stop 2>/dev/null || true
+    $SUDO pg_ctlcluster $PG_VERSION main start
 fi
 
 # 等待就绪
