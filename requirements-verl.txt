@@ -1,0 +1,6 @@
+-r requirements.txt
+verl>=0.5.0,<0.8.0
+ray>=2.0
+vllm
+hydra-core
+omegaconf

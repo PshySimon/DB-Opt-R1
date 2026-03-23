@@ -32,28 +32,32 @@
 │   ├── config.py                       # 统一配置管理
 │   ├── tool/                           # 工具框架（Tool 基类、ToolEnv、装饰器）
 │   └── db/                             # PG 公共基础设施
-│       ├── knob_space.py               # Knob 搜索空间 + 校验
-│       ├── collector.py                # 数据采集器
-│       ├── pg_configurator.py          # PG 配置管理
-│       └── benchmark_runner.py         # Benchmark 运行器
 ├── environment/
 │   └── tools/                          # 12 个 DB 调优工具（real/simulated 双模式）
-├── cost_model/
-│   ├── knob_generator.py               # Knob 随机采样（random/near_default/LHS/mixed）
-│   ├── train.py                        # 训练脚本
-│   ├── model.py                        # 模型定义
-│   └── preprocess.py                   # 特征工程（支持 CSV/JSON 输入）
-├── datasets/
-│   ├── data/scenarios/                 # 种子 + knob 配置 + 采集结果（统一 JSON）
-│   └── synthesis/
-│       ├── scenarios/                  # 场景生成 + 采集 pipeline
-│       └── mcts/                       # MCTS 轨迹合成
+├── cost_model/                         # Cost Model（LightGBM）
+├── datasets/                           # 数据采集 + MCTS 轨迹合成
+├── training/                           # 训练代码
+│   ├── reward_score.py                 # Reward 计算（共享）
+│   ├── data_utils.py                   # 数据加载工具（共享）
+│   ├── trl/                            # trl 后端（不依赖 vLLM/Ray）
+│   │   ├── sft.py                      # SFT 训练
+│   │   └── grpo.py                     # GRPO 训练
+│   └── verl/                           # verl 后端（需要 vLLM + Ray）
+│       ├── main_grpo.py                # GRPO 入口
+│       └── agent_ray_trainer.py        # 训练循环
 ├── configs/
 │   ├── config.yaml                     # 全局配置
 │   ├── knob_space.yaml                 # 45 个可调 knob 定义
-│   └── knob_effects.yaml              # Knob 效果知识库（瓶颈方向 + 效果描述）
-└── scripts/
-    └── setup_env.sh                    # 环境准备
+│   └── knob_effects.yaml               # Knob 效果知识库
+├── scripts/
+│   ├── train_sft_trl.sh                # SFT（trl 后端）
+│   ├── train_grpo_trl.sh               # GRPO（trl 后端）
+│   ├── train_sft_verl.sh               # SFT（verl 后端）
+│   ├── train_grpo_verl.sh              # GRPO（verl 后端）
+│   └── setup_env.sh                    # 环境准备
+├── requirements.txt                    # 基础依赖
+├── requirements-trl.txt                # trl 后端依赖
+└── requirements-verl.txt               # verl 后端依赖
 ```
 
 ## 环境准备
@@ -61,16 +65,13 @@
 **系统要求**：Ubuntu 22.04+，Python 3.8+
 
 ```bash
-# 一键安装（自动检测 root/sudo、systemd/容器）
+# 一键安装 PostgreSQL + 初始化
 bash scripts/setup_env.sh
-```
 
-自动完成：
-- 安装 PostgreSQL 16 + pgbench（国内优先系统源）
-- 开启统计收集（`track_io_timing`）和慢查询日志
-- 配置本地免密登录（Unix socket + TCP 127.0.0.1）
-- 创建 benchmark 数据库 + pgbench 初始化
-- 安装 Python 依赖
+# 安装 Python 依赖（选一个后端）
+pip install -r requirements-trl.txt   # trl 后端（不依赖 vLLM/Ray，壁仞 GPU 推荐）
+pip install -r requirements-verl.txt  # verl 后端（需要 vLLM + Ray）
+```
 
 ---
 
@@ -194,24 +195,51 @@ python3 -m datasets.synthesis.mcts.run_search \
 
 #### Step 6: SFT 训练
 
-将 MCTS 轨迹转为 verl 训练格式，进行 SFT 冷启动训练。
+将 MCTS 轨迹转为训练格式，进行 SFT 冷启动训练。支持 **trl** 和 **verl** 两种后端。
 
 ```bash
+# === trl 后端（推荐，不依赖 vLLM/Ray）===
+
+# 方式 1：用脚本
+BASE_MODEL=~/models/Qwen2.5-3B-Instruct \
+DATA_FILES="datasets/data/run_*/sft_trajectories.jsonl" \
+bash scripts/train_sft_trl.sh
+
+# 方式 2：直接调用
+python -m training.trl.sft \
+    --model_path ~/models/Qwen2.5-3B-Instruct \
+    --data_files datasets/data/run_*/sft_trajectories.jsonl \
+    --output_dir model_save/sft/
+
+# === verl 后端（需要 vLLM + Ray）===
+
 # 数据预处理（JSONL → Parquet）
 python3 -m datasets.preprocess_sft \
     --input_files datasets/data/run_*/sft_trajectories.jsonl \
     --output_dir datasets/sft/
 
-# SFT 训练（默认 Qwen2.5-3B-Instruct，2 GPU）
-bash scripts/train_sft.sh
-
-# 自定义参数
-BASE_MODEL=Qwen/Qwen2.5-1.5B-Instruct \
-EPOCHS=5 LR=2e-6 N_GPUS=1 \
-bash scripts/train_sft.sh
+# SFT 训练
+BASE_MODEL=Qwen/Qwen2.5-3B-Instruct \
+bash scripts/train_sft_verl.sh
 ```
 
 训练完成后 checkpoint 保存在 `model_save/sft/`。
+
+#### Step 7: GRPO 训练
+
+基于 SFT checkpoint 进行 GRPO 强化学习训练。
+
+```bash
+# === trl 后端 ===
+python -m training.trl.grpo \
+    --model_path model_save/sft/ \
+    --scenario_dir datasets/data/scenarios/ \
+    --cost_model cost_model/checkpoints/v1 \
+    --output_dir model_save/grpo/
+
+# === verl 后端 ===
+bash scripts/train_grpo_verl.sh
+```
 
 
 

@@ -55,7 +55,7 @@ echo "N_REPEAT: $N_REPEAT"
 echo "总步数: $TOTAL_STEPS"
 echo "============================================"
 
-python3 -m training.main_grpo \
+python3 -m training.verl.main_grpo \
   algorithm.adv_estimator=grpo \
   \
   data.train_files=$TRAIN_DATA \

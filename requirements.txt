@@ -4,3 +4,10 @@ lightgbm
 scikit-learn
 scipy
 joblib
+pandas
+transformers
+torch
+peft
+datasets
+accelerate
+openai

@@ -4,7 +4,7 @@ DB-Opt GRPO 训练入口
 参考 Agent-R1 的 main_agent.py，将编译器工具替换为 DB 调优工具。
 
 Usage:
-    python3 -m training.main_grpo \
+    python3 -m training.verl.main_grpo \
         --config configs/grpo_trainer.yaml \
         ...hydra overrides...
 """
@@ -15,7 +15,7 @@ import torch
 
 from verl import DataProto
 
-from training.agent_ray_trainer import RayAgentTrainer, ResourcePoolManager, Role
+from training.verl.agent_ray_trainer import RayAgentTrainer, ResourcePoolManager, Role
 from training.reward_score import (
     compute_score_format,
     compute_score_answer,
@@ -113,7 +113,7 @@ class DBRewardManager:
 # 训练入口
 # ============================================================
 
-@hydra.main(config_path='../configs', config_name='grpo_trainer', version_base=None)
+@hydra.main(config_path='../../configs', config_name='grpo_trainer', version_base=None)
 def main(config):
     run_grpo(config)
 

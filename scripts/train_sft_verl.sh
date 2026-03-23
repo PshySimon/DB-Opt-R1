@@ -61,7 +61,7 @@ echo "============================================================"
 # 训练
 # ============================================================
 torchrun --standalone --nnodes=1 --nproc_per_node=$n_gpus \
-    -m verl.trainer.fsdp_sft_trainer \
+    -m verl.trainer.sft_trainer \
     data.train_files=$data_dir/train.parquet \
     data.val_files=$data_dir/validation.parquet \
     data.train_batch_size=$batch_size \
