@@ -81,42 +81,16 @@ pip install -r requirements-verl.txt  # verl 后端（需要 vLLM + Ray）
 
 所有数据采集、Cost Model 训练、MCTS 轨迹合成合并为一条流水线：
 
-#### Step 0: 按瓶颈方向生成种子
+#### Step 1: 维度组合蒸馏生成 knob 配置
 
-基于 `knob_effects.yaml` 中的 8 个瓶颈方向（memory/optimizer/wal/vacuum/parallel/bgwriter/connections/locks），LLM 逐方向生成性能瓶颈场景描述。
+基于 `synthesis_dimensions.yaml` 中定义的 58 个场景模板（单瓶颈/组合瓶颈/应用场景/反模式/边界条件），按 **场景 × 负载类型 × 严重程度** 的笛卡尔积，让 LLM 系统性生成 knob 配置。默认 `--per-cell 5`，共生成 **~3,000 条**配置。
 
 ```bash
-python3 -m datasets.synthesis.scenarios.pipeline seeds \
-    --effects configs/knob_effects.yaml \
+python3 -m datasets.synthesis.scenarios.pipeline synthesize \
+    --dimensions configs/synthesis_dimensions.yaml \
     --knob-space configs/knob_space.yaml \
-    --output datasets/data/scenarios/seeds.json \
-    --count 100 --model gpt-5 \
-    --api-key $OPENAI_API_KEY \
-    --api-base $OPENAI_API_BASE
-```
-
-#### Step 1: LLM 生成 knob 配置
-
-LLM 根据种子描述生成**可用但有优化空间**的 knob 配置。通过 `--cpu/--memory/--disk` 指定目标硬件。
-
-```bash
-# 4c8g SSD 机器
-python3 -m datasets.synthesis.scenarios.pipeline generate \
-    --seeds datasets/data/scenarios/seeds.json \
-    --output datasets/data/scenarios/knob_configs_4c8g_ssd.json \
-    --config configs/knob_space.yaml \
-    --cpu 4 --memory 8 --disk SSD \
-    --model gpt-5 --variants 5 --workers 5 \
-    --api-key $OPENAI_API_KEY \
-    --api-base $OPENAI_API_BASE
-
-# 8c16g HDD 机器
-python3 -m datasets.synthesis.scenarios.pipeline generate \
-    --seeds datasets/data/scenarios/seeds.json \
-    --output datasets/data/scenarios/knob_configs_8c16g_hdd.json \
-    --config configs/knob_space.yaml \
-    --cpu 8 --memory 16 --disk HDD \
-    --model gpt-5 --variants 5 --workers 5 \
+    --output datasets/data/scenarios/knob_configs_synth.json \
+    --per-cell 5 --workers 5 --model gpt-5 \
     --api-key $OPENAI_API_KEY \
     --api-base $OPENAI_API_BASE
 ```
@@ -129,7 +103,7 @@ python3 -m datasets.synthesis.scenarios.pipeline generate \
 python3 -m datasets.synthesis.scenarios.pipeline random-sample \
     --knob-space configs/knob_space.yaml \
     --output datasets/data/scenarios/knob_configs_random.json \
-    --count 200 --strategy mixed
+    --count 5000 --strategy mixed
 ```
 
 #### Step 3: 统一真机采集（需要 PG）
@@ -149,6 +123,7 @@ echo $! > logs/scenarios/running.pid
 ```
 
 数据带 `source` 标签：`llm_generated`（MCTS + Cost Model）、`random_sampled`（仅 Cost Model）。
+
 
 #### Step 4: Cost Model 训练
 

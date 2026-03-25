@@ -165,10 +165,11 @@ class KnobPreprocessor:
         df = self._load_data(data_path)
         logger.info(f"  原始: {df.shape[0]} 行 × {df.shape[1]} 列")
 
-        # 保存 status 和 workload 信息
+        # 保存 status、workload、source 信息
         meta = pd.DataFrame({
             "status": df.get("status", "success"),
             "workload": df.get("workload", "mixed"),
+            "source": df.get("source", "unknown"),
         })
 
         # 1. 找变化的 knob（用成功数据判断）
@@ -247,6 +248,7 @@ class KnobPreprocessor:
                 row["tps"] = 0
 
             row["status"] = "success"  # collected.json 里都是成功的
+            row["source"] = item.get("source", "unknown")
             rows.append(row)
 
         df = pd.DataFrame(rows)

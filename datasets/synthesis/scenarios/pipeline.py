@@ -1,32 +1,31 @@
 """
-场景采集 Pipeline（三步流程）
+场景采集 Pipeline
 
-Step 0: seeds     — 按瓶颈方向让 LLM 生成种子场景描述（或程序化生成）
-Step 1: generate  — LLM 根据种子生成可用但有优化空间的 knob 配置
-Step 2: collect   — 真机执行 + 采集完整指标（需要 PG）
+Step 1: synthesize — 按维度组合蒸馏让 LLM 系统性生成 knob 配置
+Step 2: random-sample — 随机采样 knob 配置（Cost Model 训练数据）
+Step 3: collect   — 真机执行 + 采集完整指标（需要 PG）
 
 用法:
-    # Step 0: 按瓶颈方向生成种子
-    python3 -m datasets.synthesis.scenarios.pipeline seeds \
-        --effects configs/knob_effects.yaml \
+    # Step 1: 维度组合蒸馏生成 knob 配置
+    python3 -m datasets.synthesis.scenarios.pipeline synthesize \
+        --dimensions configs/synthesis_dimensions.yaml \
         --knob-space configs/knob_space.yaml \
-        --output datasets/data/scenarios/seeds.json \
-        --count 100 --model gpt-5
+        --output datasets/data/scenarios/knob_configs_synth.json \
+        --per-cell 5 --workers 5 --model gpt-5
 
-    # Step 1: LLM 生成 knob 配置
-    python3 -m datasets.synthesis.scenarios.pipeline generate \
-        --seeds datasets/data/scenarios/seeds.json \
-        --output datasets/data/scenarios/knob_configs.json \
-        --config configs/knob_space.yaml \
-        --model gpt-5 --variants 5 --workers 5 \
-        --cpu 8 --memory 16 --disk HDD
+    # Step 2: 随机采样
+    python3 -m datasets.synthesis.scenarios.pipeline random-sample \
+        --knob-space configs/knob_space.yaml \
+        --output datasets/data/scenarios/knob_configs_random.json \
+        --count 5000 --strategy mixed
 
-    # Step 2: 真机采集
+    # Step 3: 真机采集
     python3 -m datasets.synthesis.scenarios.pipeline collect \
-        --input datasets/data/scenarios/knob_configs.json \
+        --input 'datasets/data/scenarios/knob_configs_*.json' \
         --output datasets/data/scenarios/collected.json \
         --host 127.0.0.1 --port 5432
 """
+
 
 import json
 import os
@@ -41,288 +40,8 @@ from .schema import ScenarioState
 
 logger = logging.getLogger(__name__)
 
+# ==================== Step 1: 真机采集 ====================
 
-def create_scenario_prompt(seed: dict, hardware: dict, knob_space: KnobSpace) -> str:
-    """构造让 LLM 生成调优场景 knob 配置的 prompt"""
-    return f"""你是 PostgreSQL 性能调优专家。请根据以下瓶颈场景描述，给出一组合理的 knob 配置。
-
-## 瓶颈场景
-{seed['description']}
-
-## 硬件环境
-- CPU: {hardware.get('cpu_count', 8)} 核
-- 内存: {hardware.get('total_memory_gb', 16)} GB
-- 磁盘: {hardware.get('disk_type', 'SSD')}
-
-## 可用 knob 列表（只能从这些中选择，值必须在范围内）
-{knob_space.summarize_for_prompt()}
-
-## 要求
-1. 给出的配置必须是**可用的**（数据库能正常启动和运行）
-2. 配置应体现该瓶颈场景的特征：性能不差到不可用，但**存在明显优化空间**
-3. 只输出需要修改的 knob（2-5 个），其余保持默认
-4. 值要合理，不要极端值（不要直接用 min 或 max）
-5. 输出纯 JSON，不要任何多余文字
-
-## 输出格式
-{{"shared_buffers": "256MB", "work_mem": "2MB"}}"""
-
-
-# 按瓶颈方向生成种子的 prompt
-SEED_BY_DIRECTION_PROMPT = """你是 PostgreSQL 性能调优专家。请针对【{direction}】瓶颈方向，生成 {count} 个不同的性能瓶颈场景。
-
-## 瓶颈方向说明
-{direction_desc}
-
-## 该方向涉及的 knob
-{knob_list}
-
-## 已有种子（避免重复）
-{existing}
-
-## 要求
-1. 每个场景描述一个**可用但性能不佳**的配置状况，而非极端故障
-2. 描述要具体，包含瓶颈的典型现象
-3. 场景应有调优空间：通过调整上述 knob 可以显著改善性能
-4. 难度 1（单参数调整）到 3（多参数组合）均匀分布
-5. 输出纯 JSON 数组
-
-## 输出格式
-[
-  {{
-    "name": "场景英文短名（snake_case）",
-    "difficulty": 1-3,
-    "description": "具体的中文场景描述，包含瓶颈现象和可优化方向",
-    "category": "{category}"
-  }},
-  ...
-]"""
-
-
-# ==================== Step 0: 按瓶颈方向生成种子 ====================
-
-# 8 个瓶颈方向及其描述
-BOTTLENECK_DIRECTIONS = {
-    "memory": "内存配置瓶颈：shared_buffers/work_mem/effective_cache_size 等配置不当，缓存命中率低、排序溢写、内存分配不合理",
-    "optimizer": "优化器代价估算瓶颈：random_page_cost/statistics_target/join_collapse_limit 等配置不当，执行计划选择次优",
-    "wal": "WAL/Checkpoint 瓶颈：max_wal_size/checkpoint_timeout/synchronous_commit 等配置不当，写入性能受限或恢复风险高",
-    "vacuum": "VACUUM/AutoVacuum 瓶颈：autovacuum 参数配置不当，表膨胀、统计信息过时、死元组堆积",
-    "parallel": "并行查询瓶颈：max_parallel_workers 等配置不当，无法充分利用多核 CPU",
-    "bgwriter": "后台写入瓶颈：bgwriter_delay/lru_maxpages 等配置不当，脏页清理效率低或 IO 争抢",
-    "connections": "连接与资源瓶颈：max_connections/idle_in_transaction_session_timeout 等配置不当，连接资源浪费或不足",
-    "locks": "锁与并发瓶颈：deadlock_timeout/lock_timeout 配置不当，锁等待策略影响并发性能",
-}
-
-
-def _extract_knob_list_for_direction(effects_data: dict, direction: str) -> str:
-    """从 knob_effects.yaml 中提取某个方向涉及的 knob 及其效果描述"""
-    knobs_info = effects_data.get("knobs", {})
-    lines = []
-    for knob_name, info in knobs_info.items():
-        if info.get("category") == direction:
-            parts = [f"  {knob_name}:"]
-            if info.get("too_low"):
-                parts.append(f"偏低时 → {info['too_low']}")
-            if info.get("too_high"):
-                parts.append(f"偏高时 → {info['too_high']}")
-            if info.get("off"):
-                parts.append(f"关闭时 → {info['off']}")
-            lines.append("；".join(parts))
-    return "\n".join(lines) if lines else "（该方向暂无详细 knob 信息）"
-
-
-def generate_seeds(effects_path: str, knob_space_path: str, output_path: str,
-                   llm_generate, count: int = 100):
-    """按瓶颈方向让 LLM 生成种子场景描述
-
-    Args:
-        effects_path: knob_effects.yaml 路径
-        knob_space_path: knob_space.yaml 路径
-    """
-    import yaml
-    with open(effects_path, "r", encoding="utf-8") as f:
-        effects_data = yaml.safe_load(f)
-
-    # 加载已有种子
-    existing = []
-    if output_path and os.path.exists(output_path):
-        with open(output_path, "r", encoding="utf-8") as f:
-            existing = json.load(f)
-
-    # 每个方向分配的数量
-    directions = list(BOTTLENECK_DIRECTIONS.keys())
-    per_direction = max(1, count // len(directions))
-
-    all_new = []
-    existing_names = {s["name"] for s in existing}
-
-    for direction in directions:
-        direction_desc = BOTTLENECK_DIRECTIONS[direction]
-        knob_list = _extract_knob_list_for_direction(effects_data, direction)
-
-        existing_summary = "\n".join(
-            f"- {s['name']}: {s.get('description', '')[:50]}..."
-            for s in existing + all_new
-        ) if (existing or all_new) else "（暂无）"
-
-        prompt = SEED_BY_DIRECTION_PROMPT.format(
-            direction=direction,
-            direction_desc=direction_desc,
-            knob_list=knob_list,
-            count=per_direction,
-            existing=existing_summary,
-            category=direction,
-        )
-
-        logger.info(f"[{direction}] 请求 LLM 生成 {per_direction} 个种子...")
-        try:
-            raw = llm_generate(prompt)
-            text = raw.strip()
-            if text.startswith("```"):
-                text = "\n".join(text.split("\n")[1:-1])
-            batch = json.loads(text)
-            if not isinstance(batch, list):
-                logger.error(f"[{direction}] LLM 输出不是数组")
-                continue
-        except (json.JSONDecodeError, Exception) as e:
-            logger.error(f"[{direction}] LLM 生成失败: {e}")
-            continue
-
-        # 去重
-        added = 0
-        for s in batch:
-            if s.get("name") and s["name"] not in existing_names:
-                s.setdefault("category", direction)
-                all_new.append(s)
-                existing_names.add(s["name"])
-                added += 1
-
-        logger.info(f"[{direction}] 新增 {added} 个，累计 {len(all_new)} 个")
-
-    # 保存
-    merged = existing + all_new
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, ensure_ascii=False, indent=2)
-    logger.info(f"✅ 共 {len(merged)} 个种子 → {output_path}")
-
-
-# ==================== Step 1: 生成 knob 配置 ====================
-
-WORKLOAD_TYPES = ["mixed", "read_only", "write_heavy", "high_concurrency"]
-
-def generate_knobs(seeds_path: str, output_path: str, knob_space_path: str,
-                   llm_generate, variants: int = 1, hardware: dict = None,
-                   workers: int = 1):
-    """读取种子描述，调用 LLM 生成 knob 配置，保存为单个 JSON 文件"""
-    import threading
-    import random as _random
-
-    knob_space = KnobSpace(knob_space_path)
-
-    with open(seeds_path, "r", encoding="utf-8") as f:
-        seeds = json.load(f)
-
-    if hardware is None:
-        hardware = {"cpu_count": 8, "total_memory_gb": 16, "disk_type": "SSD"}
-
-    # 加载已有结果（断点续跑）
-    results = []
-    existing_keys = set()
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    if os.path.exists(output_path):
-        with open(output_path, "r", encoding="utf-8") as f:
-            results = json.load(f)
-        existing_keys = {(e["name"], e["variant"]) for e in results}
-        logger.info(f"已有 {len(results)} 条记录，断点续跑")
-
-    # 构建待生成任务
-    tasks = []
-    for seed in seeds:
-        for v in range(variants):
-            if (seed["name"], v) not in existing_keys:
-                tasks.append((seed, v))
-
-    total_all = len(seeds) * variants
-    logger.info(f"共 {total_all} 个（已有 {len(results)}），待生成 {len(tasks)} 个，并发 {workers}")
-
-    if not tasks:
-        logger.info("无需生成")
-        return
-
-    # 线程安全的进度计数器 + 增量保存
-    lock = threading.Lock()
-    counter = {"done": 0, "success": 0, "total": len(tasks)}
-
-    def _save():
-        """写磁盘（调用方需持有 lock）"""
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
-
-    def _generate_one(args):
-        seed, v = args
-        name = seed["name"]
-        try:
-            prompt = create_scenario_prompt(seed, hardware, knob_space)
-            raw = llm_generate(prompt)
-
-            text = raw.strip()
-            if text.startswith("```"):
-                text = "\n".join(text.split("\n")[1:-1])
-            knob_config = json.loads(text)
-
-            valid = knob_space.validate(knob_config)
-            if not valid:
-                with lock:
-                    counter["done"] += 1
-                    logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {name}_v{v}: 校验失败")
-                return
-
-            # 为场景分配负载类型
-            workload = _random.choice(WORKLOAD_TYPES)
-
-            result = {
-                "name": name,
-                "variant": v,
-                "difficulty": seed.get("difficulty", 1),
-                "description": seed["description"],
-                "category": seed.get("category", ""),
-                "workload": workload,
-                "knobs": valid,
-                "hardware_hint": hardware,
-            }
-
-            with lock:
-                results.append(result)
-                counter["done"] += 1
-                counter["success"] += 1
-                logger.info(f"  [{counter['done']}/{counter['total']}] ✅ {name}_v{v}: {len(valid)} knob, workload={workload}")
-                # 每条都写磁盘
-                _save()
-
-        except json.JSONDecodeError as e:
-            with lock:
-                counter["done"] += 1
-                logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {name}_v{v}: 非法 JSON: {e}")
-        except Exception as e:
-            with lock:
-                counter["done"] += 1
-                logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {name}_v{v}: {e}")
-
-    if workers > 1:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_generate_one, t) for t in tasks]
-            for future in as_completed(futures):
-                future.result()  # 触发异常
-    else:
-        for t in tasks:
-            _generate_one(t)
-
-    logger.info(f"生成完成: 成功 {counter['success']}/{counter['total']}，总计 {len(results)} 条 → {output_path}")
-
-
-# ==================== Step 2: 真机采集 ====================
 
 def collect_scenarios(input_path: str, output_path: str,
                       pg_host: str = "127.0.0.1", pg_port: int = 5432,
@@ -539,39 +258,225 @@ def random_sample_knobs(knob_space_path: str, output_path: str,
     logger.info(f"已保存 {len(results)} 条随机配置 → {output_path}")
 
 
+# ==================== Step 4: 维度组合蒸馏 ====================
+
+SYNTHESIZE_PROMPT = """你是 PostgreSQL 性能调优专家。请根据以下场景描述，生成一组完整的 45 个 knob 配置。
+
+## 场景
+{description}
+
+## 严重程度
+{severity_desc}
+
+## 负载类型
+{workload}
+
+## 硬件环境
+- CPU: {cpu} 核
+- 内存: {memory} GB
+- 磁盘: {disk}
+
+## 场景要求的 knob 方向
+{knob_hints}
+
+## 可用 knob 列表（必须从这些中选择，值必须在范围内）
+{knob_space_summary}
+
+## 要求
+1. 输出完整的 45 个 knob 配置（所有 knob 都要有值），而不只是需要修改的那几个
+2. 场景要求方向的 knob 按指定方向设置
+3. 其他 knob 设置为合理值（不一定是默认值，要考虑与核心 knob 的协同关系）
+4. 配置必须可用：数据库能正常启动并跑 benchmark
+5. 严重程度 {severity} 意味着：{severity_meaning}
+6. 值的格式：memory 类型用 "128MB"/"2GB" 格式，enum 用字符串，integer/float 用数字
+7. 输出纯 JSON，不要任何多余的文字
+
+## 输出格式
+{{"shared_buffers": "2GB", "work_mem": "4MB", ...所有 45 个 knob...}}"""
+
+SEVERITY_MEANINGS = {
+    "mild": "参数轻微偏移，与默认值差距约 ±20%，性能影响不大",
+    "moderate": "参数中度偏移，与默认值差距约 ±50%，性能有明显影响",
+    "severe": "参数严重偏离，接近极值或偏离 200%+，性能严重受影响",
+}
+
+
+def synthesize_knobs(dimensions_path: str, knob_space_path: str,
+                     output_path: str, llm_generate, per_cell: int = 5,
+                     workers: int = 1):
+    """按维度组合蒸馏生成 knob 配置
+
+    读取 synthesis_dimensions.yaml，按 场景×负载×严重程度 的笛卡尔积
+    调用 LLM 生成完整的 knob 配置。
+    """
+    import yaml
+    import threading
+    import itertools
+
+    knob_space = KnobSpace(knob_space_path)
+
+    with open(dimensions_path, "r", encoding="utf-8") as f:
+        dims = yaml.safe_load(f)
+
+    hardware = dims["hardware"]
+    workloads = dims["workloads"]
+    severities = dims["severities"]
+    scenarios = dims["scenarios"]
+
+    # 构建任务列表
+    tasks = []
+    for scenario in scenarios:
+        severity_list = severities if scenario.get("severity_varies", True) else ["fixed"]
+        for workload in workloads:
+            for severity in severity_list:
+                for v in range(per_cell):
+                    tasks.append((scenario, workload, severity, v))
+
+    logger.info(f"场景: {len(scenarios)}, 负载: {len(workloads)}, "
+                f"总任务: {len(tasks)}")
+
+    # 加载已有结果（断点续跑）
+    results = []
+    existing_keys = set()
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    if os.path.exists(output_path):
+        with open(output_path, "r", encoding="utf-8") as f:
+            results = json.load(f)
+        existing_keys = {(e["name"], e.get("variant", 0),
+                          e.get("workload", ""), e.get("severity", ""))
+                         for e in results}
+        logger.info(f"已有 {len(results)} 条，断点续跑")
+
+    # 过滤已完成的
+    pending = []
+    for scenario, workload, severity, v in tasks:
+        key = (scenario["name"], v, workload, severity)
+        if key not in existing_keys:
+            pending.append((scenario, workload, severity, v))
+
+    logger.info(f"待生成: {len(pending)} 条")
+    if not pending:
+        logger.info("所有任务已完成")
+        return
+
+    # 格式化 knob 方向提示
+    def _format_knob_hints(scenario):
+        lines = []
+        for knob_name, info in scenario.get("key_knobs", {}).items():
+            if "value" in info:
+                lines.append(f"- {knob_name}: 设为 {info['value']}")
+            elif "direction" in info:
+                direction = info["direction"]
+                range_str = info.get("range", "")
+                lines.append(f"- {knob_name}: 偏{direction}，参考范围 {range_str}")
+        return "\n".join(lines) if lines else "（无特殊要求）"
+
+    lock = threading.Lock()
+    counter = {"done": 0, "success": 0, "total": len(pending)}
+
+    def _save():
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+
+    def _process_one(args):
+        scenario, workload, severity, v = args
+        name = scenario["name"]
+        label = f"{name}_w{workload}_s{severity}_v{v}"
+
+        try:
+            severity_desc = SEVERITY_MEANINGS.get(severity, "固定配置，不区分严重程度")
+
+            prompt = SYNTHESIZE_PROMPT.format(
+                description=scenario["description"],
+                severity=severity,
+                severity_desc=severity_desc,
+                severity_meaning=severity_desc,
+                workload=workload,
+                cpu=hardware["cpu_count"],
+                memory=hardware["total_memory_gb"],
+                disk=hardware["disk_type"],
+                knob_hints=_format_knob_hints(scenario),
+                knob_space_summary=knob_space.summarize_for_prompt(),
+            )
+
+            raw = llm_generate(prompt)
+            text = raw.strip()
+            if text.startswith("```"):
+                text = "\n".join(text.split("\n")[1:-1])
+
+            knob_config = json.loads(text)
+            valid = knob_space.validate(knob_config)
+            if not valid:
+                with lock:
+                    counter["done"] += 1
+                    logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {label}: 校验失败")
+                return
+
+            result = {
+                "name": name,
+                "variant": v,
+                "source": "llm_generated",
+                "difficulty": scenario.get("difficulty", 1),
+                "category": scenario.get("category", ""),
+                "description": scenario["description"],
+                "workload": workload,
+                "severity": severity,
+                "knobs": valid,
+                "hardware_hint": hardware,
+            }
+
+            with lock:
+                results.append(result)
+                counter["done"] += 1
+                counter["success"] += 1
+                logger.info(f"  [{counter['done']}/{counter['total']}] "
+                            f"✅ {label}: {len(valid)} knobs")
+                _save()
+
+        except json.JSONDecodeError as e:
+            with lock:
+                counter["done"] += 1
+                logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {label}: JSON 解析失败: {e}")
+        except Exception as e:
+            with lock:
+                counter["done"] += 1
+                logger.error(f"  [{counter['done']}/{counter['total']}] ❌ {label}: {e}")
+
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_process_one, t) for t in pending]
+            for future in as_completed(futures):
+                future.result()
+    else:
+        for t in pending:
+            _process_one(t)
+
+    logger.info(f"合成完成: 成功 {counter['success']}/{counter['total']}，"
+                f"总计 {len(results)} 条 → {output_path}")
+
+
 # ==================== CLI ====================
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="故障场景 Pipeline")
+    parser = argparse.ArgumentParser(description="场景采集 Pipeline")
     subparsers = parser.add_subparsers(dest="command")
 
-    # Step 0: seeds（按瓶颈方向生成）
-    sd = subparsers.add_parser("seeds", help="按瓶颈方向生成种子场景描述")
-    sd.add_argument("--effects", default="configs/knob_effects.yaml", help="knob 效果知识库")
-    sd.add_argument("--knob-space", default="configs/knob_space.yaml", help="knob 搜索空间")
-    sd.add_argument("--output", default="datasets/data/scenarios/seeds.json")
-    sd.add_argument("--count", type=int, default=100, help="目标种子总数")
-    sd.add_argument("--model", default="gpt-5")
-    sd.add_argument("--api-key", default=None)
-    sd.add_argument("--api-base", default=None)
+    # synthesize（维度组合蒸馏）
+    syn = subparsers.add_parser("synthesize", help="按维度组合蒸馏生成 knob 配置（场景×负载×严重程度）")
+    syn.add_argument("--dimensions", default="configs/synthesis_dimensions.yaml",
+                     help="维度定义文件")
+    syn.add_argument("--knob-space", default="configs/knob_space.yaml")
+    syn.add_argument("--output", default="datasets/data/scenarios/knob_configs_synth.json")
+    syn.add_argument("--per-cell", type=int, default=5, help="每个维度格子生成几条配置")
+    syn.add_argument("--model", default="gpt-5")
+    syn.add_argument("--api-key", default=None)
+    syn.add_argument("--api-base", default=None)
+    syn.add_argument("--workers", type=int, default=5, help="并发线程数")
 
-    # Step 1: generate（LLM 生成 knob 配置）
-    gen = subparsers.add_parser("generate", help="LLM 生成可用但有优化空间的 knob 配置")
-    gen.add_argument("--seeds", default="datasets/data/scenarios/seeds.json")
-    gen.add_argument("--output", default="datasets/data/scenarios/knob_configs_llm.json")
-    gen.add_argument("--config", default="configs/knob_space.yaml")
-    gen.add_argument("--model", default="gpt-5")
-    gen.add_argument("--api-key", default=None)
-    gen.add_argument("--api-base", default=None)
-    gen.add_argument("--variants", type=int, default=5, help="每个种子生成几个变体")
-    gen.add_argument("--workers", type=int, default=5, help="并发线程数")
-    gen.add_argument("--cpu", type=int, default=8, help="CPU 核数")
-    gen.add_argument("--memory", type=int, default=16, help="内存 GB")
-    gen.add_argument("--disk", default="SSD", choices=["SSD", "HDD", "NVMe"], help="磁盘类型")
-
-    # Step 2: random-sample（随机采样 knob 配置）
+    # random-sample（随机采样 knob 配置）
     rs = subparsers.add_parser("random-sample", help="随机采样 knob 配置（Cost Model 训练数据）")
     rs.add_argument("--knob-space", default="configs/knob_space.yaml")
     rs.add_argument("--output", default="datasets/data/scenarios/knob_configs_random.json")
@@ -580,7 +485,7 @@ if __name__ == "__main__":
                     choices=["random", "near_default", "lhs", "mixed"],
                     help="采样策略：random/near_default/lhs/mixed（默认 mixed=40%%random+40%%near_default+20%%lhs）")
 
-    # Step 3: collect（统一真机采集）
+    # collect（统一真机采集）
     col = subparsers.add_parser("collect", help="统一真机采集（支持 glob 合并多个 knob_configs_*.json）")
     col.add_argument("--input", default="datasets/data/scenarios/knob_configs_*.json",
                      help="输入 JSON 路径，支持 glob 模式")
@@ -596,36 +501,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-    if args.command == "seeds":
+    if args.command == "synthesize":
         from datasets.synthesis.mcts.run_search import create_llm_client
         llm_fn = create_llm_client(
             model=args.model,
             api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
             api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
         )
-        generate_seeds(
-            effects_path=args.effects,
+        synthesize_knobs(
+            dimensions_path=args.dimensions,
             knob_space_path=args.knob_space,
             output_path=args.output,
             llm_generate=llm_fn,
-            count=args.count,
-        )
-
-    elif args.command == "generate":
-        from datasets.synthesis.mcts.run_search import create_llm_client
-        llm_fn = create_llm_client(
-            model=args.model,
-            api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
-            api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
-        )
-        generate_knobs(
-            seeds_path=args.seeds,
-            output_path=args.output,
-            knob_space_path=args.config,
-            llm_generate=llm_fn,
-            variants=args.variants,
+            per_cell=args.per_cell,
             workers=args.workers,
-            hardware={"cpu_count": args.cpu, "total_memory_gb": args.memory, "disk_type": args.disk},
         )
 
     elif args.command == "random-sample":
@@ -648,3 +537,4 @@ if __name__ == "__main__":
 
     else:
         parser.print_help()
+

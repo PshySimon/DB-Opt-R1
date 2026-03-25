@@ -6,15 +6,15 @@ CostModel 预测接口
     tps = model.predict({"shared_buffers": "2GB", "work_mem": "64MB", ...})
 """
 
-import argparse
 import json
 import logging
 from pathlib import Path
 
 import numpy as np
-import joblib
+import torch
 
 from .preprocess import KnobPreprocessor
+from .train import CostMLP, DeepEnsemble
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 class CostModel:
     """Cost Model: knob 配置 → 预测 TPS"""
 
-    def __init__(self, model, preprocessor: KnobPreprocessor, metrics: dict = None):
-        self.model = model
+    def __init__(self, ensemble: DeepEnsemble, preprocessor: KnobPreprocessor,
+                 metrics: dict = None):
+        self.ensemble = ensemble
         self.preprocessor = preprocessor
         self.metrics = metrics or {}
 
@@ -31,23 +32,48 @@ class CostModel:
     def load(cls, checkpoint_dir: str) -> "CostModel":
         """加载模型"""
         path = Path(checkpoint_dir)
-
-        model = joblib.load(path / "model.pkl")
         preprocessor = KnobPreprocessor.load(checkpoint_dir)
 
+        # 加载 ensemble
+        save_data = torch.load(path / "ensemble.pt", map_location="cpu",
+                               weights_only=False)
+
+        ensemble = DeepEnsemble(
+            n_models=save_data["n_models"],
+            hidden_dims=save_data["hidden_dims"],
+            dropout=save_data["dropout"],
+            device="cpu",
+        )
+        ensemble.scaler_X = save_data["scaler_X"]
+        ensemble.scaler_y = save_data["scaler_y"]
+
+        # 重建模型
+        input_dim = save_data["input_dim"]
+        ensemble.models = []
+        for state_dict in save_data["model_states"]:
+            model = CostMLP(
+                input_dim=input_dim,
+                hidden_dims=save_data["hidden_dims"],
+                dropout=save_data["dropout"],
+            )
+            model.load_state_dict(state_dict)
+            model.eval()
+            ensemble.models.append(model)
+
+        # 加载指标
         metrics = {}
         metrics_path = path / "metrics.json"
         if metrics_path.exists():
             with open(metrics_path, "r") as f:
                 metrics = json.load(f)
 
-        logger.info(f"模型已加载: {checkpoint_dir}")
+        logger.info(f"模型已加载: {checkpoint_dir} (Deep Ensemble × {save_data['n_models']})")
         if metrics:
             logger.info(f"  R²={metrics.get('r2', '?'):.4f}, "
                         f"Spearman={metrics.get('spearman', '?'):.4f}, "
                         f"MAPE={metrics.get('mape', '?'):.1%}")
 
-        return cls(model, preprocessor, metrics)
+        return cls(ensemble, preprocessor, metrics)
 
     def predict(self, knob_config: dict, hw_info: dict = None) -> float:
         """
@@ -62,16 +88,37 @@ class CostModel:
             predicted TPS
         """
         x = self.preprocessor.transform(knob_config, hw_info)
-        log_tps = self.model.predict(x.reshape(1, -1))[0]
-        return float(np.expm1(log_tps))
+        mean, _ = self.ensemble.predict(x.reshape(1, -1))
+        return float(np.expm1(mean[0]))
+
+    def predict_with_uncertainty(self, knob_config: dict,
+                                 hw_info: dict = None) -> tuple:
+        """
+        预测 TPS 并返回不确定性
+
+        Returns:
+            (tps, uncertainty_std)
+        """
+        x = self.preprocessor.transform(knob_config, hw_info)
+        mean, std = self.ensemble.predict(x.reshape(1, -1))
+        return float(np.expm1(mean[0])), float(std[0])
 
     def predict_batch(self, configs: list, hw_info: dict = None) -> list:
         """批量预测"""
         X = np.array([
             self.preprocessor.transform(cfg, hw_info) for cfg in configs
         ])
-        log_tps = self.model.predict(X)
-        return [float(np.expm1(v)) for v in log_tps]
+        mean, _ = self.ensemble.predict(X)
+        return [float(np.expm1(v)) for v in mean]
+
+    def predict_batch_with_uncertainty(self, configs: list,
+                                       hw_info: dict = None) -> tuple:
+        """批量预测，返回 (tps_list, std_list)"""
+        X = np.array([
+            self.preprocessor.transform(cfg, hw_info) for cfg in configs
+        ])
+        mean, std = self.ensemble.predict(X)
+        return [float(np.expm1(v)) for v in mean], [float(s) for s in std]
 
     def rank(self, configs: list, hw_info: dict = None) -> list:
         """
@@ -84,6 +131,7 @@ class CostModel:
 
 
 def main():
+    import argparse
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     parser = argparse.ArgumentParser(description="Cost Model 预测")
@@ -93,8 +141,8 @@ def main():
 
     model = CostModel.load(args.checkpoint)
     config = json.loads(args.config)
-    tps = model.predict(config)
-    print(f"预测 TPS: {tps:.0f}")
+    tps, unc = model.predict_with_uncertainty(config)
+    print(f"预测 TPS: {tps:.0f} (±{unc:.2f})")
 
 
 if __name__ == "__main__":
