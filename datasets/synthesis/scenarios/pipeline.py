@@ -47,7 +47,8 @@ def collect_scenarios(input_path: str, output_path: str,
                       pg_host: str = "127.0.0.1", pg_port: int = 5432,
                       pg_user: str = "postgres", pg_password: str = "",
                       pg_database: str = "postgres", pg_data_dir: str = None,
-                      knob_space_path: str = "configs/knob_space.yaml"):
+                      knob_space_path: str = "configs/knob_space.yaml",
+                      start: int = None, end: int = None):
     """读取 knob 配置 JSON，逐个应用到 PG，跑 benchmark，采集完整指标
 
     input_path 支持 glob 模式（如 knob_configs_*.json），会合并所有匹配文件。
@@ -89,6 +90,13 @@ def collect_scenarios(input_path: str, output_path: str,
     if dup_count > 0:
         logger.info(f"去重: {len(configs)} → {len(unique_configs)} 条（移除 {dup_count} 条重复配置，{dup_count*100/len(configs):.1f}%）")
     configs = unique_configs
+
+    # 分片：--start/--end 截取范围（1-indexed）
+    if start is not None or end is not None:
+        s = (start or 1) - 1  # 转 0-indexed
+        e = end or len(configs)
+        configs = configs[s:e]
+        logger.info(f"分片: [{s+1}, {e}]，本机负责 {len(configs)} 条")
 
     # 加载已有结果（断点续跑）
     existing = []
@@ -497,6 +505,8 @@ if __name__ == "__main__":
     col.add_argument("--password", default="")
     col.add_argument("--database", default="postgres")
     col.add_argument("--pg-data-dir", default=None)
+    col.add_argument("--start", type=int, default=None, help="起始编号（1-indexed，含）")
+    col.add_argument("--end", type=int, default=None, help="结束编号（1-indexed，含）")
 
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -533,6 +543,7 @@ if __name__ == "__main__":
             pg_user=args.user, pg_password=args.password,
             pg_database=args.database, pg_data_dir=args.pg_data_dir,
             knob_space_path=args.config,
+            start=args.start, end=args.end,
         )
 
     else:
