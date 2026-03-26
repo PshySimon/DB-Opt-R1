@@ -340,6 +340,67 @@ class KnobPreprocessor:
             for wl in ["mixed", "read_only", "high_concurrency", "write_heavy"]:
                 features[f"workload_{wl}"] = (df["workload"] == wl).astype(float)
 
+        # ---- 比值交互特征 ----
+        # ---- 比值交互特征 ----
+        # 用原始 MB 值计算（从已解析的 log2 值还原，或直接从 df 解析）
+        if "hw_total_memory_gb" in df.columns:
+            total_mem_gb = pd.to_numeric(df["hw_total_memory_gb"], errors="coerce").fillna(16)
+        else:
+            total_mem_gb = pd.Series(16, index=df.index)
+        total_mem_mb = total_mem_gb * 1024
+
+        if "knob_shared_buffers" in df.columns:
+            sb_mb = df["knob_shared_buffers"].apply(parse_memory_to_mb).fillna(
+                parse_memory_to_mb(self.knob_defaults.get("shared_buffers", "128MB")))
+            features["ratio_shared_buffers_mem"] = sb_mb / total_mem_mb.clip(lower=1)
+
+            if "knob_effective_cache_size" in df.columns:
+                ec_mb = df["knob_effective_cache_size"].apply(parse_memory_to_mb).fillna(
+                    parse_memory_to_mb(self.knob_defaults.get("effective_cache_size", "4GB")))
+                features["ratio_cache_mem"] = ec_mb / total_mem_mb.clip(lower=1)
+                features["ratio_cache_sb"] = ec_mb / sb_mb.clip(lower=1)
+
+        if "knob_work_mem" in df.columns and "knob_max_connections" in df.columns:
+            wm_mb = df["knob_work_mem"].apply(parse_memory_to_mb).fillna(
+                parse_memory_to_mb(self.knob_defaults.get("work_mem", "4MB")))
+            mc = pd.to_numeric(df["knob_max_connections"], errors="coerce").fillna(100)
+            features["mem_pressure"] = np.log1p(wm_mb * mc / total_mem_mb.clip(lower=1))
+
+        if "knob_max_parallel_workers_per_gather" in df.columns:
+            pw = pd.to_numeric(df["knob_max_parallel_workers_per_gather"], errors="coerce").fillna(2)
+            if "hw_cpu_count" in df.columns:
+                cpu_count = pd.to_numeric(df["hw_cpu_count"], errors="coerce").fillna(8)
+            else:
+                cpu_count = pd.Series(8, index=df.index)
+            features["ratio_parallel_cpu"] = pw / cpu_count.clip(lower=1)
+
+        if "knob_max_wal_size" in df.columns and "knob_shared_buffers" in df.columns:
+            wal_mb = df["knob_max_wal_size"].apply(parse_memory_to_mb).fillna(
+                parse_memory_to_mb(self.knob_defaults.get("max_wal_size", "1GB")))
+            sb_mb2 = df["knob_shared_buffers"].apply(parse_memory_to_mb).fillna(
+                parse_memory_to_mb(self.knob_defaults.get("shared_buffers", "128MB")))
+            features["ratio_wal_sb"] = wal_mb / sb_mb2.clip(lower=1)
+
+        # ---- workload × top-knob 交叉特征 ----
+        top_knobs_for_cross = ["synchronous_commit", "commit_delay", "shared_buffers"]
+        if "workload" in df.columns:
+            for knob_name in top_knobs_for_cross:
+                if knob_name in features:
+                    for wl in ["read_only", "write_heavy"]:
+                        wl_mask = features.get(f"workload_{wl}", pd.Series(0, index=df.index))
+                        features[f"cross_{wl}_{knob_name}"] = features[knob_name] * wl_mask
+
+        # ---- Top-10 Knob 两两交叉特征 (乘积) ----
+        from itertools import combinations
+        top_10_knobs = [
+            'commit_delay', 'synchronous_commit', 'max_connections', 'lock_timeout',
+            'checkpoint_completion_target', 'shared_buffers', 'effective_io_concurrency',
+            'seq_page_cost', 'autovacuum_vacuum_threshold', 'random_page_cost'
+        ]
+        for a, b in combinations(top_10_knobs, 2):
+            if a in features and b in features:
+                features[f"x_{a}_x_{b}"] = features[a] * features[b]
+
         result = pd.DataFrame(features)
 
         # 处理残余 NaN

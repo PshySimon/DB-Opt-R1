@@ -74,7 +74,8 @@ class DeepEnsemble:
 
     def fit(self, X_train, y_train, X_val=None, y_val=None,
             epochs: int = 200, batch_size: int = 256, lr: float = 1e-3,
-            weight_decay: float = 1e-4, patience: int = 20):
+            weight_decay: float = 1e-4, patience: int = 20,
+            sample_weights: np.ndarray = None):
         """训练 ensemble 中的所有模型"""
 
         # 标准化
@@ -83,6 +84,12 @@ class DeepEnsemble:
 
         X_tensor = torch.FloatTensor(X_train_scaled).to(self.device)
         y_tensor = torch.FloatTensor(y_train_scaled).to(self.device)
+
+        # 样本权重
+        if sample_weights is not None:
+            w_tensor = torch.FloatTensor(sample_weights).to(self.device)
+        else:
+            w_tensor = None
 
         if X_val is not None:
             X_val_scaled = self.scaler_X.transform(X_val)
@@ -112,9 +119,11 @@ class DeepEnsemble:
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=epochs, eta_min=lr * 0.01
             )
-            criterion = nn.HuberLoss(delta=1.0)
 
-            dataset = TensorDataset(X_tensor, y_tensor)
+            if w_tensor is not None:
+                dataset = TensorDataset(X_tensor, y_tensor, w_tensor)
+            else:
+                dataset = TensorDataset(X_tensor, y_tensor)
             loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
             best_val_loss = float("inf")
@@ -124,10 +133,20 @@ class DeepEnsemble:
             for epoch in range(epochs):
                 model.train()
                 train_loss = 0
-                for xb, yb in loader:
+                for batch in loader:
+                    if w_tensor is not None:
+                        xb, yb, wb = batch
+                    else:
+                        xb, yb = batch
+                        wb = None
                     optimizer.zero_grad()
                     pred = model(xb)
-                    loss = criterion(pred, yb)
+                    # 加权 Huber Loss
+                    huber = nn.functional.huber_loss(pred, yb, reduction='none', delta=1.0)
+                    if wb is not None:
+                        loss = (huber * wb).mean()
+                    else:
+                        loss = huber.mean()
                     loss.backward()
                     nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                     optimizer.step()
@@ -140,7 +159,7 @@ class DeepEnsemble:
                     model.eval()
                     with torch.no_grad():
                         val_pred = model(X_val_t)
-                        val_loss = criterion(val_pred, y_val_t).item()
+                        val_loss = nn.functional.huber_loss(val_pred, y_val_t, delta=1.0).item()
 
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss
@@ -237,6 +256,16 @@ def evaluate(y_true, y_pred, status=None):
     else:
         metrics["mape"] = float("nan")
 
+    # WAPE（加权绝对百分误差）
+    total_actual = np.sum(np.abs(tps_true_s[nonzero]))
+    if total_actual > 0:
+        metrics["wape"] = np.sum(np.abs(tps_true_s[nonzero] - tps_pred_s[nonzero])) / total_actual
+    else:
+        metrics["wape"] = float("nan")
+
+    # log-MAE（log 空间的平均绝对误差）
+    metrics["log_mae"] = np.mean(np.abs(y_true - y_pred))
+
     # 失败识别率
     if status is not None:
         fail_mask = status != "success"
@@ -252,12 +281,17 @@ def evaluate(y_true, y_pred, status=None):
 # ===== 训练入口 =====
 
 def train(data_path: str, knob_space_path: str, output_dir: str,
-          n_models: int = 5, hidden_dims: str = "256,128,64",
+          n_models: int = 5, hidden_dims: str = "512,256,128",
           epochs: int = 200, batch_size: int = 256,
           lr: float = 1e-3, dropout: float = 0.1,
           test_size: float = 0.2, seed: int = 42,
-          split_by_source: bool = False):
-    """训练 Deep Ensemble Cost Model"""
+          split_by_source: bool = False,
+          model_type: str = "mlp"):
+    """训练 Cost Model
+
+    Args:
+        model_type: 'mlp' (Deep Ensemble) 或 'lgbm' (LightGBM)
+    """
 
     hidden = [int(x) for x in hidden_dims.split(",")]
 
@@ -324,107 +358,155 @@ def train(data_path: str, knob_space_path: str, output_dir: str,
             )
         logger.info(f"  训练集: {X_train.shape[0]}, 验证集: {X_val.shape[0]}")
 
+    # 2.5 计算逆频率样本权重（按 TPS 分桶）
+    tps_train = np.expm1(y_train)
+    bin_edges = [0, 100, 1000, 10000, float("inf")]
+    bin_indices = np.digitize(tps_train, bin_edges) - 1  # 0-indexed
+    n_bins = len(bin_edges) - 1
+    bin_counts = np.array([np.sum(bin_indices == b) for b in range(n_bins)])
+    bin_weights = len(tps_train) / (n_bins * np.maximum(bin_counts, 1))
+    sample_weights = np.array([bin_weights[b] for b in bin_indices], dtype=np.float32)
+    # 归一化使均值=1
+    sample_weights = sample_weights / sample_weights.mean()
+    logger.info(f"  样本加权: bins={list(bin_counts)}, weights={[f'{w:.2f}' for w in bin_weights]}")
+
     # 3. 训练
-    logger.info(f"=== 训练 Deep Ensemble ({n_models} × MLP {hidden}) ===")
-    ensemble = DeepEnsemble(
-        n_models=n_models,
-        hidden_dims=hidden,
-        dropout=dropout,
-    )
-    ensemble.fit(
-        X_train, y_train,
-        X_val=X_val, y_val=y_val,
-        epochs=epochs, batch_size=batch_size,
-        lr=lr,
-    )
+    y_pred_std = np.zeros(len(y_val))  # LightGBM 无不确定性
+
+    if model_type == "lgbm":
+        import lightgbm as lgb
+        logger.info(f"=== 训练 LightGBM ===")
+
+        dtrain = lgb.Dataset(X_train, y_train, weight=sample_weights)
+        dval = lgb.Dataset(X_val, y_val, reference=dtrain)
+
+        lgb_params = {
+            'objective': 'huber', 'metric': 'mae', 'alpha': 1.0,
+            'num_leaves': 63, 'learning_rate': 0.05,
+            'min_child_samples': 20, 'subsample': 0.8, 'colsample_bytree': 0.8,
+            'verbose': -1, 'seed': seed,
+        }
+        gbm = lgb.train(lgb_params, dtrain, num_boost_round=1000,
+                        valid_sets=[dval],
+                        callbacks=[lgb.early_stopping(50), lgb.log_evaluation(100)])
+
+        logger.info(f"  最佳迭代: {gbm.best_iteration}")
+    else:
+        logger.info(f"=== 训练 Deep Ensemble ({n_models} × MLP {hidden}) ===")
+        ensemble = DeepEnsemble(
+            n_models=n_models,
+            hidden_dims=hidden,
+            dropout=dropout,
+        )
+        ensemble.fit(
+            X_train, y_train,
+            X_val=X_val, y_val=y_val,
+            epochs=epochs, batch_size=batch_size,
+            lr=lr,
+            sample_weights=sample_weights,
+        )
 
     # 4. 评估
+    def _predict(X_data):
+        if model_type == "lgbm":
+            return gbm.predict(X_data), np.zeros(len(X_data))
+        else:
+            return ensemble.predict(X_data)
+
     all_metrics = {}
 
     if split_by_source:
         # In-Distribution 评估（random hold-out）
         logger.info("=== In-Distribution 评估 (random hold-out) ===")
-        y_pred_id, y_std_id = ensemble.predict(X_val_id)
+        y_pred_id, y_std_id = _predict(X_val_id)
         metrics_id = evaluate(y_val_id, y_pred_id, s_val_id)
+        logger.info(f"  WAPE:     {metrics_id['wape']:.1%}")
         logger.info(f"  MAPE:     {metrics_id['mape']:.1%}")
+        logger.info(f"  log-MAE:  {metrics_id['log_mae']:.4f}")
         logger.info(f"  R²:       {metrics_id['r2']:.4f}")
         logger.info(f"  Spearman: {metrics_id['spearman']:.4f}")
-        logger.info(f"  不确定性: mean={y_std_id.mean():.4f}")
         all_metrics["in_distribution"] = {k: float(v) for k, v in metrics_id.items()}
-        all_metrics["in_distribution"]["uncertainty_mean"] = float(y_std_id.mean())
 
         # OOD 评估（llm_generated）
         logger.info("=== OOD 评估 (llm_generated) ===")
-        y_pred_ood, y_std_ood = ensemble.predict(X_test_ood)
+        y_pred_ood, y_std_ood = _predict(X_test_ood)
         metrics_ood = evaluate(y_test_ood, y_pred_ood, s_test_ood)
+        logger.info(f"  WAPE:     {metrics_ood['wape']:.1%}")
         logger.info(f"  MAPE:     {metrics_ood['mape']:.1%}")
+        logger.info(f"  log-MAE:  {metrics_ood['log_mae']:.4f}")
         logger.info(f"  R²:       {metrics_ood['r2']:.4f}")
         logger.info(f"  Spearman: {metrics_ood['spearman']:.4f}")
-        logger.info(f"  不确定性: mean={y_std_ood.mean():.4f}")
         all_metrics["ood"] = {k: float(v) for k, v in metrics_ood.items()}
-        all_metrics["ood"]["uncertainty_mean"] = float(y_std_ood.mean())
 
-        # 对比
-        logger.info("=== ID vs OOD 对比 ===")
-        logger.info(f"  MAPE:     ID={metrics_id['mape']:.1%}  vs  OOD={metrics_ood['mape']:.1%}")
-        logger.info(f"  R²:       ID={metrics_id['r2']:.4f}  vs  OOD={metrics_ood['r2']:.4f}")
-        logger.info(f"  Spearman: ID={metrics_id['spearman']:.4f}  vs  OOD={metrics_ood['spearman']:.4f}")
-        logger.info(f"  不确定性: ID={y_std_id.mean():.4f}  vs  OOD={y_std_ood.mean():.4f}")
-
-        metrics = metrics_ood  # 主指标使用 OOD
-        y_pred_std = y_std_ood
+        metrics = metrics_ood
     else:
         logger.info("=== 验证集评估 ===")
-        y_pred_mean, y_pred_std = ensemble.predict(X_val)
+        y_pred_mean, y_pred_std = _predict(X_val)
         metrics = evaluate(y_val, y_pred_mean, s_val_id)
 
+        logger.info(f"  WAPE:     {metrics['wape']:.1%}")
         logger.info(f"  MAPE:     {metrics['mape']:.1%}")
+        logger.info(f"  log-MAE:  {metrics['log_mae']:.4f}")
         logger.info(f"  R²:       {metrics['r2']:.4f}")
         logger.info(f"  Spearman: {metrics['spearman']:.4f}")
         if not np.isnan(metrics.get("fail_recall", float("nan"))):
             logger.info(f"  失败识别: {metrics['fail_recall']:.1%}")
-        logger.info(f"  不确定性: mean={y_pred_std.mean():.4f}, max={y_pred_std.max():.4f}")
+        if model_type != "lgbm":
+            logger.info(f"  不确定性: mean={y_pred_std.mean():.4f}, max={y_pred_std.max():.4f}")
+
+        # 分桶 WAPE
+        tps_true_val = np.expm1(y_val)
+        tps_pred_val = np.expm1(y_pred_mean)
+        bins_eval = [(0, 100, '<100'), (100, 1000, '100-1K'), (1000, 10000, '1K-10K'), (10000, 1e9, '10K+')]
+        logger.info("  分桶 WAPE:")
+        for lo, hi, label in bins_eval:
+            m = (tps_true_val >= lo) & (tps_true_val < hi)
+            if m.sum() > 0:
+                w = np.sum(np.abs(tps_true_val[m] - tps_pred_val[m])) / np.sum(np.abs(tps_true_val[m]))
+                logger.info(f"    [{label:>6s}]: {w:.1%} (n={m.sum()})")
 
     # 5. 保存
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    save_data = {
-        "n_models": n_models,
-        "hidden_dims": hidden,
-        "dropout": dropout,
-        "input_dim": X_train.shape[1],
-        "scaler_X": ensemble.scaler_X,
-        "scaler_y": ensemble.scaler_y,
-        "model_states": [m.state_dict() for m in ensemble.models],
-    }
-    torch.save(save_data, output_path / "ensemble.pt")
+    if model_type == "lgbm":
+        gbm.save_model(str(output_path / "lgbm_model.txt"))
+    else:
+        save_data = {
+            "n_models": n_models,
+            "hidden_dims": hidden,
+            "dropout": dropout,
+            "input_dim": X_train.shape[1],
+            "scaler_X": ensemble.scaler_X,
+            "scaler_y": ensemble.scaler_y,
+            "model_states": [m.state_dict() for m in ensemble.models],
+        }
+        torch.save(save_data, output_path / "ensemble.pt")
     prep.save(output_dir)
 
     metrics_save = {k: float(v) for k, v in metrics.items()}
-    metrics_save["model_type"] = "deep_ensemble"
-    metrics_save["n_models"] = n_models
-    metrics_save["hidden_dims"] = hidden
+    metrics_save["model_type"] = model_type
     metrics_save["n_train"] = int(X_train.shape[0])
     metrics_save["n_features"] = int(X_train.shape[1])
     metrics_save["split_by_source"] = split_by_source
+    if model_type == "mlp":
+        metrics_save["n_models"] = n_models
+        metrics_save["hidden_dims"] = hidden
     if split_by_source:
         metrics_save["n_val_id"] = int(X_val_id.shape[0])
         metrics_save["n_test_ood"] = int(X_test_ood.shape[0])
         metrics_save["detail"] = all_metrics
     else:
         metrics_save["n_test"] = int(X_val.shape[0])
-        metrics_save["uncertainty_mean"] = float(y_pred_std.mean())
 
     with open(output_path / "metrics.json", "w") as f:
         json.dump(metrics_save, f, indent=2, ensure_ascii=False)
 
     logger.info(f"\n=== 模型保存 ===")
-    logger.info(f"  → {output_path / 'ensemble.pt'}")
-    logger.info(f"  → {output_path / 'preprocessor.pkl'}")
+    logger.info(f"  → {output_path}")
     logger.info(f"  → {output_path / 'metrics.json'}")
 
-    return ensemble, prep, metrics
+    return None, prep, metrics
 
 
 def main():
@@ -436,7 +518,7 @@ def main():
                         help="输出目录")
     parser.add_argument("--n-models", type=int, default=5,
                         help="Ensemble 中 MLP 数量")
-    parser.add_argument("--hidden-dims", default="256,128,64",
+    parser.add_argument("--hidden-dims", default="512,256,128",
                         help="MLP 隐层维度，逗号分隔")
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -446,6 +528,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--split-by-source", action="store_true",
                         help="按 source 拆分: random→训练, llm→OOD 测试")
+    parser.add_argument("--model", default="mlp", choices=["mlp", "lgbm"],
+                        help="模型类型: mlp (Deep Ensemble) 或 lgbm (LightGBM)")
 
     args = parser.parse_args()
     train(
@@ -461,6 +545,7 @@ def main():
         test_size=args.test_size,
         seed=args.seed,
         split_by_source=args.split_by_source,
+        model_type=args.model,
     )
 
 
