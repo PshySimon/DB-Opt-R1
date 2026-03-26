@@ -11,3 +11,4 @@ peft
 datasets
 accelerate
 openai
+scikit-optimize

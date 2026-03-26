@@ -464,6 +464,293 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
                 f"总计 {len(results)} 条 → {output_path}")
 
 
+# ==================== Step 5: 贝叶斯优化搜索好配置 ====================
+
+def bo_search(knob_space_path: str, collected_path: str, output_path: str,
+              pg_host: str, pg_port: int, pg_user: str, pg_password: str,
+              pg_database: str, pg_data_dir: str,
+              rounds: int = 30, workloads: list = None,
+              n_perturb: int = 50):
+    """贝叶斯优化搜索好配置
+
+    对每种 workload 独立跑 BO，用已有 collected 数据热启动。
+    搜索轨迹 + 围绕 top 配置的扰动变体一起输出。
+    """
+    from skopt import Optimizer
+    from skopt.space import Real, Integer, Categorical
+    import numpy as np
+    import random as _random
+
+    knob_space = KnobSpace(knob_space_path)
+    from core.db.knob_space import parse_memory, format_memory
+
+    if workloads is None:
+        workloads = ["read_only", "write_heavy", "mixed", "high_concurrency"]
+
+    # ---- 构建 skopt 搜索空间 ----
+    dimensions = []
+    dim_names = []
+    knob_types = {}  # name → type info
+
+    for knob_name, info in knob_space.knobs.items():
+        knob_type = info["type"]
+        knob_types[knob_name] = info
+
+        if knob_type == "memory":
+            lo = parse_memory(str(info["min"]))
+            hi = parse_memory(str(info["max"]))
+            dimensions.append(Real(float(lo), float(hi), name=knob_name))
+        elif knob_type == "integer":
+            dimensions.append(Integer(int(info["min"]), int(info["max"]), name=knob_name))
+        elif knob_type == "float":
+            dimensions.append(Real(float(info["min"]), float(info["max"]), name=knob_name))
+        elif knob_type == "enum":
+            dimensions.append(Categorical(info["values"], name=knob_name))
+
+        dim_names.append(knob_name)
+
+    def _knobs_to_x(knobs_dict: dict) -> list:
+        """knob dict → skopt 向量"""
+        x = []
+        for name in dim_names:
+            info = knob_types[name]
+            val = knobs_dict.get(name, info["default"])
+            if info["type"] == "memory":
+                x.append(float(parse_memory(str(val))))
+            elif info["type"] == "integer":
+                x.append(int(val))
+            elif info["type"] == "float":
+                x.append(float(val))
+            elif info["type"] == "enum":
+                x.append(str(val))
+        return x
+
+    def _x_to_knobs(x: list) -> dict:
+        """skopt 向量 → knob dict（格式化为 PG 可接受的值）"""
+        knobs = {}
+        for i, name in enumerate(dim_names):
+            info = knob_types[name]
+            val = x[i]
+            if info["type"] == "memory":
+                knobs[name] = format_memory(int(round(val)))
+            elif info["type"] == "integer":
+                knobs[name] = int(round(val))
+            elif info["type"] == "float":
+                knobs[name] = round(float(val), 4)
+            elif info["type"] == "enum":
+                knobs[name] = str(val)
+        return knobs
+
+    # ---- 加载已有数据做热启动 ----
+    existing_data = {}  # workload → [(x, tps)]
+    if collected_path and os.path.exists(collected_path):
+        import glob as glob_mod
+        files = sorted(glob_mod.glob(collected_path))
+        if not files:
+            files = [collected_path]
+        for fpath in files:
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                wl = item.get("workload", {})
+                if isinstance(wl, dict):
+                    wl_type = wl.get("type", "mixed")
+                    tps = wl.get("tps_current", 0)
+                else:
+                    wl_type = "mixed"
+                    tps = 0
+                if tps <= 0:
+                    continue
+                knobs = item.get("knobs", {})
+                if not knobs:
+                    continue
+                try:
+                    x = _knobs_to_x(knobs)
+                    existing_data.setdefault(wl_type, []).append((x, tps))
+                except Exception:
+                    continue
+        for wl, pairs in existing_data.items():
+            logger.info(f"热启动 [{wl}]: {len(pairs)} 条已有数据")
+
+    # ---- PG 连接 ----
+    pg_ctl = PGConfigurator(
+        pg_host=pg_host, pg_port=pg_port,
+        pg_user=pg_user, pg_password=pg_password,
+        pg_database=pg_database, pg_data_dir=pg_data_dir,
+    )
+
+    # ---- 加载已有 BO 结果（断点续跑）----
+    results = []
+    existing_bo_keys = set()
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    if os.path.exists(output_path):
+        with open(output_path, "r", encoding="utf-8") as f:
+            results = json.load(f)
+        existing_bo_keys = {(r.get("name", ""), r.get("variant", 0)) for r in results}
+        logger.info(f"已有 BO 结果 {len(results)} 条")
+
+    def _save():
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            suffix='.json', dir=os.path.dirname(output_path) or '.'
+        )
+        try:
+            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, output_path)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
+
+    def _benchmark_one(knobs: dict, workload: str, label: str) -> float:
+        """对一组 knob 配置跑 benchmark，返回 TPS"""
+        try:
+            pg_ctl.reset_to_default()
+            needs_restart = knob_space.needs_restart(knobs)
+            pg_ctl.apply(knobs, needs_restart=needs_restart)
+
+            benchmark = BenchmarkRunner(
+                pg_host=pg_host, pg_port=pg_port,
+                pg_user=pg_user, pg_database=pg_database,
+                workload=workload,
+            )
+            perf = benchmark.run()
+            tps = perf.get("tps", 0)
+            logger.info(f"  {label}: TPS={tps:.1f}")
+            return float(tps)
+        except Exception as e:
+            logger.error(f"  {label}: benchmark 失败: {e}")
+            try:
+                pg_ctl.safe_restart()
+            except Exception:
+                pass
+            return 0.0
+
+    # ---- 对每种 workload 跑 BO ----
+    for wl in workloads:
+        logger.info(f"\n{'='*50}")
+        logger.info(f"BO 搜索: workload={wl}, rounds={rounds}")
+        logger.info(f"{'='*50}")
+
+        # 检查断点：已完成多少轮
+        done_rounds = sum(1 for r in results
+                         if r.get("name", "").startswith(f"bo_{wl}_round_"))
+        if done_rounds >= rounds:
+            logger.info(f"  [{wl}] 已完成 {done_rounds} 轮，跳过")
+            continue
+
+        optimizer = Optimizer(
+            dimensions=dimensions,
+            base_estimator="GP",
+            acq_func="EI",
+            n_initial_points=max(5, 10 - len(existing_data.get(wl, []))),
+            random_state=42,
+        )
+
+        # 热启动：用已有数据 tell optimizer
+        warm_data = existing_data.get(wl, [])
+        if warm_data:
+            xs = [pair[0] for pair in warm_data]
+            ys = [-pair[1] for pair in warm_data]  # skopt 是最小化，取负
+            try:
+                optimizer.tell(xs, ys)
+                logger.info(f"  热启动 {len(warm_data)} 条")
+            except Exception as e:
+                logger.warning(f"  热启动失败（跳过）: {e}")
+
+        best_tps = 0.0
+        best_knobs = None
+
+        for r in range(done_rounds, rounds):
+            name = f"bo_{wl}_round_{r}"
+            if (name, 0) in existing_bo_keys:
+                continue
+
+            x = optimizer.ask()
+            knobs = _x_to_knobs(x)
+
+            label = f"[{wl}] round {r+1}/{rounds}"
+            tps = _benchmark_one(knobs, wl, label)
+
+            if tps > 0:
+                optimizer.tell(x, -tps)
+
+                result = {
+                    "name": name,
+                    "variant": 0,
+                    "source": "bo_search",
+                    "category": "bo",
+                    "description": f"BO 搜索 round {r} for {wl}",
+                    "workload": wl,
+                    "knobs": knobs,
+                    "tps": tps,
+                }
+                results.append(result)
+                _save()
+
+                if tps > best_tps:
+                    best_tps = tps
+                    best_knobs = knobs.copy()
+
+            logger.info(f"  round {r+1}: TPS={tps:.1f}, best={best_tps:.1f}")
+
+        if best_knobs:
+            logger.info(f"  [{wl}] 最优 TPS={best_tps:.1f}")
+
+            # ---- 围绕 top 配置生成扰动变体 ----
+            logger.info(f"  [{wl}] 生成 {n_perturb} 条扰动变体...")
+            for p in range(n_perturb):
+                name = f"bo_{wl}_perturb_{p}"
+                if (name, 0) in existing_bo_keys:
+                    continue
+
+                perturbed = {}
+                for knob_name, val in best_knobs.items():
+                    info = knob_types.get(knob_name, {})
+                    if info.get("type") == "memory":
+                        val_kb = parse_memory(str(val))
+                        lo = parse_memory(str(info["min"]))
+                        hi = parse_memory(str(info["max"]))
+                        noise = val_kb * _random.uniform(-0.2, 0.2)
+                        new_val = max(lo, min(hi, int(val_kb + noise)))
+                        perturbed[knob_name] = format_memory(new_val)
+                    elif info.get("type") == "integer":
+                        lo, hi = int(info["min"]), int(info["max"])
+                        noise = int(val) * _random.uniform(-0.2, 0.2)
+                        new_val = max(lo, min(hi, int(round(int(val) + noise))))
+                        perturbed[knob_name] = new_val
+                    elif info.get("type") == "float":
+                        lo, hi = float(info["min"]), float(info["max"])
+                        noise = float(val) * _random.uniform(-0.2, 0.2)
+                        new_val = max(lo, min(hi, float(val) + noise))
+                        perturbed[knob_name] = round(new_val, 4)
+                    elif info.get("type") == "enum":
+                        # 小概率随机换
+                        if _random.random() < 0.1:
+                            perturbed[knob_name] = _random.choice(info["values"])
+                        else:
+                            perturbed[knob_name] = val
+                    else:
+                        perturbed[knob_name] = val
+
+                results.append({
+                    "name": name,
+                    "variant": 0,
+                    "source": "bo_perturb",
+                    "category": "bo",
+                    "description": f"围绕 {wl} 最优配置的扰动变体",
+                    "workload": wl,
+                    "knobs": perturbed,
+                })
+
+            _save()
+            logger.info(f"  [{wl}] 扰动变体已保存")
+
+    logger.info(f"\nBO 搜索完成: {len(results)} 条 → {output_path}")
+
+
 # ==================== CLI ====================
 
 if __name__ == "__main__":
@@ -508,6 +795,23 @@ if __name__ == "__main__":
     col.add_argument("--start", type=int, default=None, help="起始编号（1-indexed，含）")
     col.add_argument("--end", type=int, default=None, help="结束编号（1-indexed，含）")
 
+    # bo-search（贝叶斯优化搜索好配置）
+    bo = subparsers.add_parser("bo-search", help="贝叶斯优化搜索好配置（需要 PG）")
+    bo.add_argument("--knob-space", default="configs/knob_space.yaml")
+    bo.add_argument("--collected", default="datasets/data/scenarios/collected*.json",
+                    help="已有 collected 数据（glob），用于热启动")
+    bo.add_argument("--output", default="datasets/data/scenarios/collected_bo.json")
+    bo.add_argument("--rounds", type=int, default=30, help="每种负载的 BO 轮数")
+    bo.add_argument("--workloads", default="read_only,write_heavy,mixed,high_concurrency",
+                    help="逗号分隔的负载类型列表")
+    bo.add_argument("--n-perturb", type=int, default=50, help="围绕最优配置的扰动变体数")
+    bo.add_argument("--host", default="127.0.0.1")
+    bo.add_argument("--port", type=int, default=5432)
+    bo.add_argument("--user", default="postgres")
+    bo.add_argument("--password", default="")
+    bo.add_argument("--database", default="postgres")
+    bo.add_argument("--pg-data-dir", default=None)
+
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -546,6 +850,20 @@ if __name__ == "__main__":
             start=args.start, end=args.end,
         )
 
+    elif args.command == "bo-search":
+        bo_search(
+            knob_space_path=args.knob_space,
+            collected_path=args.collected,
+            output_path=args.output,
+            pg_host=args.host, pg_port=args.port,
+            pg_user=args.user, pg_password=args.password,
+            pg_database=args.database, pg_data_dir=args.pg_data_dir,
+            rounds=args.rounds,
+            workloads=args.workloads.split(","),
+            n_perturb=args.n_perturb,
+        )
+
     else:
         parser.print_help()
+
 

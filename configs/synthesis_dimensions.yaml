@@ -514,3 +514,96 @@ scenarios:
       random_page_cost: {value: 4.0}
       checkpoint_completion_target: {value: 0.9}
       max_parallel_workers_per_gather: {value: 4}
+
+  # ========== 六、最佳配置场景 (8) ==========
+  # severity 在此表示优化程度：mild=80分配置, moderate=90分, severe=95+分（接近最优）
+
+  - name: optimal_read_heavy
+    category: optimal
+    severity_varies: true
+    description: "针对读密集负载的最佳配置：最大化缓冲池命中率，优化器代价准确反映 HDD，并行读取充分利用 8 核。severity 表示优化程度：mild=80 分, moderate=90 分, severe=95+ 分"
+    key_knobs:
+      shared_buffers: {direction: optimal, range: "3GB-4GB"}
+      effective_cache_size: {direction: optimal, range: "10GB-12GB"}
+      random_page_cost: {direction: optimal, range: "3.5-4.0"}
+      max_parallel_workers_per_gather: {direction: optimal, range: "3-5"}
+      work_mem: {direction: optimal, range: "16MB-64MB"}
+
+  - name: optimal_write_heavy
+    category: optimal
+    severity_varies: true
+    description: "针对写密集负载的最佳配置：WAL 和 checkpoint 宽松，bgwriter 适度活跃，同步提交可关。severity 表示优化程度：mild=80 分, moderate=90 分, severe=95+ 分"
+    key_knobs:
+      shared_buffers: {direction: optimal, range: "3GB-4GB"}
+      max_wal_size: {direction: optimal, range: "2GB-4GB"}
+      checkpoint_timeout: {direction: optimal, range: "600-1800"}
+      checkpoint_completion_target: {direction: optimal, range: "0.7-0.9"}
+      synchronous_commit: {value: "off"}
+      bgwriter_delay: {direction: optimal, range: "100-200"}
+
+  - name: optimal_mixed_workload
+    category: optimal
+    severity_varies: true
+    description: "针对混合读写负载的最佳均衡配置：内存、WAL、并行、优化器都调到合理值。severity 表示优化程度：mild=80 分, moderate=90 分, severe=95+ 分"
+    key_knobs:
+      shared_buffers: {direction: optimal, range: "3GB-4GB"}
+      work_mem: {direction: optimal, range: "16MB-32MB"}
+      effective_cache_size: {direction: optimal, range: "10GB-12GB"}
+      max_wal_size: {direction: optimal, range: "1GB-2GB"}
+      checkpoint_completion_target: {direction: optimal, range: "0.7-0.9"}
+
+  - name: optimal_high_concurrency
+    category: optimal
+    severity_varies: true
+    description: "针对高并发短事务的最佳配置：连接数合理、work_mem 不太大避免总内存溢出、锁超时适中。severity 表示优化程度：mild=80 分, moderate=90 分, severe=95+ 分"
+    key_knobs:
+      max_connections: {direction: optimal, range: "100-200"}
+      shared_buffers: {direction: optimal, range: "3GB-4GB"}
+      work_mem: {direction: optimal, range: "4MB-16MB"}
+      effective_cache_size: {direction: optimal, range: "10GB-12GB"}
+      deadlock_timeout: {direction: optimal, range: "500-1000"}
+
+  - name: optimal_dba_80_score
+    category: optimal
+    severity_varies: true
+    description: "DBA 日常 80分通用配置：不追求极致，但比默认值好很多。各参数都调到合理范围但不精雕细琢。severity 表示优化程度：mild=70 分, moderate=80 分, severe=85 分"
+    key_knobs:
+      shared_buffers: {direction: optimal, range: "2GB-4GB"}
+      work_mem: {direction: optimal, range: "8MB-32MB"}
+      effective_cache_size: {direction: optimal, range: "8GB-12GB"}
+      random_page_cost: {direction: optimal, range: "3.0-4.0"}
+
+  - name: optimal_memory_tuned
+    category: optimal
+    severity_varies: true
+    description: "内存子系统精调：shared_buffers/work_mem/effective_cache_size/maintenance_work_mem 四者协调最优。severity 表示优化程度"
+    key_knobs:
+      shared_buffers: {direction: optimal, range: "3GB-4GB"}
+      work_mem: {direction: optimal, range: "16MB-64MB"}
+      effective_cache_size: {direction: optimal, range: "10GB-12GB"}
+      maintenance_work_mem: {direction: optimal, range: "256MB-512MB"}
+      temp_buffers: {direction: optimal, range: "16MB-32MB"}
+
+  - name: optimal_io_tuned_hdd
+    category: optimal
+    severity_varies: true
+    description: "HDD IO 子系统精调：random_page_cost 准确反映 HDD 特性，effective_io_concurrency 适合机械盘，checkpoint 分散写入。severity 表示优化程度"
+    key_knobs:
+      random_page_cost: {direction: optimal, range: "3.5-4.0"}
+      seq_page_cost: {direction: optimal, range: "1.0-1.2"}
+      effective_io_concurrency: {direction: optimal, range: "2-4"}
+      checkpoint_completion_target: {direction: optimal, range: "0.8-0.9"}
+      bgwriter_delay: {direction: optimal, range: "100-200"}
+      bgwriter_lru_maxpages: {direction: optimal, range: "200-400"}
+
+  - name: optimal_progressive_tuning
+    category: optimal
+    severity_varies: true
+    description: "渐进调优系列：从默认配置开始逐步优化。mild=只调了内存, moderate=内存+优化器, severe=全面优化。模拟 DBA 逐步调参的真实过程"
+    key_knobs:
+      shared_buffers: {direction: optimal, range: "2GB-4GB"}
+      effective_cache_size: {direction: optimal, range: "8GB-12GB"}
+      work_mem: {direction: optimal, range: "8MB-32MB"}
+      random_page_cost: {direction: optimal, range: "3.5-4.0"}
+      max_wal_size: {direction: optimal, range: "1GB-2GB"}
+

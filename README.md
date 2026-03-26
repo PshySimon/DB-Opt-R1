@@ -124,6 +124,24 @@ echo $! > logs/scenarios/running.pid
 
 数据带 `source` 标签：`llm_generated`（MCTS + Cost Model）、`random_sampled`（仅 Cost Model）。
 
+#### Step 3.5: 贝叶斯优化搜索好配置（可选，需要 PG）
+
+用已有 collected 数据热启动高斯过程代理模型，对每种负载跑 30 轮 BO，搜索中高 TPS 配置。搜索轨迹 ~120 条 + 围绕最优配置的扰动变体 ~200 条。
+
+```bash
+mkdir -p logs/scenarios
+nohup python3 -m datasets.synthesis.scenarios.pipeline bo-search \
+    --knob-space configs/knob_space.yaml \
+    --collected "datasets/data/scenarios/collected*.json" \
+    --output datasets/data/scenarios/collected_bo.json \
+    --rounds 30 --n-perturb 50 \
+    --host 127.0.0.1 --port 5432 \
+    --user postgres --database benchmark \
+    > logs/scenarios/bo_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+echo $! > logs/scenarios/bo.pid
+```
+
+BO 产出的扰动变体（`source=bo_perturb`）需要再走一遍 `collect` 采集真实 TPS。
 
 #### Step 4: Cost Model 训练
 
