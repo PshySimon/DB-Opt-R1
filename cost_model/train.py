@@ -286,7 +286,8 @@ def train(data_path: str, knob_space_path: str, output_dir: str,
           lr: float = 1e-3, dropout: float = 0.1,
           test_size: float = 0.2, seed: int = 42,
           split_by_source: bool = False,
-          model_type: str = "mlp"):
+          model_type: str = "mlp",
+          use_weighting: bool = False):
     """训练 Cost Model
 
     Args:
@@ -359,16 +360,20 @@ def train(data_path: str, knob_space_path: str, output_dir: str,
         logger.info(f"  训练集: {X_train.shape[0]}, 验证集: {X_val.shape[0]}")
 
     # 2.5 计算逆频率样本权重（按 TPS 分桶）
-    tps_train = np.expm1(y_train)
-    bin_edges = [0, 100, 1000, 10000, float("inf")]
-    bin_indices = np.digitize(tps_train, bin_edges) - 1  # 0-indexed
-    n_bins = len(bin_edges) - 1
-    bin_counts = np.array([np.sum(bin_indices == b) for b in range(n_bins)])
-    bin_weights = len(tps_train) / (n_bins * np.maximum(bin_counts, 1))
-    sample_weights = np.array([bin_weights[b] for b in bin_indices], dtype=np.float32)
-    # 归一化使均值=1
-    sample_weights = sample_weights / sample_weights.mean()
-    logger.info(f"  样本加权: bins={list(bin_counts)}, weights={[f'{w:.2f}' for w in bin_weights]}")
+    if use_weighting:
+        tps_train = np.expm1(y_train)
+        bin_edges = [0, 100, 1000, 10000, float("inf")]
+        bin_indices = np.digitize(tps_train, bin_edges) - 1  # 0-indexed
+        n_bins = len(bin_edges) - 1
+        bin_counts = np.array([np.sum(bin_indices == b) for b in range(n_bins)])
+        bin_weights = len(tps_train) / (n_bins * np.maximum(bin_counts, 1))
+        sample_weights = np.array([bin_weights[b] for b in bin_indices], dtype=np.float32)
+        # 归一化使均值=1
+        sample_weights = sample_weights / sample_weights.mean()
+        logger.info(f"  样本加权: 开启逆频率加权, bins={list(bin_counts)}, weights={[f'{w:.2f}' for w in bin_weights]}")
+    else:
+        sample_weights = None
+        logger.info("  样本加权: 禁用 (使用均等权重)")
 
     # 3. 训练
     y_pred_std = np.zeros(len(y_val))  # LightGBM 无不确定性
@@ -530,6 +535,8 @@ def main():
                         help="按 source 拆分: random→训练, llm→OOD 测试")
     parser.add_argument("--model", default="mlp", choices=["mlp", "lgbm"],
                         help="模型类型: mlp (Deep Ensemble) 或 lgbm (LightGBM)")
+    parser.add_argument("--use-weighting", action="store_true",
+                        help="是否开启逆频率样本加权（注意：会美化 WAPE 但牺牲 log-MAE 整体精度，默认关闭）")
 
     args = parser.parse_args()
     train(
@@ -546,6 +553,7 @@ def main():
         seed=args.seed,
         split_by_source=args.split_by_source,
         model_type=args.model,
+        use_weighting=args.use_weighting,
     )
 
 
