@@ -30,7 +30,8 @@ class MCTSNode:
         self.rollout_trajectory: List[dict] = []
 
         # 搜索元数据
-        self.sample_idx: Optional[int] = None  # 根节点记录环境样本索引
+        self.sample_idx: Optional[int] = None   # 根节点记录环境样本索引
+        self.user_message: Optional[str] = None  # 根节点记录场景专属用户提问
 
     @property
     def avg_reward(self) -> float:
@@ -95,6 +96,8 @@ class MCTSNode:
         }
         if self.sample_idx is not None:
             d["sample_idx"] = self.sample_idx
+        if self.user_message is not None:
+            d["user_message"] = self.user_message
         return d
 
     @classmethod
@@ -105,6 +108,7 @@ class MCTSNode:
         node.total_reward = d.get("total_reward", 0.0)
         node.rollout_trajectory = d.get("rollout_trajectory", [])
         node.sample_idx = d.get("sample_idx")
+        node.user_message = d.get("user_message")
         for child_d in d.get("children", []):
             child = cls.from_dict(child_d, parent=node)
             node.children.append(child)

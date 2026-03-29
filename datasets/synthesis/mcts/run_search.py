@@ -26,6 +26,41 @@ from datasets.synthesis.mcts.extract import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+import re as _re
+
+
+def _build_question_prompt(scenario) -> str:
+    """根据场景信息生成 LLM 提示，让 LLM 以用户视角提出自然的调优问题。"""
+    hw = getattr(scenario, 'hardware', {}) or {}
+    wl = getattr(scenario, 'workload', {}) or {}
+    desc = getattr(scenario, 'description', '') or ''
+    return (
+        "你是一位真实的 PostgreSQL 使用者，正在向技术支持提问。"
+        "根据以下场景信息，生成一个自然的中文用户提问。\n\n"
+        "规则：\n"
+        "1. 从用户视角出发，用户不知道根因，只知道自己遇到了问题\n"
+        "2. 提问风格可以多样：可以描述观察到的现象（'某个操作变慢了'、'磁盘 IO 异常'），"
+        "也可以描述遇到的困扰（'报表跑不动'、'某个作业一直没跑完'）\n"
+        "3. 不要在提问中提及任何具体指标数字\n"
+        "4. 语言自然、口语化，像真实用户在技术论坛或工单里提问\n"
+        f"5. 输出严格的 JSON，格式为：{{\"question\": \"...\"}}\n\n"
+        f"场景背景（仅供参考，不要照搬）：\n{desc}\n"
+        f"硬件环境：{hw.get('total_memory_gb')}GB 内存，{hw.get('disk_type')} 磁盘\n"
+        f"负载类型：{wl.get('type')}\n\n"
+        "JSON:"
+    )
+
+
+def _extract_question(raw: str) -> str:
+    """从模型返回的 JSON 中提取 question 字段，失败则返回默认值。"""
+    try:
+        m = _re.search(r'\{.*?"question"\s*:\s*"(.+?)"\s*\}', raw, _re.DOTALL)
+        if m:
+            return m.group(1).strip()
+        return json.loads(raw)["question"]
+    except Exception:
+        return "请优化这个数据库的性能。"
+
 
 SYSTEM_PROMPT = """你是 PostgreSQL 数据库调优专家。你的目标是通过调整数据库配置参数来最大化性能（TPS）。
 
@@ -83,11 +118,18 @@ def run_mcts(args):
     from environment.tools import DBToolEnv
     t0 = time.time()
 
-    # 每次运行创建带时间戳的子目录
-    run_id = time.strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(args.output_dir, f"run_{run_id}")
-    os.makedirs(run_dir, exist_ok=True)
-    logger.info(f"输出目录: {run_dir}")
+    # 断点续跑：复用已有 run 目录；否则创建新目录
+    if getattr(args, 'resume_dir', None):
+        run_dir = args.resume_dir
+        if not os.path.isdir(run_dir):
+            logger.error(f"--resume-dir 目录不存在: {run_dir}")
+            sys.exit(1)
+        logger.info(f"断点续跑，复用目录: {run_dir}")
+    else:
+        run_id = time.strftime("%Y%m%d_%H%M%S")
+        run_dir = os.path.join(args.output_dir, f"run_{run_id}")
+        os.makedirs(run_dir, exist_ok=True)
+        logger.info(f"输出目录: {run_dir}")
 
     data_source = args.scenarios if args.scenarios else args.dataset
     logger.info(f"数据源: {data_source}")
@@ -122,17 +164,29 @@ def run_mcts(args):
         from cost_model.model import CostModel
         cost_model = CostModel.load(args.cost_model)
 
-    sft_data = []
-    contrastive_data = []
+    # 断点续跑：恢复已有结果
+    sft_path = os.path.join(run_dir, "sft_trajectories.jsonl")
+    contrastive_path = os.path.join(run_dir, "contrastive_pairs.jsonl")
+    sft_data, contrastive_data = [], []
+    if getattr(args, 'resume_dir', None):
+        for path, store in [(sft_path, sft_data), (contrastive_path, contrastive_data)]:
+            if os.path.isfile(path):
+                with open(path, encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            store.append(json.loads(line))
+                logger.info(f"  恢复已有数据: {len(store)} 条 ← {path}")
 
-    # 对每个环境样本搜索
+    # 对每个环境样本搜索：预加载场景（只读一次磁盘）
+    preloaded_scenarios = None
     if args.scenarios:
-        # 新模式：单文件或目录（自动合并 collected_*.json）
         env_tmp = DBToolEnv(
             mode="train", scenario_dir=args.scenarios,
             max_turns=args.depth, knob_space_path=args.knob_space,
         )
         total = env_tmp.num_samples
+        preloaded_scenarios = env_tmp.scenarios  # 保留预加载的场景列表
         del env_tmp
     else:
         # 旧模式：CSV
@@ -143,36 +197,88 @@ def run_mcts(args):
     num_samples = min(args.num_envs, total) if args.num_envs > 0 else total
     logger.info(f"场景总数: {total}，本次搜索: {num_samples}")
 
+    # 已完成的环境：扫描 tree 文件并做完整性校验
+    # 完整 = 文件 >1KB + 合法 JSON + 所有非根节点 visit_count > 0
+    tree_dir = os.path.join(run_dir, "mcts_trees")
+    done_envs = set()
+
+    def _is_tree_complete(path: str) -> bool:
+        """返回 True 表示该树完整可用，False 表示需要重新搜索。"""
+        try:
+            d = json.load(open(path, encoding="utf-8"))
+        except Exception:
+            return False
+        # 空树：根节点没有 children
+        if not d.get("children"):
+            return False
+        # 递归检查：非根节点 visit_count 必须 > 0
+        def _check(node, depth):
+            if depth > 0 and (node.get("visit_count") or 0) == 0:
+                return False
+            for child in node.get("children") or []:
+                if not _check(child, depth + 1):
+                    return False
+            return True
+        return _check(d, 0)
+
+    if os.path.isdir(tree_dir):
+        for fname in os.listdir(tree_dir):
+            if not (fname.startswith("tree_env_") and fname.endswith(".json")):
+                continue
+            try:
+                env_idx = int(fname[len("tree_env_"):-len(".json")])
+            except ValueError:
+                continue
+            path = os.path.join(tree_dir, fname)
+            if _is_tree_complete(path):
+                done_envs.add(env_idx)
+            else:
+                # 不完整：删除后重新搜索，避免漏数据
+                os.remove(path)
+                logger.warning(f"  树不完整，已删除将重新搜索: {fname}")
+    if done_envs:
+        logger.info(f"已完成环境: {len(done_envs)} 个，跳过")
+
+    # questions 字典：idx -> 场景专属的用户提问（预生成后填充）
+    questions: dict = {}
+
     def search_one_env(i):
         """搜索单个环境，返回 (sft_items, contrastive_items)"""
         logger.info(f"\n{'='*50}")
         logger.info(f"环境 {i+1}/{num_samples} (sample_idx={i})")
         logger.info(f"{'='*50}")
 
+        # 取场景专属提问（预生成，或退回默认）
+        q = questions.get(i, "请优化这个数据库的性能。")
+        # 每个环境独立 copy，避免并行竞争
+        scenario_config = {**search_config, "user_message": q}
+
         def env_factory():
-            return DBToolEnv(
+            env = DBToolEnv(
                 mode="train",
                 dataset_path=args.dataset if not args.scenarios else None,
-                scenario_dir=args.scenarios,
                 cost_model=cost_model,
                 max_turns=args.depth,
                 knob_space_path=args.knob_space,
             )
+            # 复用预加载的场景，不再重新读磁盘
+            if preloaded_scenarios is not None:
+                env.scenarios = preloaded_scenarios
+            return env
 
         if num_workers > 1:
             searcher = AsyncMCTSSearch(
                 env_factory=env_factory,
                 llm_generate=llm_generate,
-                config=search_config,
+                config=scenario_config,
             )
         else:
             env = env_factory()
-            searcher = MCTSSearch(env=env, llm_generate=llm_generate, config=search_config)
+            searcher = MCTSSearch(env=env, llm_generate=llm_generate, config=scenario_config)
 
         root = searcher.search(sample_idx=i)
 
         # 保存搜索树用于 debug
-        tree_dir = os.path.join(run_dir, "mcts_trees")
         os.makedirs(tree_dir, exist_ok=True)
         tree_path = os.path.join(tree_dir, f"tree_env_{i}.json")
         with open(tree_path, "w", encoding="utf-8") as f:
@@ -189,6 +295,7 @@ def run_mcts(args):
                 system_prompt=SYSTEM_PROMPT,
                 reward=best_reward,
                 sample_idx=i,
+                user_message=q,
             ))
             logger.info(f"  最优轨迹: {len(best_traj)} 步, reward={best_reward:.3f}")
 
@@ -198,6 +305,7 @@ def run_mcts(args):
                     trajectory=traj,
                     system_prompt=SYSTEM_PROMPT,
                     sample_idx=i,
+                    user_message=q,
                 ))
 
             pairs = extract_contrastive_pairs(root)
@@ -211,31 +319,60 @@ def run_mcts(args):
 
     # 多环境并行 or 串行
     parallel = getattr(args, 'parallel', 1)
+    pending = [i for i in range(num_samples) if i not in done_envs]
+    logger.info(f"待搜索: {len(pending)} 个环境")
+
+    # 并发预生成场景问题（与 MCTS 搜索串行，无竞争）
+    if preloaded_scenarios is not None and pending:
+        logger.info(f"预生成场景问题（{len(pending)} 个，并发={parallel}）...")
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+        with ThreadPoolExecutor(max_workers=parallel) as pool:
+            fut_map = {
+                pool.submit(llm_generate, _build_question_prompt(preloaded_scenarios[i]), 0.7): i
+                for i in pending
+            }
+            for fut in _as_completed(fut_map):
+                idx = fut_map[fut]
+                try:
+                    questions[idx] = _extract_question(fut.result())
+                except Exception as e:
+                    logger.warning(f"场景 {idx} question 生成失败，使用默认: {e}")
+                    questions[idx] = "请优化这个数据库的性能。"
+        logger.info("问题预生成完毕")
+
+    def _append_incremental(sft_items, contrastive_items):
+        """每完成一个环境立即追加写入，避免崩溃丢失数据"""
+        if sft_items:
+            with open(sft_path, 'a', encoding='utf-8') as f:
+                for item in sft_items:
+                    f.write(json.dumps(item, ensure_ascii=False) + '\n')
+        if contrastive_items:
+            with open(contrastive_path, 'a', encoding='utf-8') as f:
+                for item in contrastive_items:
+                    f.write(json.dumps(item, ensure_ascii=False) + '\n')
+
     if parallel > 1:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         logger.info(f"多环境并行: {parallel} parallel")
         with ThreadPoolExecutor(max_workers=parallel) as pool:
-            futures = {pool.submit(search_one_env, i): i for i in range(num_samples)}
+            futures = {pool.submit(search_one_env, i): i for i in pending}
             for future in as_completed(futures):
                 try:
                     sft_items, contrastive_items = future.result()
                     sft_data.extend(sft_items)
                     contrastive_data.extend(contrastive_items)
+                    _append_incremental(sft_items, contrastive_items)
                 except Exception as e:
                     logger.error(f"环境 {futures[future]} 搜索失败: {e}")
     else:
-        for i in range(num_samples):
+        for i in pending:
             sft_items, contrastive_items = search_one_env(i)
             sft_data.extend(sft_items)
             contrastive_data.extend(contrastive_items)
+            _append_incremental(sft_items, contrastive_items)
 
-    # 保存
-    sft_path = os.path.join(run_dir, "sft_trajectories.jsonl")
-    save_jsonl(sft_data, sft_path)
+    # 汇总（数据已增量写入，这里只打印统计）
     logger.info(f"\nSFT 数据: {len(sft_data)} 条 → {sft_path}")
-
-    contrastive_path = os.path.join(run_dir, "contrastive_pairs.jsonl")
-    save_jsonl(contrastive_data, contrastive_path)
     logger.info(f"对比数据: {len(contrastive_data)} 对 → {contrastive_path}")
 
     elapsed = time.time() - t0
@@ -265,6 +402,7 @@ def main():
     parser.add_argument("--num-envs", type=int, default=0, help="搜索的环境数（0=全量）")
     parser.add_argument("--parallel", type=int, default=1, help="多环境并行数（1=串行）")
     parser.add_argument("--num-workers", type=int, default=1, help="单棵树内并发 simulation 线程数（1=串行）")
+    parser.add_argument("--resume-dir", default=None, help="断点续跑：指定上次的 run_* 目录，自动跳过已完成环境")
 
     # LLM
     parser.add_argument("--model", default="gpt-5", help="LLM 模型名称")

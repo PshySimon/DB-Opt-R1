@@ -35,11 +35,13 @@ class MCTSSearch:
         self.system_prompt = cfg.get("system_prompt",
             "你是 PostgreSQL 调优专家。通过调用工具来观察数据库状态、调整参数、验证性能。"
             "目标是最大化 TPS（每秒事务数）。")
+        self.user_message = cfg.get("user_message", "请优化这个数据库的性能。")
 
     def search(self, sample_idx: int = None) -> MCTSNode:
         """对一个环境样本执行 MCTS 搜索，返回根节点"""
         root = MCTSNode()
         root.sample_idx = sample_idx
+        root.user_message = self.user_message
 
         for i in range(self.num_simulations):
             # 1. Selection
@@ -154,7 +156,7 @@ class MCTSSearch:
         if hasattr(self, '_example_trajectory') and self._example_trajectory:
             messages.append(f"{self._example_trajectory}\n\n---\n现在请你完成以下任务：\n")
 
-        messages.append("User: 请优化这个数据库的性能。\n")
+        messages.append(f"User: {self.user_message}\n")
 
         for step in trajectory:
             messages.append(f"Assistant: {step['action']}\n")
@@ -225,19 +227,14 @@ class MCTSSearch:
 
     def _compute_reward(self) -> float:
         """计算当前环境状态的 reward"""
-        env_state = self.env.env_state
-        baseline_tps = env_state.get("tps", 0)
-        if baseline_tps <= 0:
-            return 0.0
-
-        # 用 predict_performance 工具获取预测
         for tool in self.env.tools:
             if tool.name == "predict_performance":
                 result = tool.execute({})
                 try:
                     parsed = json.loads(result)
-                    pred_tps = parsed.get("predicted_tps", 0)
-                    return (pred_tps - baseline_tps) / baseline_tps
+                    # 直接用工具返回的 improvement_pct：(pred_modified - pred_baseline) / pred_baseline
+                    improvement_pct = parsed.get("improvement_pct", 0)
+                    return improvement_pct / 100.0
                 except (json.JSONDecodeError, TypeError):
                     return 0.0
 

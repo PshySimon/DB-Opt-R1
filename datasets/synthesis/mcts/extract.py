@@ -53,6 +53,18 @@ def extract_contrastive_pairs(root: MCTSNode) -> List[dict]:
     return pairs
 
 
+def _get_best_subtraj(node: MCTSNode) -> list:
+    """从 node 开始，沿 best-reward 路径采集到叶节点，包含 rollout。"""
+    steps = [{"action": node.action, "observation": node.observation or ""}]
+    cur = node
+    while cur.children:
+        cur = cur.best_child_by_reward()
+        steps.append({"action": cur.action, "observation": cur.observation or ""})
+    if cur.rollout_trajectory:
+        steps.extend(cur.rollout_trajectory)
+    return steps
+
+
 def _collect_contrastive(node: MCTSNode, pairs: list):
     """递归收集对比数据：同一决策点下最优 vs 最差"""
     visited_children = [c for c in node.children if c.visit_count > 0]
@@ -63,11 +75,17 @@ def _collect_contrastive(node: MCTSNode, pairs: list):
 
         # 只有差距足够大才生成对比
         if best.avg_reward - worst.avg_reward > 0.01:
+            # 追溯根节点，取搜索时存入的 user_message
+            root = node
+            while root.parent is not None:
+                root = root.parent
+
             pairs.append({
                 "context": node.trajectory,
-                "chosen": best.action,
+                "user_message": root.user_message,
+                "chosen_traj": _get_best_subtraj(best),
                 "chosen_reward": best.avg_reward,
-                "rejected": worst.action,
+                "rejected_traj": _get_best_subtraj(worst),
                 "rejected_reward": worst.avg_reward,
             })
 
@@ -78,11 +96,12 @@ def _collect_contrastive(node: MCTSNode, pairs: list):
 def format_trajectory_as_messages(trajectory: List[dict],
                                    system_prompt: str,
                                    reward: float = None,
-                                   sample_idx: int = None) -> dict:
+                                   sample_idx: int = None,
+                                   user_message: str = "请优化这个数据库的性能。") -> dict:
     """将轨迹格式化为 SFT 训练数据（messages 格式）"""
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "请优化这个数据库的性能。"},
+        {"role": "user", "content": user_message},
     ]
 
     for step in trajectory:
@@ -107,21 +126,25 @@ def format_trajectory_as_messages(trajectory: List[dict],
 
 
 def format_contrastive_as_dpo(pair: dict, system_prompt: str) -> dict:
-    """将对比数据格式化为 DPO 训练数据"""
-    # 构建共享上下文
-    context_messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "请优化这个数据库的性能。"},
-    ]
-    for step in pair["context"]:
-        context_messages.append({"role": "assistant", "content": step["action"]})
-        if step.get("observation"):
-            context_messages.append({"role": "tool", "content": step["observation"]})
+    """将对比数据格式化为 DPO 训练数据（chosen/rejected 均为完整对话）"""
+    user_message = pair.get("user_message", "请优化这个数据库的性能。")
+
+    full_chosen = format_trajectory_as_messages(
+        trajectory=pair["context"] + pair["chosen_traj"],
+        system_prompt=system_prompt,
+        user_message=user_message,
+        reward=pair.get("chosen_reward"),
+    )
+    full_rejected = format_trajectory_as_messages(
+        trajectory=pair["context"] + pair["rejected_traj"],
+        system_prompt=system_prompt,
+        user_message=user_message,
+        reward=pair.get("rejected_reward"),
+    )
 
     return {
-        "prompt": context_messages,
-        "chosen": pair["chosen"],
-        "rejected": pair["rejected"],
+        "chosen": full_chosen["messages"],
+        "rejected": full_rejected["messages"],
         "chosen_reward": pair.get("chosen_reward"),
         "rejected_reward": pair.get("rejected_reward"),
     }
