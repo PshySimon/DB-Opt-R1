@@ -132,6 +132,14 @@ class KnobPreprocessor:
     HW_NUMERIC = [
         "hw_cpu_count", "hw_cpu_freq_mhz", "hw_total_memory_gb",
         "hw_available_memory_gb", "hw_disk_capacity_gb",
+        # IO 基准特征（_load_json 展平 hardware 字段时自动加 hw_ 前缀，字典里的 key 不带 hw_）
+        "hw_seq_write_mbps",        # dd conv=fdatasync 顺序写 (MB/s)
+        "hw_seq_read_mbps",         # dd 顺序读 (MB/s)
+        "hw_rand_read_iops",        # fio randread 4K IOPS
+        "hw_rand_read_mbps",        # fio randread 带宽 (MB/s)
+        "hw_mem_bw_gbps",           # dd /dev/zero 内存带宽 (GB/s)
+        "hw_seq_write_bw_fio_mbps",# fio seqwrite 带宽 (MB/s)
+        "hw_seq_write_p99_lat_us", # fio seqwrite p99 延迟 (us)
     ]
 
     # 删除的列
@@ -139,7 +147,6 @@ class KnobPreprocessor:
     DROP_EXACT = [
         "timestamp", "error",
         "knob_shared_memory_size", "knob_shared_memory_size_in_huge_pages",
-        "hw_disk_read_bandwidth_mbps", "hw_disk_write_bandwidth_mbps",
         "hw_cpu_model",
     ]
 
@@ -200,44 +207,30 @@ class KnobPreprocessor:
         return X, y, meta
 
     def _load_data(self, data_path: str) -> pd.DataFrame:
-        """加载数据：自动检测 CSV 或 JSON（ScenarioState 格式）"""
+        """加载数据：自动检测 CSV、单 JSON 或目录（collected_*.json）"""
+        import os
         path = str(data_path)
         logger.info(f"加载数据: {path}")
 
-        if path.endswith(".json"):
+        if os.path.isdir(path):
+            # 目录：用 loader 统一加载 + 去重所有 collected_*.json
+            from datasets.synthesis.scenarios.loader import load_scenario_files
+            items = load_scenario_files(path, logger=logger)
+            return self._items_to_df(items)
+        elif path.endswith(".json"):
             return self._load_json(path)
         else:
             return pd.read_csv(path, on_bad_lines="skip")
 
-    def _load_json(self, json_path: str) -> pd.DataFrame:
-        """将 ScenarioState JSON 数组展平为 CSV 等价的 DataFrame
-
-        JSON 格式:
-          [{"knobs": {"shared_buffers": "2GB", ...},
-            "hardware": {"cpu_count": 8, ...},
-            "workload": {"type": "mixed", "tps_current": 3127, ...},
-            ...}, ...]
-
-        展平为:
-          knob_shared_buffers | hw_cpu_count | workload | tps | status
-        """
-        import json as json_mod
-        with open(json_path, "r", encoding="utf-8") as f:
-            items = json_mod.load(f)
-
+    def _items_to_df(self, items: list) -> pd.DataFrame:
+        """将 raw JSON dict list 展平为 DataFrame（knob_* / hw_* / workload / tps / source）"""
         rows = []
         for item in items:
             row = {}
-
-            # knobs → knob_* 列
             for k, v in item.get("knobs", {}).items():
                 row[f"knob_{k}"] = v
-
-            # hardware → hw_* 列
             for k, v in item.get("hardware", {}).items():
                 row[f"hw_{k}"] = v
-
-            # workload
             wl = item.get("workload", {})
             if isinstance(wl, dict):
                 row["workload"] = wl.get("type", "mixed")
@@ -246,14 +239,21 @@ class KnobPreprocessor:
             else:
                 row["workload"] = str(wl)
                 row["tps"] = 0
-
-            row["status"] = "success"  # collected.json 里都是成功的
+            row["status"] = "success"
             row["source"] = item.get("source", "unknown")
             rows.append(row)
-
         df = pd.DataFrame(rows)
-        logger.info(f"  JSON 加载: {len(rows)} 条，{len(df.columns)} 列")
+        logger.info(f"  展平: {len(rows)} 条，{len(df.columns)} 列")
         return df
+
+    def _load_json(self, json_path: str) -> pd.DataFrame:
+        """加载单个 JSON 文件，去重后展平为 DataFrame"""
+        import json as json_mod
+        from datasets.synthesis.scenarios.loader import dedup_scenarios
+        with open(json_path, "r", encoding="utf-8") as f:
+            items = json_mod.load(f)
+        items = dedup_scenarios(items, fname=json_path, logger=logger)
+        return self._items_to_df(items)
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """从原始 df 提取并变换特征"""
@@ -326,10 +326,12 @@ class KnobPreprocessor:
                 cat_map = {v: i for i, v in enumerate(categories)}
                 features[name] = vals.map(cat_map).fillna(0).astype(float)
 
-        # ---- 硬件特征 ----
+        # ---- 硬件特征（含 IO 基准特征，缺失时补 0 保证维度一致）----
         for col in self.HW_NUMERIC:
             if col in df.columns:
                 features[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            else:
+                features[col] = 0.0  # 旧数据无 IO 字段时补 0，维度保持一致
 
         # 磁盘类型
         if "hw_disk_type" in df.columns:
@@ -390,6 +392,31 @@ class KnobPreprocessor:
                         wl_mask = features.get(f"workload_{wl}", pd.Series(0, index=df.index))
                         features[f"cross_{wl}_{knob_name}"] = features[knob_name] * wl_mask
 
+        # ---- 悬崖阈值特征 ----
+        # 数据分析显示: commit_delay 和 synchronous_commit 对写 workload 有悬崖效应
+        if "workload" in df.columns:
+            is_write = (
+                (df["workload"] == "write_heavy") |
+                (df["workload"] == "mixed") |
+                (df["workload"] == "high_concurrency")
+            ).astype(float)
+
+            # commit_delay 阈值 × 写 workload（cd>=5000 时写TPS降2-3倍）
+            if "knob_commit_delay" in df.columns:
+                cd_raw = pd.to_numeric(df["knob_commit_delay"], errors="coerce").fillna(0)
+                cd_high = (cd_raw >= 5000).astype(float)
+                cd_very_high = (cd_raw >= 50000).astype(float)
+                features["cliff_cd_high_write"] = cd_high * is_write
+                features["cliff_cd_vhigh_write"] = cd_very_high * is_write
+                # commit_delay 对 read_only 无影响，单独标记
+                is_read = features.get("workload_read_only", pd.Series(0, index=df.index))
+                features["cliff_cd_high_read"] = cd_high * is_read
+
+            # synchronous_commit=off × 写 workload（off时写TPS翻2-3.5倍）
+            if "synchronous_commit" in features:
+                sync_off = (features["synchronous_commit"] == 0).astype(float)
+                features["cliff_sync_off_write"] = sync_off * is_write
+
         # ---- Top-10 Knob 两两交叉特征 (乘积) ----
         from itertools import combinations
         top_10_knobs = [
@@ -417,6 +444,16 @@ class KnobPreprocessor:
             hw_info: {"cpu_count": 8, "total_memory_gb": 16, ...}, 可选
         """
         assert self._fitted, "预处理器未拟合，请先 fit_transform 或 load"
+
+        # 硬件特征是区分三台机器 TPS 差异（最高 10 倍）的关键
+        # hw_info 缺失时所有 hw_* 特征为 0，模型会收到训练集从未出现的分布，预测结果不可信
+        if not hw_info:
+            import warnings
+            warnings.warn(
+                "hw_info 未传入，所有硬件特征（rand_read_iops/mem_bw_gbps 等）将为 0，"
+                "模型预测结果不可信，请确保传入正确的硬件信息。",
+                UserWarning, stacklevel=2
+            )
 
         # 构建单行 DataFrame
         row = {}
