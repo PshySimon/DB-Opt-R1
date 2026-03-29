@@ -278,15 +278,15 @@ def run_mcts(args):
 
         root = searcher.search(sample_idx=i)
 
-        # 保存搜索树用于 debug
-        os.makedirs(tree_dir, exist_ok=True)
-        tree_path = os.path.join(tree_dir, f"tree_env_{i}.json")
-        with open(tree_path, "w", encoding="utf-8") as f:
-            json.dump(root.to_dict(), f, ensure_ascii=False, indent=2)
-        logger.info(f"  搜索树已保存: {tree_path}")
-
         sft_items, contrastive_items = [], []
         if root.children:
+            # 保存搜索树用于 debug（空树不保存，避免干扰断点续跑）
+            os.makedirs(tree_dir, exist_ok=True)
+            tree_path = os.path.join(tree_dir, f"tree_env_{i}.json")
+            with open(tree_path, "w", encoding="utf-8") as f:
+                json.dump(root.to_dict(), f, ensure_ascii=False, indent=2)
+            logger.info(f"  搜索树已保存: {tree_path}")
+
             best_traj = extract_best_trajectory(root)
             best_reward = root.best_child_by_reward().avg_reward
 
