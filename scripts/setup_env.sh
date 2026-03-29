@@ -63,6 +63,35 @@ $SUDO apt-get install -y \
     sysstat 2>/dev/null || true
 echo "  ✓ 系统依赖安装完成"
 
+# 安装 fio（IO 基准测试工具）
+echo "  → 安装 fio..."
+if command -v fio &>/dev/null || [ -x "$HOME/.local/bin/fio" ]; then
+    echo "  ✓ fio 已安装，跳过"
+elif $SUDO apt-get install -y fio 2>/dev/null; then
+    echo "  ✓ fio apt 安装成功"
+elif $SUDO apt-get install -y --download-only fio 2>/dev/null && \
+     ls /var/cache/apt/archives/fio_*.deb &>/dev/null; then
+    # apt 下载成功但依赖安装失败（常见于有 ceph 依赖的环境），强制 dpkg
+    echo "  → apt 下载成功，强制 dpkg 跳过依赖安装..."
+    $SUDO dpkg -i --force-depends /var/cache/apt/archives/fio_*.deb && \
+        echo "  ✓ fio dpkg 强制安装成功" || echo "  ⚠ fio dpkg 安装失败，尝试源码编译"
+fi
+# 最后兜底：源码编译（无需 sudo，安装到~/.local）
+if ! command -v fio &>/dev/null && ! [ -x "$HOME/.local/bin/fio" ]; then
+    echo "  → 源码编译安装 fio..."
+    FIO_TMP=$(mktemp -d)
+    wget -q -O "$FIO_TMP/fio.tar.gz" \
+        "https://github.com/axboe/fio/archive/refs/tags/fio-3.41.tar.gz" && \
+    tar -xf "$FIO_TMP/fio.tar.gz" -C "$FIO_TMP" && \
+    cd "$FIO_TMP"/fio-fio-3.41 && \
+    ./configure --prefix="$HOME/.local" && make -j4 && make install && \
+    echo "export PATH=\$HOME/.local/bin:\$PATH" >> ~/.zshrc 2>/dev/null || \
+    echo "export PATH=\$HOME/.local/bin:\$PATH" >> ~/.bashrc
+    rm -rf "$FIO_TMP"
+    export PATH="$HOME/.local/bin:$PATH"
+    echo "  ✓ fio 源码编译完成: $(fio --version 2>/dev/null || echo '版本未知')"
+fi
+
 # ==================== 2. PostgreSQL ====================
 echo ""
 echo "[2/5] 安装 PostgreSQL $PG_VERSION..."

@@ -510,6 +510,7 @@ class PredictPerformanceTool(DBTool):
             **kwargs
         )
         self.cost_model = cost_model
+        self._original_knobs_snapshot = {}  # reset 时由 DBToolEnv 注入，保存未修改的原始 knob
 
     def execute_real(self, args):
         return json.dumps({"error": "predict_performance only available in train mode"})
@@ -518,30 +519,39 @@ class PredictPerformanceTool(DBTool):
         if self.cost_model is None:
             return json.dumps({"error": "cost model not loaded"})
 
-        # 优先从 scenario 读取
         if self.scenario and self.scenario.knobs:
-            knob_config = dict(self.scenario.knobs)
-            knob_config["workload"] = self.scenario.workload.get("type", "mixed")
             hw_info = dict(self.scenario.hardware)
-            baseline = float(self.scenario.workload.get("tps_current", 0) or 0)
+            wl_type = self.scenario.workload.get("type", "mixed")
+
+            # baseline 配置：优先用 reset 时保存的快照（不受 apply_knob_change 污染）
+            if self._original_knobs_snapshot:
+                baseline_knobs = {k[5:]: v for k, v in self._original_knobs_snapshot.items()}  # 去掉 "knob_" 前缀
+            else:
+                baseline_knobs = dict(self.scenario.knobs)
+            baseline_knobs["workload"] = wl_type
+
+            # 当前配置：scenario.knobs 已被 apply_knob_change 更新，直接用即可
+            current_knobs = dict(self.scenario.knobs)
+            current_knobs["workload"] = wl_type
         else:
-            knob_config = {}
-            for k, v in self.env_state.items():
-                if k.startswith("knob_"):
-                    knob_config[k.replace("knob_", "")] = v
-            knob_config["workload"] = self.env_state.get("workload", "mixed")
             hw_info = {k.replace("hw_", ""): v for k, v in self.env_state.items() if k.startswith("hw_")}
-            baseline = float(self.env_state.get("tps", 0) or 0)
+            wl_type = self.env_state.get("workload", "mixed")
+            baseline_knobs = {k.replace("knob_", ""): v for k, v in self.env_state.items() if k.startswith("knob_")}
+            baseline_knobs["workload"] = wl_type
+            current_knobs = dict(baseline_knobs)
 
         try:
-            pred_tps = self.cost_model.predict(knob_config, hw_info)
+            # 两者都用模型预测，improvement = (pred_current - pred_baseline) / pred_baseline
+            pred_baseline = self.cost_model.predict(baseline_knobs, hw_info)
+            pred_tps      = self.cost_model.predict(current_knobs,  hw_info)
         except Exception as e:
             return json.dumps({"error": f"prediction failed: {str(e)}"})
 
         return json.dumps({
-            "predicted_tps": round(pred_tps, 1),
-            "baseline_tps": round(baseline, 1),
-            "improvement_pct": round((pred_tps - baseline) / max(baseline, 1) * 100, 2),
+            "predicted_tps":     round(pred_tps, 1),
+            "baseline_tps":      round(pred_baseline, 1),
+            "actual_tps":        round(float(self.scenario.workload.get("tps_current", 0) or 0) if self.scenario else 0, 1),
+            "improvement_pct":   round((pred_tps - pred_baseline) / max(pred_baseline, 1) * 100, 2),
         }, indent=2)
 
 

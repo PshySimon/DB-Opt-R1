@@ -97,6 +97,7 @@ class DBToolEnv(ToolEnv):
         """
         import glob
         from datasets.synthesis.scenarios.schema import ScenarioState
+        from datasets.synthesis.scenarios.loader import dedup_scenarios
 
         def _parse_items(items):
             return [ScenarioState(**{k: v for k, v in item.items()
@@ -104,16 +105,24 @@ class DBToolEnv(ToolEnv):
                     for item in items]
 
         def _filter_llm(scenarios):
-            """过滤只保留 llm_generated 场景"""
-            filtered = [s for s in scenarios if getattr(s, 'source', 'llm_generated') == 'llm_generated']
+            """过滤：只保留 llm_generated 且 TPS 有优化空间的场景"""
+            filtered = []
+            for s in scenarios:
+                if getattr(s, 'source', 'llm_generated') != 'llm_generated':
+                    continue
+                tps = float(getattr(s, 'workload', {}).get('tps_current', 0) or 0)
+                # TPS 100-5000：有优化空间（不是 crash 也不是已接近最优）
+                if 100 <= tps <= 5000:
+                    filtered.append(s)
             if len(filtered) < len(scenarios):
-                logger.info(f"  过滤: {len(scenarios)} → {len(filtered)} 条 (仅 llm_generated)")
+                logger.info(f"  过滤: {len(scenarios)} → {len(filtered)} 条 (llm_generated, TPS 100-5000)")
             return filtered
 
         if os.path.isfile(source):
             # 单文件（JSON 数组）
             with open(source, "r", encoding="utf-8") as f:
                 items = json.load(f)
+            items = dedup_scenarios(items, fname=source, logger=logger)
             scenarios = _parse_items(items)
             logger.info(f"  加载 {source}: {len(scenarios)} 个场景")
             return _filter_llm(scenarios)
@@ -126,6 +135,7 @@ class DBToolEnv(ToolEnv):
                 for fpath in collected_files:
                     with open(fpath, "r", encoding="utf-8") as f:
                         items = json.load(f)
+                    items = dedup_scenarios(items, fname=fpath, logger=logger)
                     batch = _parse_items(items)
                     logger.info(f"  加载 {os.path.basename(fpath)}: {len(batch)} 个场景")
                     scenarios.extend(batch)
@@ -160,11 +170,12 @@ class DBToolEnv(ToolEnv):
                 self._reset_from_csv(sample_idx)
 
     def _reset_from_scenario(self, sample_idx=None):
-        """从场景列表加载"""
+        """从场景列表加载（深拷贝，防止搜索过程修改污染原始数据）"""
+        import copy
         if sample_idx is None:
             sample_idx = random.randint(0, len(self.scenarios) - 1)
 
-        scenario = self.scenarios[sample_idx]
+        scenario = copy.deepcopy(self.scenarios[sample_idx])
 
         # 注入 scenario 到所有工具
         for tool in self.tools:
@@ -185,6 +196,8 @@ class DBToolEnv(ToolEnv):
         for tool in self.tools:
             if isinstance(tool, ResetConfigTool):
                 tool._original_knobs = dict(self._original_knobs)
+            if hasattr(tool, '_original_knobs_snapshot'):
+                tool._original_knobs_snapshot = dict(self._original_knobs)
 
         logger.debug(f"Episode reset: scenario={scenario.name}, "
                     f"difficulty={scenario.difficulty}")
@@ -212,6 +225,8 @@ class DBToolEnv(ToolEnv):
         for tool in self.tools:
             if isinstance(tool, ResetConfigTool):
                 tool._original_knobs = dict(self._original_knobs)
+            if hasattr(tool, '_original_knobs_snapshot'):
+                tool._original_knobs_snapshot = dict(self._original_knobs)
 
         logger.debug(f"Episode reset: sample_idx={sample_idx}, "
                     f"baseline_tps={self.env_state.get('tps', 'N/A')}")

@@ -43,12 +43,101 @@ logger = logging.getLogger(__name__)
 # ==================== Step 1: 真机采集 ====================
 
 
+def _run_io_benchmark() -> dict:
+    """运行一次 IO 基准测试，返回硬件 IO 特征字典。
+    整个 collect 任务启动时采集一次，写入所有记录。
+    依赖 fio（需提前安装: apt install fio --fix-missing）。
+    """
+    import subprocess, re, shutil, tempfile
+    result = {}
+
+    fio_bin = shutil.which("fio") or os.path.expanduser("~/.local/bin/fio")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fio_file = os.path.join(tmpdir, "fio_test")
+
+        # -- 1. 顺序写 (fio, 512MB, 30s) ---------------------------------
+        try:
+            if os.path.exists(fio_bin):
+                out = subprocess.check_output([
+                    fio_bin, "--name=seq_write", "--rw=write", "--bs=1M",
+                    "--size=512M", "--numjobs=1", "--runtime=30", "--time_based",
+                    "--group_reporting", "--output-format=terse",
+                    f"--filename={fio_file}",
+                ], stderr=subprocess.DEVNULL, timeout=60).decode()
+                fields = out.split(";")
+                if len(fields) > 50:
+                    result["seq_write_bw_fio_mbps"] = round(float(fields[48]) / 1024, 1)  # KiB/s → MiB/s
+                    result["seq_write_p99_lat_us"] = int(float(fields[56]))               # p99 clat (us)
+        except Exception as e:
+            logger.warning(f"IO 基准(顺序写)失败: {e}")
+
+        # -- 2. 随机读 4K (fio, 512MB, 30s) -------------------------------
+        try:
+            if os.path.exists(fio_bin):
+                out = subprocess.check_output([
+                    fio_bin, "--name=rand_read", "--rw=randread", "--bs=4k",
+                    "--size=512M", "--numjobs=4", "--runtime=30", "--time_based",
+                    "--group_reporting", "--output-format=terse",
+                    f"--filename={fio_file}",
+                ], stderr=subprocess.DEVNULL, timeout=60).decode()
+                fields = out.split(";")
+                if len(fields) > 10:
+                    result["rand_read_iops"] = int(float(fields[7]))      # read IOPS
+                    result["rand_read_mbps"] = round(float(fields[6]) / 1024, 1)  # KiB/s → MiB/s
+        except Exception as e:
+            logger.warning(f"IO 基准(随机读)失败: {e}")
+
+    # -- 3. 顺序写 (dd, 256MB, fdatasync) ---------------------------------
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".dd") as tf:
+            dd_file = tf.name
+        t0 = time.time()
+        subprocess.check_call(
+            f"dd if=/dev/zero of={dd_file} bs=1M count=256 conv=fdatasync",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60
+        )
+        elapsed = time.time() - t0
+        result["seq_write_mbps"] = round(256 / elapsed, 1)
+
+        # -- 4. 顺序读 (dd, 无缓存) ----------------------------------------
+        try:
+            subprocess.call("echo 3 > /proc/sys/vm/drop_caches", shell=True,
+                            stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        t0 = time.time()
+        subprocess.check_call(
+            f"dd if={dd_file} of=/dev/null bs=1M",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60
+        )
+        result["seq_read_mbps"] = round(256 / (time.time() - t0), 1)
+        os.unlink(dd_file)
+    except Exception as e:
+        logger.warning(f"IO 基准(dd 顺序读写)失败: {e}")
+
+    # -- 5. 内存带宽 (dd /dev/zero → /dev/null) ---------------------------
+    try:
+        t0 = time.time()
+        subprocess.check_call(
+            "dd if=/dev/zero of=/dev/null bs=1M count=4096",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30
+        )
+        result["mem_bw_gbps"] = round(4 / (time.time() - t0), 2)  # 4 GB / s
+    except Exception as e:
+        logger.warning(f"IO 基准(内存带宽)失败: {e}")
+
+    logger.info(f"IO 基准采集完成: {result}")
+    return result
+
+
 def collect_scenarios(input_path: str, output_path: str,
                       pg_host: str = "127.0.0.1", pg_port: int = 5432,
                       pg_user: str = "postgres", pg_password: str = "",
                       pg_database: str = "postgres", pg_data_dir: str = None,
                       knob_space_path: str = "configs/knob_space.yaml",
                       start: int = None, end: int = None):
+
     """读取 knob 配置 JSON，逐个应用到 PG，跑 benchmark，采集完整指标
 
     input_path 支持 glob 模式（如 knob_configs_*.json），会合并所有匹配文件。
@@ -113,6 +202,10 @@ def collect_scenarios(input_path: str, output_path: str,
     results = list(existing)
     t0 = time.time()
 
+    # 采集任务开始前，先做一次 IO 基准测试（只跑一次，写入所有记录）
+    logger.info("开始 IO 基准测试（约 2 分钟）...")
+    io_benchmarks = _run_io_benchmark()
+
     for i, config in enumerate(pending):
         knobs = config["knobs"]
         workload = config.get("workload", "mixed")
@@ -159,6 +252,10 @@ def collect_scenarios(input_path: str, output_path: str,
             cursor.close()
             conn.close()
 
+            # 将 IO 基准数据注入 hardware 字段
+            hw_with_io = {k: v for k, v in hardware.items() if v is not None}
+            hw_with_io.update(io_benchmarks)
+
             from dataclasses import asdict
             state = ScenarioState(
                 name=config["name"],
@@ -166,7 +263,7 @@ def collect_scenarios(input_path: str, output_path: str,
                 source=config.get("source", "llm_generated"),
                 difficulty=config.get("difficulty", 1),
                 description=config.get("description", ""),
-                hardware={k: v for k, v in hardware.items() if v is not None},
+                hardware=hw_with_io,
                 knobs=all_knobs,
                 system=scenario_data.get("system", {}),
                 db_metrics=ScenarioState._parse_csv_metrics(csv_metrics),

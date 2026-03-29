@@ -246,18 +246,16 @@ class AsyncMCTSSearch(MCTSSearch):
 
     def _compute_reward_with(self, env) -> float:
         """用指定 env 计算 reward"""
-        env_state = env.env_state
-        baseline_tps = env_state.get("tps", 0)
-        if baseline_tps <= 0:
-            return 0.0
-
         for tool in env.tools:
             if tool.name == "predict_performance":
                 result = tool.execute({})
                 try:
                     parsed = json.loads(result)
-                    pred_tps = parsed.get("predicted_tps", 0)
-                    return (pred_tps - baseline_tps) / baseline_tps
+                    # 直接用工具返回的 improvement_pct：
+                    # = (pred_modified - pred_baseline) / pred_baseline
+                    # 两端都是模型预测值，消除系统偏差，reward 才有意义
+                    improvement_pct = parsed.get("improvement_pct", 0)
+                    return improvement_pct / 100.0
                 except (json.JSONDecodeError, TypeError):
                     return 0.0
 
