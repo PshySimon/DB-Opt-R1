@@ -227,9 +227,9 @@ class MultiProviderLLMClient:
                 last_error = e
                 err_str = str(e).lower()
                 
-                # 致命错误关键词
+                # 致命错误关键词（欠费、不存、封禁）
                 fatal_keywords = ["model_not_found", "unsupported", "does not exist", 
-                                  "401", "404", "insufficient_quota", "invalid_api_key"]
+                                  "401", "404", "403", "insufficient", "invalid_api_key", "额度不足"]
                 
                 if any(k in err_str for k in fatal_keywords):
                     selected.banned = True
