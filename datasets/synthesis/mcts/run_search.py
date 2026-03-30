@@ -373,6 +373,8 @@ def run_mcts(args):
                 pool.submit(_generate_with_retry, _build_question_prompt(preloaded_scenarios[i])): i
                 for i in pending_q_idx
             }
+            completed_q = 0
+            total_q = len(pending_q_idx)
             for fut in _as_completed(fut_map):
                 idx = fut_map[fut]
                 s_name = preloaded_scenarios[idx].name
@@ -383,6 +385,10 @@ def run_mcts(args):
                     _save_questions_cache()
                 except Exception as e:
                     logger.error(f"场景 {idx} ({s_name}) question 生成失败(已重试3次): {e}")
+                
+                completed_q += 1
+                if completed_q % 10 == 0 or completed_q == total_q:
+                    logger.info(f"  > 问题生成进度: {completed_q}/{total_q}")
 
         logger.info("问题预生成阶段结束")
 
