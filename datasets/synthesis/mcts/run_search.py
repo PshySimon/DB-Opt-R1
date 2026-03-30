@@ -243,17 +243,38 @@ def run_mcts(args):
     if done_envs:
         logger.info(f"已完成环境: {len(done_envs)} 个，跳过")
 
-    # questions 字典：idx -> 场景专属的用户提问（预生成后填充）
-    questions: dict = {}
+    # 加载已生成的 questions 缓存 (跨 run_dir 复用)
+    questions_cache_path = os.path.join(args.output_dir, "questions_cache.json")
+    questions = {}
+    if os.path.exists(questions_cache_path):
+        try:
+            with open(questions_cache_path, "r", encoding="utf-8") as f:
+                questions = json.load(f)
+            logger.info(f"已加载 {len(questions)} 个预生成的场景问题缓存")
+        except Exception as e:
+            logger.warning(f"读取 questions.json 缓存失败: {e}")
+            questions = {}
 
+    import threading
+    q_lock = threading.Lock()
+
+    def _save_questions_cache():
+        with q_lock:
+            with open(questions_cache_path, "w", encoding="utf-8") as f:
+                json.dump(questions, f, ensure_ascii=False, indent=2)
     def search_one_env(i):
         """搜索单个环境，返回 (sft_items, contrastive_items)"""
         logger.info(f"\n{'='*50}")
         logger.info(f"环境 {i+1}/{num_samples} (sample_idx={i})")
         logger.info(f"{'='*50}")
 
-        # 取场景专属提问（预生成，或退回默认）
-        q = questions.get(i, "请优化这个数据库的性能。")
+        # 取场景专属提问（从缓存），没有即跳过
+        scenario_name = preloaded_scenarios[i].name if preloaded_scenarios else f"env_{i}"
+        q = questions.get(scenario_name)
+        if not q:
+            logger.error(f"  场景 {scenario_name} 无可用专属问题，跳过 MCTS 搜索")
+            return [], []
+
         # 每个环境独立 copy，避免并行竞争
         scenario_config = {**search_config, "user_message": q}
 
@@ -327,22 +348,43 @@ def run_mcts(args):
     logger.info(f"待搜索: {len(pending)} 个环境")
 
     # 并发预生成场景问题（与 MCTS 搜索串行，无竞争）
+    pending_q_idx = []
     if preloaded_scenarios is not None and pending:
-        logger.info(f"预生成场景问题（{len(pending)} 个，并发={parallel}）...")
+        for i in pending:
+            s_name = preloaded_scenarios[i].name
+            if s_name not in questions:
+                pending_q_idx.append(i)
+
+    def _generate_with_retry(prompt, max_retries=3):
+        for attempt in range(max_retries):
+            try:
+                # LLM 生成并提取
+                return _extract_question(llm_generate(prompt, 0.7))
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise e
+                time.sleep(1)
+
+    if pending_q_idx:
+        logger.info(f"预生成场景问题（{len(pending_q_idx)} 个，并发={parallel}）...")
         from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
         with ThreadPoolExecutor(max_workers=parallel) as pool:
             fut_map = {
-                pool.submit(llm_generate, _build_question_prompt(preloaded_scenarios[i]), 0.7): i
-                for i in pending
+                pool.submit(_generate_with_retry, _build_question_prompt(preloaded_scenarios[i])): i
+                for i in pending_q_idx
             }
             for fut in _as_completed(fut_map):
                 idx = fut_map[fut]
+                s_name = preloaded_scenarios[idx].name
                 try:
-                    questions[idx] = _extract_question(fut.result())
+                    q_text = fut.result()
+                    with q_lock:
+                        questions[s_name] = q_text
+                    _save_questions_cache()
                 except Exception as e:
-                    logger.warning(f"场景 {idx} question 生成失败，使用默认: {e}")
-                    questions[idx] = "请优化这个数据库的性能。"
-        logger.info("问题预生成完毕")
+                    logger.error(f"场景 {idx} ({s_name}) question 生成失败(已重试3次): {e}")
+
+        logger.info("问题预生成阶段结束")
 
     def _append_incremental(sft_items, contrastive_items):
         """每完成一个环境立即追加写入，避免崩溃丢失数据"""
