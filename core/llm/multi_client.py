@@ -11,10 +11,11 @@ logger = logging.getLogger(__name__)
 
 class ClientStats:
     """包装单个 OpenAI client，维护其并发状态与封禁/冷却状态"""
-    def __init__(self, idx: int, api_base: str, client, max_concurrent: int, model_name: str):
+    def __init__(self, idx: int, api_base: str, client, max_concurrent: int, model_name: str, api_key_str: str):
         self.idx = idx
         self.api_base = api_base
         self.client = client
+        self.api_key_str = api_key_str  # 用于比对重载
         self.max_concurrent = max_concurrent
         self.model_name = model_name
         
@@ -51,81 +52,134 @@ class ClientStats:
                 self.total_latency += latency
 
 class MultiProviderLLMClient:
-    """多中转站 LLM 客户端，采用基于响应速度的加权随机轮询，并支持指数退避冷却"""
+    """多中转站 LLM 客户端，采用基于响应速度的加权随机轮询，支持指数退避冷却，并每 60 秒热更新配置文件"""
     
     def __init__(self, target_model: str, providers_config: str = None, 
                  single_api_key: str = None, single_api_base: str = None):
         self.target_model = target_model
-        self.stats: List[ClientStats] = []
+        self.providers_config = providers_config
+        self.single_api_key = single_api_key
+        self.single_api_base = single_api_base
         
+        self.stats: List[ClientStats] = []
+        self._stats_lock = threading.RLock()
+        
+        self.last_reload_time = 0.0
+        self.reload_interval = 60.0
+        
+        self._load_providers(is_reload=False)
+
+    def _load_providers(self, is_reload=False):
         try:
             from openai import OpenAI
         except ImportError:
-            logger.error("需要安装 openai: pip install openai")
-            sys.exit(1)
+            if not is_reload:
+                logger.error("需要安装 openai: pip install openai")
+                sys.exit(1)
+            return
             
         default_headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"}
         
         providers = []
-        if providers_config and os.path.isfile(providers_config):
+        if self.providers_config and os.path.isfile(self.providers_config):
             try:
-                with open(providers_config, "r", encoding="utf-8") as f:
+                with open(self.providers_config, "r", encoding="utf-8") as f:
                     all_providers = json.load(f)
                 for p in all_providers:
                     providers.append(p)
-                if not providers:
-                    logger.error(f"配置文件 {providers_config} 为空！")
+                if not providers and not is_reload:
+                    logger.error(f"配置文件 {self.providers_config} 为空！")
                     sys.exit(1)
-                logger.info(f"配置由 providers.json 接管，成功加载 {len(providers)} 个 API 提供商配置。")
             except Exception as e:
-                logger.error(f"读取 providers 配置文件失败: {e}")
-                sys.exit(1)
-        elif single_api_key:
+                if not is_reload:
+                    logger.error(f"读取 providers 配置文件失败: {e}")
+                    sys.exit(1)
+                else:
+                    logger.warning(f"⚠️ 热重载 providers.json 失败 (正在被修改或语法错误?): {e}，按原配置继续运行。")
+                    return
+        elif self.single_api_key:
             providers = [{
-                "api_key": single_api_key,
-                "api_base": single_api_base,
-                "model": target_model,
+                "api_key": self.single_api_key,
+                "api_base": self.single_api_base,
+                "model": self.target_model,
                 "max_concurrent": 5
             }]
         else:
-            logger.error("必须提供 --providers-config 或 --api-key！")
-            sys.exit(1)
+            if not is_reload:
+                logger.error("必须提供 --providers-config 或 --api-key！")
+                sys.exit(1)
+            return
+
+        with self._stats_lock:
+            new_stats = []
+            changed = False
             
-        for i, config in enumerate(providers):
-            client = OpenAI(
-                api_key=config.get("api_key"),
-                base_url=config.get("api_base"),
-                default_headers=default_headers
-            )
-            max_c = config.get("max_concurrent", 5)
-            model_n = config.get("model", target_model)
-            self.stats.append(ClientStats(i, config.get("api_base"), client, max_c, model_n))
-            
-        self.total_clients = len(self.stats)
+            for i, config in enumerate(providers):
+                base = config.get("api_base")
+                key = config.get("api_key")
+                max_c = config.get("max_concurrent", 5)
+                model_n = config.get("model", self.target_model)
+                
+                existing = None
+                for old_c in self.stats:
+                    if old_c.api_base == base and old_c.api_key_str == key:
+                        existing = old_c
+                        break
+                        
+                if existing:
+                    # 如果参数修改了则更新这二项
+                    if existing.max_concurrent != max_c or existing.model_name != model_n:
+                        existing.max_concurrent = max_c
+                        existing.model_name = model_n
+                        changed = True
+                    new_stats.append(existing)
+                else:
+                    client = OpenAI(
+                        api_key=key,
+                        base_url=base,
+                        default_headers=default_headers
+                    )
+                    new_stats.append(ClientStats(i, base, client, max_c, model_n, key))
+                    changed = True
+                    
+            if len(new_stats) != len(self.stats):
+                changed = True
+                
+            if changed or not is_reload:
+                self.stats = new_stats
+                self.total_clients = len(self.stats)
+                if is_reload:
+                    logger.info(f"🔄 热重载检测到提供商配置变更，当前同步为 {self.total_clients} 个节点（保留原节点健康分状态）。")
+                else:
+                    logger.info(f"配置由 JSON 接管，成功加载 {self.total_clients} 个 API 提供商配置。")
+                    
+            self.last_reload_time = time.time()
 
     def _get_next_client(self) -> ClientStats:
-        """基于响应速度进行加权轮询挑选一个可用节点（越快越容易被选中）"""
+        """基于响应速度进行加权轮询挑选一个可用节点，并附带 60s 配置文件热更检测"""
+        if self.providers_config and time.time() - self.last_reload_time >= self.reload_interval:
+            self._load_providers(is_reload=True)
+            
         available_clients = []
         weights = []
         
-        for c in self.stats:
-            if c.banned or time.time() < c.cooldown_until:
-                continue
-            # 在没有锁的情况下先大致判断一下并发，如果满了就直接跳过
-            if c.active_requests >= c.max_concurrent:
-                continue
+        with self._stats_lock:
+            for c in self.stats:
+                if c.banned or time.time() < c.cooldown_until:
+                    continue
+                # 粗略判断并发
+                if c.active_requests >= c.max_concurrent:
+                    continue
+                    
+                available_clients.append(c)
+                weights.append(1.0 / max(c.avg_latency, 0.1))
                 
-            available_clients.append(c)
-            # 权重与延迟成反比，越快权重越大
-            weights.append(1.0 / max(c.avg_latency, 0.1))
-            
         if not available_clients:
             return None
             
-        # 根据速度计算的权重进行随机掷骰子（Roulette Wheel Selection）
+        # 根据速度权重加权随机挑选（Roulette Wheel Selection）
         candidates = random.choices(available_clients, weights=weights, k=len(available_clients))
         
-        # 依次尝试获取锁，防止被其它线程刚好抢走
         for c in candidates:
             if c.try_acquire():
                 return c
