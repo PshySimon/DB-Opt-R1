@@ -126,10 +126,11 @@ class MultiProviderLLMClient:
         """对外暴露的统一 generate 接口，基于成功率与速度综合计算得分进行智能路由"""
         last_error = None
         
-        # 允许重试次数 = 提供商数量 * 3（应对短暂的所有 API 繁忙）
-        max_retries = self.total_clients * 3
+        # 允许因报错重试的次数 = 提供商数量 * 3
+        max_error_retries = self.total_clients * 3
+        error_count = 0
         
-        for attempt in range(max_retries):
+        while True:
             # 1. 按照优先级得分降序排序；如果得分相同，优先选择当前并发任务少的
             sorted_clients = sorted(self.stats, key=lambda c: (c.score, -c.active_requests), reverse=True)
             
@@ -141,7 +142,7 @@ class MultiProviderLLMClient:
                     break
                     
             if not selected:
-                # 所有提供商的并发槽位均满，退避一下再试
+                # 所有提供商的并发槽位均满，这不是报错，只是系统繁忙。无限退避等待空闲即可。
                 time.sleep(0.5)
                 continue
                 
@@ -164,13 +165,16 @@ class MultiProviderLLMClient:
                 return res_content
                 
             except Exception as e:
-                # 失败
+                # 发生真实报错
                 selected.release(success=False)
                 last_error = e
                 logger.warning(
                     f"中转站异常 [base={selected.api_base}, score={selected.score:.2f}, avg_latency={selected.avg_latency:.2f}s]: {e}。自动重试..."
                 )
+                error_count += 1
+                if error_count >= max_error_retries:
+                    break
                 time.sleep(1)
         
-        logger.error(f"所有 API 提供商均调用失败或一直繁忙！最后报错: {last_error}")
-        raise Exception(f"All API providers failed or busy. Last error: {last_error}")
+        logger.error(f"所有 API 提供商均调用失败！共重试 {error_count} 次。最后报错: {last_error}")
+        raise Exception(f"All API providers failed after {error_count} retries. Last error: {last_error}")
