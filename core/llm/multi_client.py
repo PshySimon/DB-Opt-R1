@@ -10,11 +10,12 @@ logger = logging.getLogger(__name__)
 
 class ClientStats:
     """包装单个 OpenAI client，维护其并发状态与成功率"""
-    def __init__(self, idx: int, api_base: str, client, max_concurrent: int = 5):
+    def __init__(self, idx: int, api_base: str, client, max_concurrent: int, model_name: str):
         self.idx = idx
         self.api_base = api_base
         self.client = client
         self.max_concurrent = max_concurrent
+        self.model_name = model_name
         
         self.successes = 0
         self.failures = 0
@@ -71,16 +72,15 @@ class MultiProviderLLMClient:
                 with open(providers_config, "r", encoding="utf-8") as f:
                     all_providers = json.load(f)
                 
-                # 根据命令行传入的 model 进行过滤
+                # 直接加载所有的配置，不再用 target_model 过滤
                 for p in all_providers:
-                    if p.get("model") == target_model:
-                        providers.append(p)
+                    providers.append(p)
                 
                 if not providers:
-                    logger.error(f"配置文件 {providers_config} 中没有找到 model={target_model} 的任何可用供应源！")
+                    logger.error(f"配置文件 {providers_config} 为空！")
                     sys.exit(1)
                 
-                logger.info(f"成功加载 {len(providers)} 个支持 {target_model} 的 API 提供商配置。")
+                logger.info(f"配置由 providers.json 接管，成功加载 {len(providers)} 个 API 提供商配置。忽略命令行单节点 --model 检查。")
             except Exception as e:
                 logger.error(f"读取 providers 配置文件失败: {e}")
                 sys.exit(1)
@@ -104,7 +104,8 @@ class MultiProviderLLMClient:
                 default_headers=default_headers
             )
             max_c = config.get("max_concurrent", 5)
-            self.stats.append(ClientStats(i, config.get("api_base"), client, max_c))
+            model_n = config.get("model", target_model)
+            self.stats.append(ClientStats(i, config.get("api_base"), client, max_c, model_n))
             
         self.total_clients = len(self.stats)
         
@@ -134,7 +135,7 @@ class MultiProviderLLMClient:
             # 3. 拿到槽位，执行请求
             try:
                 response = selected.client.chat.completions.create(
-                    model=self.target_model,
+                    model=selected.model_name,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature,
                     max_tokens=2048,
