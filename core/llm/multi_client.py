@@ -9,7 +9,7 @@ from typing import List, Dict
 logger = logging.getLogger(__name__)
 
 class ClientStats:
-    """包装单个 OpenAI client，维护其并发状态与成功率"""
+    """包装单个 OpenAI client，维护其并发状态、成功率与响应延迟"""
     def __init__(self, idx: int, api_base: str, client, max_concurrent: int, model_name: str):
         self.idx = idx
         self.api_base = api_base
@@ -20,12 +20,24 @@ class ClientStats:
         self.successes = 0
         self.failures = 0
         self.active_requests = 0
+        self.total_latency = 0.0
         self.lock = threading.Lock()
         
     @property
+    def avg_latency(self) -> float:
+        if self.successes == 0:
+            return 2.0  # 未测试过的节点，默认假定 2 秒的延迟
+        return self.total_latency / self.successes
+
+    @property
     def score(self) -> float:
-        """使用拉普拉斯平滑计算优先级分数，避免 0 成功率后永远不被调度"""
-        return (self.successes + 1.0) / (self.successes + self.failures + 2.0)
+        """
+        综合得分 = 成功率 / 平均延迟
+        - 使用拉普拉斯平滑计算成功率
+        - 延迟越高，得分按比例衰减
+        """
+        success_rate = (self.successes + 1.0) / (self.successes + self.failures + 2.0)
+        return success_rate / max(self.avg_latency, 0.1)
 
     def try_acquire(self) -> bool:
         with self.lock:
@@ -34,22 +46,23 @@ class ClientStats:
                 return True
             return False
 
-    def release(self, success: bool):
+    def release(self, success: bool, latency: float = 0.0):
         with self.lock:
             self.active_requests -= 1
             if success:
                 self.successes += 1
+                self.total_latency += latency
             else:
                 self.failures += 1
 
 class MultiProviderLLMClient:
-    """多中转站 LLM 客户端，支持按成功率优先级排序和最大并发控制"""
+    """多中转站 LLM 客户端，支持按成功率与速度综合优先级排序，及最大并发控制"""
     
     def __init__(self, target_model: str, providers_config: str = None, 
                  single_api_key: str = None, single_api_base: str = None):
         """
         Args:
-            target_model: 目标使用的模型名（如 gpt-5）
+            target_model: 目标使用的模型名（老参数保留，主要用作兜底）
             providers_config: 多中转站配置文件路径（JSON 数组）
             single_api_key: fallback 的单个 api_key
             single_api_base: fallback 的单个 api_base
@@ -110,14 +123,14 @@ class MultiProviderLLMClient:
         self.total_clients = len(self.stats)
         
     def generate(self, prompt: str, temperature: float = 0.7) -> str:
-        """对外暴露的统一 generate 接口，基于成功率与并发上限进行智能路由"""
+        """对外暴露的统一 generate 接口，基于成功率与速度综合计算得分进行智能路由"""
         last_error = None
         
         # 允许重试次数 = 提供商数量 * 3（应对短暂的所有 API 繁忙）
         max_retries = self.total_clients * 3
         
         for attempt in range(max_retries):
-            # 1. 按照成功率降序排序；如果成功率相同，优先选择当前并发任务少的
+            # 1. 按照优先级得分降序排序；如果得分相同，优先选择当前并发任务少的
             sorted_clients = sorted(self.stats, key=lambda c: (c.score, -c.active_requests), reverse=True)
             
             # 2. 依次尝试获取并发槽位
@@ -128,12 +141,13 @@ class MultiProviderLLMClient:
                     break
                     
             if not selected:
-                # 所有提供商的 5 个并发槽位均满，退避一下再试
+                # 所有提供商的并发槽位均满，退避一下再试
                 time.sleep(0.5)
                 continue
                 
             # 3. 拿到槽位，执行请求
             try:
+                t0 = time.time()
                 response = selected.client.chat.completions.create(
                     model=selected.model_name,
                     messages=[{"role": "user", "content": prompt}],
@@ -141,10 +155,12 @@ class MultiProviderLLMClient:
                     max_tokens=2048,
                 )
                 res_content = response.choices[0].message.content
+                elapsed = time.time() - t0
+                
                 if not res_content:
                     raise Exception("返回内容为空 (completion_tokens: 0)")
-                # 成功
-                selected.release(success=True)
+                # 成功记录耗时
+                selected.release(success=True, latency=elapsed)
                 return res_content
                 
             except Exception as e:
@@ -152,7 +168,7 @@ class MultiProviderLLMClient:
                 selected.release(success=False)
                 last_error = e
                 logger.warning(
-                    f"中转站异常 [base={selected.api_base}, score={selected.score:.2f}]: {e}。自动重试..."
+                    f"中转站异常 [base={selected.api_base}, score={selected.score:.2f}, avg_latency={selected.avg_latency:.2f}s]: {e}。自动重试..."
                 )
                 time.sleep(1)
         
