@@ -140,12 +140,15 @@ def run_mcts(args):
     logger.info(f"模型: {args.model}")
     logger.info(f"搜索参数: simulations={args.simulations}, children={args.children}, depth={args.depth}, num_workers={getattr(args, 'num_workers', 1)}")
 
-    # LLM 客户端
-    llm_generate = create_llm_client(
-        model=args.model,
-        api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
-        api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
+    # LLM 客户端（支持多中转站轮询与自动回退）
+    from core.llm.multi_client import MultiProviderLLMClient
+    llm_client = MultiProviderLLMClient(
+        target_model=args.model,
+        providers_config=args.providers_config,
+        single_api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
+        single_api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
     )
+    llm_generate = llm_client.generate
 
     # 搜索配置
     num_workers = getattr(args, 'num_workers', 1)
@@ -458,8 +461,9 @@ def main():
 
     # LLM
     parser.add_argument("--model", default="gpt-5", help="LLM 模型名称")
-    parser.add_argument("--api-key", default=None, help="API Key")
-    parser.add_argument("--api-base", default=None, help="API Base URL")
+    parser.add_argument("--api-key", default=None, help="单节点 API Key（如果不传 providers config）")
+    parser.add_argument("--api-base", default=None, help="单节点 API Base URL")
+    parser.add_argument("--providers-config", default=None, help="多中转站 JSON 配置文件路径，传入后忽略单节点配置")
 
     # MCTS
     parser.add_argument("--simulations", type=int, default=5, help="每棵树 MCTS 迭代次数")

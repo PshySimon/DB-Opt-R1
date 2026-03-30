@@ -1,0 +1,17 @@
+[
+  {
+    "api_base": "https://api.opengpt.cyou/v1",
+    "api_key": "sk-linuxdofreecodex1",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://api.daiju.live/v1",
+    "api_key": "sk-your-second-api-key",
+    "model": "deepseek-v3"
+  },
+  {
+    "api_base": "https://api.anotherproxy.com/v1",
+    "api_key": "sk-your-third-api-key",
+    "model": "gpt-5"
+  }
+]
