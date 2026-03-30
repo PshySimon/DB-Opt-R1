@@ -96,7 +96,11 @@ def create_llm_client(model: str, api_key: str = None, api_base: str = None):
     """创建 LLM 调用函数"""
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url=api_base)
+        client = OpenAI(
+            api_key=api_key, 
+            base_url=api_base,
+            default_headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
+        )
 
         def generate(prompt: str, temperature: float = 0.7) -> str:
             response = client.chat.completions.create(
