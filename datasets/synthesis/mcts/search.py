@@ -112,7 +112,9 @@ class MCTSSearch:
         # 回放已有轨迹
         trajectory = list(node.trajectory)  # 复制，避免污染节点属性
         for step in trajectory:
-            self._replay_step(step["action"])
+            self._execute_in_env(step["action"])
+        # 重置计步器，避免 replay 步数影响 rollout 的 done 判断
+        self.env.steps_taken = 0
 
         # 继续 rollout
         rollout_steps = []
@@ -127,9 +129,8 @@ class MCTSSearch:
             trajectory.append(step)
             rollout_steps.append(step)
 
-            # 如果调了 predict_performance 就结束
-            tool_call = self._parse_tool_call(action)
-            if tool_call and tool_call.get("name") == "predict_performance":
+            # 如果调了 predict_performance 就结束（检查 tool_history）
+            if self.env.tool_history and self.env.tool_history[-1].get("tool") == "predict_performance":
                 break
 
         reward = self._compute_reward()
@@ -175,67 +176,32 @@ class MCTSSearch:
 
         # 回放到 parent
         for step in parent_node.trajectory:
-            self._replay_step(step["action"])
+            self._execute_in_env(step["action"])
+        # 重置计步器
+        self.env.steps_taken = 0
 
         # 执行新行动
         return self._execute_in_env(action)
 
-    def _replay_step(self, action: str):
-        """回放一步"""
-        self._execute_in_env(action)
-
     def _execute_in_env(self, action: str) -> str:
-        """在环境中执行 action（tool_call），返回 observation"""
-        try:
-            # 解析 tool_call
-            tool_call = self._parse_tool_call(action)
-            if tool_call is None:
-                return "Error: invalid tool call format"
+        """在环境中执行 action，返回 observation。
 
-            name = tool_call["name"]
-            args = tool_call.get("arguments", {})
-
-            # 在工具中执行
-            for tool in self.env.tools:
-                if tool.name == name:
-                    return tool.execute(args)
-
-            return f"Error: tool '{name}' not found"
-        except Exception as e:
-            return f"Error: {str(e)}"
-
-    def _parse_tool_call(self, action: str) -> dict:
-        """从 action 字符串中解析 tool_call"""
-        # 支持 <tool_call>...</tool_call> 格式
-        import re
-        match = re.search(r'<tool_call>(.*?)</tool_call>', action, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                return None
-
-        # 也支持裸 JSON
-        try:
-            parsed = json.loads(action)
-            if "name" in parsed:
-                return parsed
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-        return None
+        统一走 env.step()，复用 ToolEnv 的 tool_call 解析、参数校验、执行和 tracking。
+        """
+        obs, reward, done, info = self.env.step(action)
+        return obs
 
     def _compute_reward(self) -> float:
-        """计算当前环境状态的 reward"""
-        for tool in self.env.tools:
-            if tool.name == "predict_performance":
-                result = tool.execute({})
-                try:
-                    parsed = json.loads(result)
-                    # 直接用工具返回的 improvement_pct：(pred_modified - pred_baseline) / pred_baseline
-                    improvement_pct = parsed.get("improvement_pct", 0)
-                    return improvement_pct / 100.0
-                except (json.JSONDecodeError, TypeError):
-                    return 0.0
+        """计算当前环境状态的 reward。
 
-        return 0.0
+        通过 env.step() 调用 predict_performance，从返回的 observation 中提取 improvement_pct。
+        """
+        obs = self._execute_in_env(
+            '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>'
+        )
+        try:
+            parsed = json.loads(obs)
+            improvement_pct = parsed.get("improvement_pct", 0)
+            return improvement_pct / 100.0
+        except (json.JSONDecodeError, TypeError):
+            return 0.0

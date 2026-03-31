@@ -86,6 +86,15 @@ pip install -r requirements-verl.txt  # verl 后端（需要 vLLM + Ray）
 基于 `synthesis_dimensions.yaml` 中定义的 58 个场景模板（单瓶颈/组合瓶颈/应用场景/反模式/边界条件），按 **场景 × 负载类型 × 严重程度** 的笛卡尔积，让 LLM 系统性生成 knob 配置。默认 `--per-cell 5`，共生成 **~3,000 条**配置。
 
 ```bash
+# 方式 1：多中转站轮询（推荐，高并发高吞吐）
+python3 -m datasets.synthesis.scenarios.pipeline synthesize \
+    --dimensions configs/synthesis_dimensions.yaml \
+    --knob-space configs/knob_space.yaml \
+    --output datasets/data/scenarios/knob_configs_synth.json \
+    --per-cell 5 --workers 8 \
+    --providers-config configs/providers.json
+
+# 方式 2：单一 API 端点
 python3 -m datasets.synthesis.scenarios.pipeline synthesize \
     --dimensions configs/synthesis_dimensions.yaml \
     --knob-space configs/knob_space.yaml \
@@ -158,10 +167,22 @@ python3 -m cost_model.train \
 基于 `source=llm_generated` 场景 + Cost Model，搜索最优调优轨迹。每次运行输出到带时间戳的子目录。
 
 ```bash
+# 方式 1：多中转站轮询（推荐）
 python3 -m datasets.synthesis.mcts.run_search \
     --scenarios datasets/data/scenarios/ \
     --knob-space configs/knob_space.yaml \
-    --cost-model cost_model/checkpoints/v3 \
+    --cost-model cost_model/checkpoints/v7_lgbm_dedup \
+    --output-dir datasets/data \
+    --providers-config configs/providers.json \
+    --parallel 4 \
+    --num-workers 2 \
+    --simulations 5
+
+# 方式 2：单一 API 端点
+python3 -m datasets.synthesis.mcts.run_search \
+    --scenarios datasets/data/scenarios/ \
+    --knob-space configs/knob_space.yaml \
+    --cost-model cost_model/checkpoints/v7_lgbm_dedup \
     --output-dir datasets/data \
     --model gpt-5 \
     --api-key $OPENAI_API_KEY \
@@ -185,6 +206,21 @@ python3 -m datasets.synthesis.mcts.run_search \
 - `sft_trajectories.jsonl` — SFT 训练数据
 - `contrastive_pairs.jsonl` — DPO/对比学习数据
 - `mcts_trees/` — 搜索树 debug 文件
+
+#### Step 5.5: 评估集 knob 配置合成
+
+复用 Step 1 的维度组合蒸馏，但 `--per-cell 1`（每格仅 1 条），输出到独立文件，确保与训练集零重叠。合成后无需真机采集，评估时直接用 Cost Model 模拟环境。
+
+```bash
+python3 -m datasets.synthesis.scenarios.pipeline synthesize \
+    --dimensions configs/synthesis_dimensions.yaml \
+    --knob-space configs/knob_space.yaml \
+    --output datasets/data/scenarios/knob_configs_eval.json \
+    --per-cell 1 --workers 8 \
+    --providers-config configs/providers.json
+```
+
+产出约 ~696 条配置，后续评估脚本会读取该文件构建模拟环境。
 
 #### Step 6: SFT 训练
 
@@ -233,6 +269,31 @@ python -m training.trl.grpo \
 # === verl 后端 ===
 bash scripts/train_grpo_verl.sh
 ```
+
+#### Step 8: 模型评估
+
+使用 Step 5.5 合成的评估集，通过 Cost Model 模拟环境，评估模型的调优能力。支持 API 和 vLLM 两种推理后端。
+
+```bash
+python3 -m evaluate.run \
+    --eval-scenarios datasets/data/scenarios/knob_configs_eval.json \
+    --scenarios datasets/data/scenarios/ \
+    --knob-space configs/knob_space.yaml \
+    --cost-model cost_model/checkpoints/v7_lgbm_dedup \
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE \
+    --model gpt-5 \
+    --output eval_results/baseline_gpt5/ \
+    --max-turns 10 \
+    --parallel 8
+```
+
+评估指标输出到 `eval_results/` 下的 `report.json`，包含：
+- **avg_reward** — 平均 reward（Cost Model 预测的 TPS 提升比例）
+- **format_pass_rate** — 工具调用格式合规率
+- **effective_rate** — 有效工具调用率
+- **avg_steps** — 平均交互轮数
+- **completion_rate** — 成功完成率（触发 `predict_performance`）
 
 
 

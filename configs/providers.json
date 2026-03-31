@@ -1,0 +1,152 @@
+[
+  {
+    "api_base": "https://wbz-api.939593.xyz/v1",
+    "api_key": "sk-oYQBneqQKpfob1RzhKyMGqiGAR0TBXaAO6miyMU1gDGT9PjJ",
+    "model": "gpt-5.4"
+  },
+  {
+    "api_base": "https://newapi.431128hys.site/v1",
+    "api_key": "sk-CMDOrlE4bUGq5yEvV9z1aZlEwBQZtTWfVnS3eZlzo1wRRat0",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://ice.v.ua/v1",
+    "api_key": "sk-8fe6d954d508ca3b2ffc3551a9f297cf57549589c3716167a4ffbb3e67687009",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://api.b022mc.us.ci/v1",
+    "api_key": "sk-8a415773a29f5729fda0a34040b9001583dce9a9e05639cd77097a90c2d0da3c",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://free.9e.nz/v1",
+    "api_key": "sk-e545b507284e88bf4562e159802cf2229042f267cb7337641ebda7131498415a",
+    "model": "gpt-5-codex"
+  },
+  {
+    "api_base": "https://520.wcgio.com/v1",
+    "api_key": "sk-tmQ70GtUTTTJjeGDi6CkyisyFZZNugYUB9GcQfJek159hKq8",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://openai.xuya.dev/v1",
+    "api_key": "sk-e21bd10c1c8ffbac0302f2a638e4236d32b0cf4dde639a72969d598b179c0625",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://new-api.xt-url.com/v1",
+    "api_key": "sk-5OzIPtRTiO9ZQQqSWtwb4cNQNv5sWVxOTH6zZlkuAsw8bkDF",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://api.131664.xyz/v1",
+    "api_key": "sk-Jzxg0jIqKi3dwnl5Qe7Q3Y3KhC3y6Wxk6tfLHI8bmkdW4rQN",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://elysiver.h-e.top/v1",
+    "api_key": "sk-c5Zl6Ot5rO94Iv82kftb8RXoupJbfbMAPbMPwypJVBCCaX0A",
+    "model": "gpt-5.2"
+  },
+  {
+    "api_base": "https://lucky-sub2api.zeabur.app/v1",
+    "api_key": "sk-c90e56a36ee246e500f4510bd7712273343bb0efcfac55684ca635bf86d54fdf",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://api.ojason.top/v1",
+    "api_key": "sk-e0baf74db658ebb3523e4aa7ffc3a39b0689bf673ccb890d070bcb5cb718d369",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://api.heabl.top/v1",
+    "api_key": "sk-dAyD4k9DSh4KCvZonUX3mEZCW5JFCMD0jiAIwo2id4mBRpps",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://api.jichuangpro.cn/v1",
+    "api_key": "sk-352880131d48e7237f4b1fba93279b82085d8b1682cf657362ea30de718de600",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://supercodex.space/v1",
+    "api_key": "sk-13ac79639e6bda41faa4a8277a34d33296373a444a7bd39e9722dba24e5c52a9",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://openrouter.cc.cd/v1",
+    "api_key": "sk-j7K5NmHmujB6eJlXYakqh4eJT1ztcx93x3FK5A4meXwty5CB",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://jabin.cloud/v1",
+    "api_key": "sk-ycp9AhHNLLCmz41goV3EIjRy0M1lBZlgyN454S7HCq9Csj56",
+    "model": "gpt-5.4"
+  },
+  {
+    "api_base": "https://runanytime.hxi.me/v1",
+    "api_key": "sk-mtfQk1xlnn1p2jiMYArKEyFFamIXOwO45wj5TVQGEJfHRFpE",
+    "model": "gpt-5.4"
+  },
+  {
+    "api_base": "https://xiaobearai.javaxiaobear.cn/v1",
+    "api_key": "sk-ClvUumAMMWJT3XAN8WDvSZ6tNtHKLGRBuMQQE5sAQmbY9I7c",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "http://192.229.101.19:8317/v1",
+    "api_key": "sk-u2ELFYJs0iRKsbYaX",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://wbz-api.939593.xyz/v1",
+    "api_key": "sk-ZHxqWPbzKv0XxpA5yHkr6f9CtSHvsNw0oMoXRTyZRiXW23s4",
+    "model": "gpt-5.4"
+  },
+  {
+    "api_base": "https://api.nih.cc/v1",
+    "api_key": "sk-lnK0KGarT3YXaVHaWndPwEG4K4ZMEnmvC6xStw4Y99B24fTI",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://uk.aoemc.top/v1",
+    "api_key": "sk-GmhcEwzqwO5UDZ2zcDKylMdQEhyPhyQUQeC39lhIO2LIdDbA",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://fzla.zeabur.app/v1",
+    "api_key": "sk-RL5VMbCc5NeHqFu6f",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://wzw.pp.ua/v1",
+    "api_key": "a5462Do2oOnh3AB7IaszyiCB1ikrdzVxTmxuOF5wlznyLT3f",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://wududu.edu.kg/v1",
+    "api_key": "sk-JXubnLLPBlUCxzTwKa1zw9wIdiYIPLeJbhm6u1Vhvi6viNZo",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://api.bwen.net/v1",
+    "api_key": "sk-0f86a37a8681906a3abeef3f53cc519097492bed7640a73123ff1859743406dd",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://liao.bot/v1",
+    "api_key": "sk-Pt7qmjiQuUIW43JwGwYWBUeOLFOdCSxSmRIATkTbGr7B1UXI",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://uk.aoemc.top/v1",
+    "api_key": "sk-scld3ZKoVWp61eoQIg5sm5aIisf5wFpFldwGlh1vgRTpNDXm",
+    "model": "gpt-5"
+  },
+  {
+    "api_base": "https://newapi.zhx47.xyz/v1",
+    "api_key": "sk-W8aAh39Rl79g2IfhFeq9fgzQY64FnjS2KowyLcyxpWxDGalW",
+    "model": "gpt-5"
+  }
+]

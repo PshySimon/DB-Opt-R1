@@ -141,23 +141,11 @@ class DBToolEnv(ToolEnv):
                     scenarios.extend(batch)
                 return _filter_llm(scenarios)
             else:
-                # 每个 .json 是单个场景，但也兼容 JSON 数组文件（如 knob_configs_synth.json）
+                # 每个 .json 是单个场景
                 scenarios = []
                 for fname in sorted(os.listdir(source)):
-                    if not fname.endswith(".json"):
-                        continue
-                    fpath = os.path.join(source, fname)
-                    with open(fpath, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    if isinstance(data, list):
-                        # JSON 数组：批量解析（如 knob_configs_synth.json）
-                        batch = _parse_items(data)
-                        scenarios.extend(batch)
-                    elif isinstance(data, dict):
-                        scenarios.append(ScenarioState(**{
-                            k: v for k, v in data.items()
-                            if k in ScenarioState.__dataclass_fields__
-                        }))
+                    if fname.endswith(".json"):
+                        scenarios.append(ScenarioState.from_json(os.path.join(source, fname)))
                 return _filter_llm(scenarios)
 
         return []

@@ -142,9 +142,10 @@ class AsyncMCTSSearch(MCTSSearch):
         with lock:
             trajectory = node.trajectory
         for step in trajectory:
-            self._execute_in_env_with(env, step["action"])
+            env.step(step["action"])
+        env.steps_taken = 0
 
-        obs = self._execute_in_env_with(env, action)
+        obs, reward, done, info = env.step(action)
 
         # 加锁修改树
         with lock:
@@ -164,7 +165,8 @@ class AsyncMCTSSearch(MCTSSearch):
             trajectory = list(node.trajectory)
 
         for step in trajectory:
-            self._execute_in_env_with(env, step["action"])
+            env.step(step["action"])
+        env.steps_taken = 0
 
         # Rollout
         rollout_steps = []
@@ -174,16 +176,24 @@ class AsyncMCTSSearch(MCTSSearch):
             action = self.llm_generate(prompt, temperature=self.rollout_temperature)
             action = action.strip()
 
-            obs = self._execute_in_env_with(env, action)
+            obs, reward, done, info = env.step(action)
             step = {"action": action, "observation": obs}
             trajectory.append(step)
             rollout_steps.append(step)
 
-            tool_call = self._parse_tool_call(action)
-            if tool_call and tool_call.get("name") == "predict_performance":
+            # 检查 tool_history 而不是手动解析 tool_call
+            if env.tool_history and env.tool_history[-1].get("tool") == "predict_performance":
                 break
 
-        reward = self._compute_reward_with(env)
+        # 通过 env.step 调 predict_performance 计算 reward
+        obs, _, _, _ = env.step(
+            '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>'
+        )
+        try:
+            parsed = json.loads(obs)
+            reward = parsed.get("improvement_pct", 0) / 100.0
+        except (json.JSONDecodeError, TypeError):
+            reward = 0.0
 
         # 保存最优 rollout
         with lock:
@@ -224,39 +234,4 @@ class AsyncMCTSSearch(MCTSSearch):
             node.total_reward += reward
             node = node.parent
 
-    # ===== 线程本地 env 操作 =====
 
-    def _execute_in_env_with(self, env, action: str) -> str:
-        """用指定 env 执行 action"""
-        try:
-            tool_call = self._parse_tool_call(action)
-            if tool_call is None:
-                return "Error: invalid tool call format"
-
-            name = tool_call["name"]
-            args = tool_call.get("arguments", {})
-
-            for tool in env.tools:
-                if tool.name == name:
-                    return tool.execute(args)
-
-            return f"Error: tool '{name}' not found"
-        except Exception as e:
-            return f"Error: {str(e)}"
-
-    def _compute_reward_with(self, env) -> float:
-        """用指定 env 计算 reward"""
-        for tool in env.tools:
-            if tool.name == "predict_performance":
-                result = tool.execute({})
-                try:
-                    parsed = json.loads(result)
-                    # 直接用工具返回的 improvement_pct：
-                    # = (pred_modified - pred_baseline) / pred_baseline
-                    # 两端都是模型预测值，消除系统偏差，reward 才有意义
-                    improvement_pct = parsed.get("improvement_pct", 0)
-                    return improvement_pct / 100.0
-                except (json.JSONDecodeError, TypeError):
-                    return 0.0
-
-        return 0.0

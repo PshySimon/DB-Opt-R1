@@ -866,6 +866,8 @@ if __name__ == "__main__":
     syn.add_argument("--model", default="gpt-5")
     syn.add_argument("--api-key", default=None)
     syn.add_argument("--api-base", default=None)
+    syn.add_argument("--providers-config", default=None,
+                     help="多中转站 JSON 配置文件路径，传入后忽略单节点 --api-key/--api-base")
     syn.add_argument("--workers", type=int, default=5, help="并发线程数")
 
     # random-sample（随机采样 knob 配置）
@@ -913,17 +915,18 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     if args.command == "synthesize":
-        from datasets.synthesis.mcts.run_search import create_llm_client
-        llm_fn = create_llm_client(
-            model=args.model,
-            api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
-            api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
+        from core.llm.multi_client import MultiProviderLLMClient
+        llm_client = MultiProviderLLMClient(
+            target_model=args.model,
+            providers_config=args.providers_config,
+            single_api_key=args.api_key or os.environ.get("OPENAI_API_KEY"),
+            single_api_base=args.api_base or os.environ.get("OPENAI_API_BASE"),
         )
         synthesize_knobs(
             dimensions_path=args.dimensions,
             knob_space_path=args.knob_space,
             output_path=args.output,
-            llm_generate=llm_fn,
+            llm_generate=llm_client.generate,
             per_cell=args.per_cell,
             workers=args.workers,
         )
