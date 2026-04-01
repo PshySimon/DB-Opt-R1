@@ -221,15 +221,11 @@ def run_mcts(args):
         logger.info(f"环境 {i+1}/{num_samples} (sample_idx={i})")
         logger.info(f"{'='*50}")
 
-        # 直接从 ScenarioState 取 question
+        # 实时生成 1 个 question（每次搜索随机 persona，保证多样性）
+        from datasets.synthesis.scenarios.pipeline import generate_questions_for_state
         scenario = preloaded_scenarios[i] if preloaded_scenarios else None
         scenario_name = scenario.name if scenario else f"env_{i}"
-        q = getattr(scenario, "question", "") if scenario else ""
-        if not q:
-            raise ValueError(
-                f"场景 {scenario_name} 的 question 为空，请先运行迁移脚本: "
-                f"python3 -m datasets.synthesis.scenarios.migrate_add_questions --input <scenarios_dir>"
-            )
+        q = generate_questions_for_state(scenario, 1, llm_generate)[0] if scenario else ""
         scenario_config = {**search_config, "user_message": q}
 
         def env_factory():

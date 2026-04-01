@@ -124,15 +124,13 @@ def sample_one_scenario(
     """对单个场景跑 num_rollouts 次 episode，返回通过阈值的 SFT 样本列表。"""
     from environment.tools import DBToolEnv
     from core.agent import rollout
+    from datasets.synthesis.scenarios.pipeline import generate_questions_for_state
 
     scenario = scenarios[sample_idx]
     s_name = getattr(scenario, "name", f"env_{sample_idx}")
-    question = getattr(scenario, "question", "")
-    if not question:
-        raise ValueError(
-            f"场景 {s_name} 的 question 为空，请先运行迁移脚本: "
-            f"python3 -m datasets.synthesis.scenarios.migrate_add_questions --input <scenarios_dir>"
-        )
+
+    # 一次 LLM 调用批量生成 num_rollouts 个风格各异的 question
+    questions = generate_questions_for_state(scenario, num_rollouts, llm_fn)
 
     good_samples = []
     threshold_pct = good_threshold * 100  # 转换为百分比
@@ -152,7 +150,7 @@ def sample_one_scenario(
                 env=env,
                 llm_fn=llm_fn,
                 system_prompt=SYSTEM_PROMPT,
-                user_message=question,
+                user_message=questions[rollout_idx],
                 max_turns=max_turns,
                 temperature=temperature,
             )

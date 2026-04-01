@@ -41,16 +41,18 @@ from .schema import ScenarioState
 logger = logging.getLogger(__name__)
 
 
-def generate_question_for_state(state, llm_fn) -> str:
-    """基于场景 description/workload/severity 生成自然的用户问题。
+def generate_questions_for_state(state, n: int, llm_fn) -> list:
+    """一次 LLM 调用为场景生成 n 条风格各异的 question。
 
-    接受 ScenarioState 实例或 dict（synthesize 阶段产出的原始 knob_config）。
-    llm_fn: (prompt: str) -> str
+    接受 ScenarioState 实例或 dict（synthesize 阶段的原始 knob_config）。
+    prompt 素材：description, workload, severity。
+    要求 LLM 返回 JSON："{"questions": ["...", "...", ...]}"
+    失败直接抛异常，不做 fallback。
     """
     import re as _re
     import random
+    import json as _json
 
-    # 兼容 ScenarioState 和 dict 两种输入
     if isinstance(state, dict):
         description = state.get("description", "")
         wl_raw = state.get("workload", "mixed")
@@ -76,17 +78,18 @@ def generate_question_for_state(state, llm_fn) -> str:
         severity_hint = "，性能有明显下降"
 
     personas = [
-        "你是一位业务开发同学，不太懂数据库底层，只知道系统有问题",
-        "你是公司的 DBA，说话直接，知道是 PG 配置问题",
-        "你是运营同学，只关心业务受影响，不懂技术细节",
-        "你是刚接手系统的后端工程师，有些不确定",
+        "业务开发同学，不太懂数据库底层，只知道系统有问题",
+        "公司 DBA，说话直接，知道是 PG 配置问题",
+        "运营同学，只关心业务受影响，不懂技术细节",
+        "刚接手系统的后端工程师，有些不确定",
+        "产品经理，关注用户体验下降，不懂技术",
     ]
-    persona = random.choice(personas)
 
     prompt = (
-        f"{persona}，向 AI 数据库调优助手发出一句求助或指令。\n\n"
+        f"你需要模拟 {n} 个不同身份的用户，分别向 AI 数据库调优助手发出一句求助或指令。\n\n"
         f"背景：这是一个{wl_desc}的系统{severity_hint}。\n"
         f"问题描述（内部参考，不要照搬原文）：{description}\n\n"
+        f"可选人物背景（随机分配，不同问题用不同身份）：{', '.join(personas)}\n\n"
         "示例（仅展示风格，不要照抄内容）：\n"
         "- 「我们系统最近怎么越来越卡，下单那块尤其明显，你帮看看数据库是不是有问题」\n"
         "- 「帮我把数据库调一下，写操作现在慢得不行」\n"
@@ -94,22 +97,26 @@ def generate_question_for_state(state, llm_fn) -> str:
         "- 「并发一高就开始堆积，能不能帮我排查一下瓶颈在哪」\n"
         "- 「数据库这几天感觉有点问题，你帮我调一调」\n\n"
         "要求：\n"
-        "1. 完全以你分配的身份和第一人称口吻表达，贴近真实对话\n"
-        "2. 绝对不能出现任何技术指标名称（如 buffer_hit_rate、seq_scan、TPS、wait_event、knob 名称等）\n"
-        "3. 不能出现任何具体数字\n"
-        "4. 不超过 60 字，不要用固定句式开头\n"
-        '5. 输出严格的 JSON，格式为：{"question": "..."}\n\n'
+        f"1. 生成恰好 {n} 条问题，每条使用不同身份和措辞，风格各异\n"
+        "2. 完全以第一人称口吻，贴近真实对话\n"
+        "3. 绝对不能出现任何技术指标名称（如 buffer_hit_rate、seq_scan、TPS、wait_event、knob 名称等）\n"
+        "4. 不能出现任何具体数字\n"
+        "5. 每条不超过 60 字\n"
+        f'6. 输出严格的 JSON，格式为：{{"questions": ["...", "...", ...]}}（恰好 {n} 条）\n\n'
         "JSON:"
     )
 
     raw = llm_fn(prompt)
-    m = _re.search(r'\{.*?"question"\s*:\s*"(.+?)"\s*\}', raw, _re.DOTALL)
+    m = _re.search(r'\{.*?"questions"\s*:\s*(\[.*?\])\s*\}', raw, _re.DOTALL)
     if m:
-        return m.group(1).strip()
-    q = json.loads(raw).get("question", "").strip()
-    if q:
-        return q
-    raise ValueError(f"LLM 未返回有效 question，原始输出: {raw[:200]}")
+        questions = _json.loads(m.group(1))
+        if isinstance(questions, list) and len(questions) >= n:
+            return [str(q).strip() for q in questions[:n]]
+    parsed = _json.loads(raw)
+    questions = parsed.get("questions", [])
+    if isinstance(questions, list) and len(questions) >= n:
+        return [str(q).strip() for q in questions[:n]]
+    raise ValueError(f"LLM 未返回足够的 questions（需要 {n} 条），原始输出: {raw[:300]}")
 
 
 # ==================== Step 1: 真机采集 ====================
@@ -349,7 +356,6 @@ def collect_scenarios(input_path: str, output_path: str,
                     "benchmark": "pgbench",
                 },
                 solution={},
-                question=config.get("question", ""),  # 继承 synthesize 阶段生成的 question
             )
             results.append(asdict(state))
             logger.info(f"  ✅ {label}")
@@ -601,14 +607,7 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
                 "severity": severity,
                 "knobs": valid,
                 "hardware_hint": hardware,
-                "question": "",
             }
-
-            # 采集完即生成 question
-            try:
-                result["question"] = generate_question_for_state(result, llm_generate)
-            except Exception as qe:
-                logger.warning(f"  [{label}] question 生成失败: {qe}")
 
             with lock:
                 results.append(result)

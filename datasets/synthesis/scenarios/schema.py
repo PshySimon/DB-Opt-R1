@@ -24,7 +24,6 @@ class ScenarioState:
     difficulty: int = 1
     root_cause: List[str] = field(default_factory=list)
     description: str = ""
-    question: str = ""  # 用户自然语言问题（基于采集到的真实DB症状生成）
 
     # 硬件
     hardware: Dict[str, Any] = field(default_factory=dict)
