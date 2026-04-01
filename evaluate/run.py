@@ -105,7 +105,9 @@ def evaluate_one(sample_idx, env_scenarios, llm_fn, cost_model, questions, args)
     # 获取 user message
     scenario = env_scenarios[sample_idx]
     s_name = getattr(scenario, "name", "")
-    user_message = questions.get(s_name, f"请优化这个数据库的性能。场景: {s_name}")
+    _q = questions.get(s_name, f"请优化这个数据库的性能。场景: {s_name}")
+    # 兼容新格式（list）和旧格式（str），评估固定取第一个保证可复现
+    user_message = _q[0] if isinstance(_q, list) else _q
 
     result = run_episode(
         env=env,
