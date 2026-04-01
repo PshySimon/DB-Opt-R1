@@ -64,6 +64,7 @@ def build_llm_fn(args):
     client = OpenAI(
         api_key=args.api_key,
         base_url=args.api_base,
+        timeout=300,  # 5 分钟超时，兼容 vLLM 冷启动
     )
 
     def generate(messages: list, temperature: float = 0.3) -> str:

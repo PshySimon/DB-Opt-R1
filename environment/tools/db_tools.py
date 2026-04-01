@@ -554,6 +554,14 @@ class PredictPerformanceTool(DBTool):
             "improvement_pct":   round((pred_tps - pred_baseline) / max(pred_baseline, 1) * 100, 2),
         }, indent=2)
 
+    def calculate_reward(self, args, result):
+        """从 predict_performance 返回的 improvement_pct 计算 reward"""
+        try:
+            parsed = json.loads(result)
+            return parsed.get("improvement_pct", 0) / 100.0
+        except (json.JSONDecodeError, TypeError):
+            return 0.0
+
 
 class RunBenchmarkTool(DBTool):
     def __init__(self, **kwargs):

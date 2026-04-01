@@ -74,6 +74,10 @@ class ToolEnv:
         self._actions_valid = []
         self._actions_effective = []
 
+    def step(self, action_text: str):
+        """执行一步工具交互，返回 (observation, reward, done, info)"""
+        return step(self, action_text)
+
     def tools_format_func(self) -> str:
         """生成工具描述 prompt"""
         template = """# Tools
