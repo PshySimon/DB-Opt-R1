@@ -118,6 +118,8 @@ For each function call, return a json object with function name and arguments wi
             "total_reward": sum(self.rewards),
             "steps_taken": self.steps_taken,
             "tool_history": self.tool_history,
+            "valid_actions": sum(1 for a in self._actions_valid if a is not None),
+            "effective_actions": sum(1 for a in self._actions_effective if a is not None),
         }
 
     def _update_tracking(self, response, action, valid, effective, reward):

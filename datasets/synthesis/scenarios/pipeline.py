@@ -40,6 +40,118 @@ from .schema import ScenarioState
 
 logger = logging.getLogger(__name__)
 
+
+def generate_question_for_state(state, llm_fn) -> str:
+    """基于采集到的 ScenarioState 真实 DB 症状，生成自然的用户问题。
+
+    按优先级依次利用：
+    1. wait_events（等待事件 → 最具体的症状）
+    2. slow_queries（慢查询）
+    3. db_metrics（buffer_hit_rate/temp_files/seq_scan_ratio 等）
+    4. workload.type + hardware（兜底）
+
+    Args:
+        state: ScenarioState 实例
+        llm_fn: (prompt: str, temperature: float) -> str
+
+    Returns:
+        生成的用户问题字符串
+    """
+    import re as _re
+
+    hw = state.hardware or {}
+    wl = state.workload or {}
+    metrics = state.db_metrics or {}
+    wait_events = state.wait_events or []
+    slow_queries = state.slow_queries or []
+
+    # 将症状翻译为用户可感知的体验描述，不暴露内部指标名称
+    experience_hints = []
+    if wait_events:
+        top_waits = [e.get("event_type", "") or e.get("event", "") for e in wait_events[:3]]
+        top_waits = [w for w in top_waits if w]
+        if any("Lock" in w for w in top_waits):
+            experience_hints.append("并发操作时经常卡住等待")
+        elif any("IO" in w or "io" in w or "Disk" in w for w in top_waits):
+            experience_hints.append("查询响应变慢，像在等磁盘")
+        else:
+            experience_hints.append("数据库有明显的响应延迟")
+    if slow_queries:
+        experience_hints.append("有些查询跑得很慢")
+    bhr = metrics.get("buffer_hit_rate", 1.0)
+    if isinstance(bhr, (int, float)) and bhr < 0.9:
+        experience_hints.append("频繁读取数据时性能下降明显")
+    tmp = metrics.get("temp_files_count", 0)
+    if isinstance(tmp, (int, float)) and tmp > 10:
+        experience_hints.append("复杂查询或排序时很慢")
+    seq_ratio = metrics.get("seq_scan_ratio", 0.0)
+    if isinstance(seq_ratio, (int, float)) and seq_ratio > 0.5:
+        experience_hints.append("大表查询特别慢")
+    deadlocks = metrics.get("deadlocks", 0)
+    if isinstance(deadlocks, (int, float)) and deadlocks > 0:
+        experience_hints.append("偶尔出现事务失败或死锁报错")
+
+    if not experience_hints:
+        experience_hints.append("整体性能感觉还有提升空间")
+
+    wl_type = wl.get("type", "mixed")
+    wl_desc = {
+        "read_only": "主要是读多写少的业务",
+        "write_heavy": "写操作比较频繁",
+        "high_concurrency": "并发用户很多",
+        "mixed": "读写都有",
+    }.get(wl_type, "读写都有")
+
+    hints_text = "；".join(experience_hints)
+
+    import random
+
+    # 随机分配用户身份，打散句式
+    personas = [
+        "你是一位业务开发同学，不太懂数据库底层，只知道线上慢了",
+        "你是公司的 DBA，熟悉技术背景，说话比较直接",
+        "你是运营同学，只关心业务受影响，不懂技术细节",
+        "你是一位刚接手这个系统的后端工程师，有些不确定",
+    ]
+    persona = random.choice(personas)
+
+    prompt = (
+        f"{persona}，向 AI 数据库调优助手发出一句求助或指令。\n\n"
+        f"背景：这是一个{wl_desc}的系统，你注意到：{hints_text}。\n\n"
+        "示例（仅展示风格，不要照抄内容）：\n"
+        "- 「我们系统最近怎么越来越卡，下单那块尤其明显，你帮看看数据库是不是有问题」\n"
+        "- 「帮我把数据库调一下，写操作现在慢得不行」\n"
+        "- 「报表查询老半天出不来，用户投诉了，麻烦帮看看怎么优化」\n"
+        "- 「并发一高就开始堆积，能不能帮我排查一下瓶颈在哪」\n"
+        "- 「数据库性能最近感觉有点问题，你帮我调一调」\n\n"
+        "要求：\n"
+        "1. 完全以你分配的身份和第一人称口吻表达，贴近真实对话\n"
+        "2. 绝对不能出现任何技术指标名称（如 buffer_hit_rate、seq_scan、TPS、wait_event 等）\n"
+        "3. 不能出现任何具体数字\n"
+        "4. 不超过 60 字，不要总用固定句式开头\n"
+        "5. 输出严格的 JSON，格式为：{\"question\": \"...\"}\n\n"
+        "JSON:"
+    )
+
+    try:
+        raw = llm_fn(prompt, 0.7)
+        m = _re.search(r'\{.*?"question"\s*:\s*"(.+?)"\s*\}', raw, _re.DOTALL)
+        if m:
+            return m.group(1).strip()
+        return json.loads(raw).get("question", "").strip()
+    except Exception:
+        pass
+
+    # fallback：根据最显著症状生成默认问题
+    if wait_events:
+        return "数据库有明显的等待事件，帮我分析一下瓶颈并调优。"
+    if slow_queries:
+        return "最近慢查询很多，麻烦帮我调整一下数据库配置。"
+    if isinstance(bhr, (int, float)) and bhr < 0.9:
+        return "数据库读性能变差了，帮我看看缓存配置是否合理。"
+    return "请帮我对这个数据库做一次全面的性能调优。"
+
+
 # ==================== Step 1: 真机采集 ====================
 
 

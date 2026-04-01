@@ -82,6 +82,8 @@ def run_episode(
         "tool_calls": tool_calls,
         "num_knobs_set": len(knobs_set),
         "knobs_set": list(knobs_set),
+        "valid_actions": tracking.get("valid_actions", len(tool_history)),
+        "effective_actions": tracking.get("effective_actions", len(tool_history)),
     }
 
     if save_trajectory:

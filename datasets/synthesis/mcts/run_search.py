@@ -26,65 +26,9 @@ from datasets.synthesis.mcts.extract import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-import re as _re
 
 
-def _build_question_prompt(scenario, num_questions: int = 5) -> str:
-    """根据场景信息生成 LLM 提示，让 LLM 以用户视角提出 num_questions 个自然的调优问题。"""
-    hw = getattr(scenario, 'hardware', {}) or {}
-    wl = getattr(scenario, 'workload', {}) or {}
-    desc = getattr(scenario, 'description', '') or ''
-    return (
-        "你是一位真实的 PostgreSQL 使用者，正在请求 AI 数据库调优 Agent 的帮助。"
-        f"根据以下场景信息，生成 {num_questions} 个风格各异的自然中文用户提问或指令。\n\n"
-        "规则：\n"
-        "1. 从用户视角出发，遇到性能问题，向 AI Agent 求助或下达优化指令\n"
-        "2. 提问风格多样：可描述现象（'某个操作变慢了'）、困扰（'报表跑不动'）、直接下指令（'帮我优化一下 IO'）等\n"
-        "3. 不要在提问中提及任何具体指标数字\n"
-        "4. 语言自然、直接，每个问题控制在 100 字以内\n"
-        "5. 每个问题措辞明显不同，覆盖不同表达方式\n"
-        f"6. 输出严格的 JSON，格式为：{{\"questions\": [\"...\", \"...\", ...]}}，共 {num_questions} 个\n\n"
-        f"场景背景（仅供参考，不要照搬）：\n{desc}\n"
-        f"硬件环境：{hw.get('total_memory_gb')}GB 内存，{hw.get('disk_type')} 磁盘\n"
-        f"负载类型：{wl.get('type')}\n\n"
-        "JSON:"
-    )
 
-
-def _extract_questions(raw: str, num_questions: int = 5) -> list:
-    """从模型返回的 JSON 中提取 questions 列表，失败则返回默认值。"""
-    defaults = [
-        "请帮我优化这个数据库的性能。",
-        "数据库最近有些慢，帮我看看怎么调一下。",
-        "帮我分析一下数据库的性能瓶颈并优化。",
-        "我们的系统响应变慢了，麻烦帮我调一下数据库参数。",
-        "请对这个 PostgreSQL 实例做一次全面的性能调优。",
-    ]
-    try:
-        # 尝试提取 questions 数组
-        m = _re.search(r'\{.*?"questions"\s*:\s*(\[.*?\]).*?\}', raw, _re.DOTALL)
-        if m:
-            questions = json.loads(m.group(1))
-            if isinstance(questions, list) and questions:
-                return [q.strip() for q in questions if q.strip()][:num_questions]
-        parsed = json.loads(raw)
-        if isinstance(parsed.get("questions"), list):
-            return [q.strip() for q in parsed["questions"] if q.strip()][:num_questions]
-    except Exception:
-        pass
-    return defaults[:num_questions]
-
-
-# 保留旧的单问题提取函数供兼容
-def _extract_question(raw: str) -> str:
-    """从模型返回的 JSON 中提取 question 字段，失败则返回默认值。"""
-    try:
-        m = _re.search(r'\{.*?"question"\s*:\s*"(.+?)"\s*\}', raw, _re.DOTALL)
-        if m:
-            return m.group(1).strip()
-        return json.loads(raw)["question"]
-    except Exception:
-        return "请优化这个数据库的性能。"
 
 
 SYSTEM_PROMPT = """你是 PostgreSQL 数据库调优专家。你的目标是通过调整数据库配置参数来最大化性能（TPS）。
@@ -271,40 +215,21 @@ def run_mcts(args):
     if done_envs:
         logger.info(f"已完成环境: {len(done_envs)} 个，跳过")
 
-    # 加载已生成的 questions 缓存 (跨 run_dir 复用)
-    questions_cache_path = os.path.join(args.output_dir, "questions_cache.json")
-    questions = {}
-    if os.path.exists(questions_cache_path):
-        try:
-            with open(questions_cache_path, "r", encoding="utf-8") as f:
-                questions = json.load(f)
-            logger.info(f"已加载 {len(questions)} 个预生成的场景问题缓存")
-        except Exception as e:
-            logger.warning(f"读取 questions.json 缓存失败: {e}")
-            questions = {}
-
-    import threading
-    q_lock = threading.Lock()
-
-    def _save_questions_cache():
-        with q_lock:
-            with open(questions_cache_path, "w", encoding="utf-8") as f:
-                json.dump(questions, f, ensure_ascii=False, indent=2)
     def search_one_env(i):
         """搜索单个环境，返回 (sft_items, contrastive_items)"""
         logger.info(f"\n{'='*50}")
         logger.info(f"环境 {i+1}/{num_samples} (sample_idx={i})")
         logger.info(f"{'='*50}")
 
-        # 取场景专属提问（从缓存），没有即跳过
-        scenario_name = preloaded_scenarios[i].name if preloaded_scenarios else f"env_{i}"
-        q_list = questions.get(scenario_name)
-        if not q_list:
-            logger.error(f"  场景 {scenario_name} 无可用专属问题，跳过 MCTS 搜索")
-            return [], []
-        # 每次随机选一个问题，让多次 rollout 覆盖不同措辞
-        q = random.choice(q_list) if isinstance(q_list, list) else q_list
-        # 每个环境独立 copy，避免并行竞争
+        # 直接从 ScenarioState 取 question
+        scenario = preloaded_scenarios[i] if preloaded_scenarios else None
+        scenario_name = scenario.name if scenario else f"env_{i}"
+        q = getattr(scenario, "question", "") if scenario else ""
+        if not q:
+            raise ValueError(
+                f"场景 {scenario_name} 的 question 为空，请先运行迁移脚本: "
+                f"python3 -m datasets.synthesis.scenarios.migrate_add_questions --input <scenarios_dir>"
+            )
         scenario_config = {**search_config, "user_message": q}
 
         def env_factory():
@@ -375,50 +300,6 @@ def run_mcts(args):
     parallel = getattr(args, 'parallel', 1)
     pending = [i for i in range(num_samples) if i not in done_envs]
     logger.info(f"待搜索: {len(pending)} 个环境")
-
-    # 并发预生成场景问题（与 MCTS 搜索串行，无竞争）
-    pending_q_idx = []
-    if preloaded_scenarios is not None and pending:
-        for i in pending:
-            s_name = preloaded_scenarios[i].name
-            if s_name not in questions:
-                pending_q_idx.append(i)
-
-    def _generate_with_retry(prompt, max_retries=3):
-        for attempt in range(max_retries):
-            try:
-                return _extract_questions(llm_generate(prompt, 0.7))
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    raise e
-                time.sleep(1)
-
-    if pending_q_idx:
-        logger.info(f"预生成场景问题（{len(pending_q_idx)} 个，并发={parallel}）...")
-        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
-        with ThreadPoolExecutor(max_workers=parallel) as pool:
-            fut_map = {
-                pool.submit(_generate_with_retry, _build_question_prompt(preloaded_scenarios[i])): i
-                for i in pending_q_idx
-            }
-            completed_q = 0
-            total_q = len(pending_q_idx)
-            for fut in _as_completed(fut_map):
-                idx = fut_map[fut]
-                s_name = preloaded_scenarios[idx].name
-                try:
-                    q_list = fut.result()
-                    with q_lock:
-                        questions[s_name] = q_list
-                    _save_questions_cache()
-                except Exception as e:
-                    logger.error(f"场景 {idx} ({s_name}) question 生成失败(已重试3次): {e}")
-                
-                completed_q += 1
-                if completed_q % 10 == 0 or completed_q == total_q:
-                    logger.info(f"  > 问题生成进度: {completed_q}/{total_q}")
-
-        logger.info("问题预生成阶段结束")
 
     def _append_incremental(sft_items, contrastive_items):
         """每完成一个环境立即追加写入，避免崩溃丢失数据"""

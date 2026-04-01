@@ -79,15 +79,9 @@ def build_llm_fn(args):
     return generate
 
 
-def load_questions(questions_path: str) -> dict:
-    """加载 questions_cache.json"""
-    if questions_path and os.path.exists(questions_path):
-        with open(questions_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
 
 
-def evaluate_one(sample_idx, env_scenarios, llm_fn, cost_model, questions, args):
+def evaluate_one(sample_idx, env_scenarios, llm_fn, cost_model, args):
     """评估单个场景"""
     from environment.tools import DBToolEnv
 
@@ -102,10 +96,15 @@ def evaluate_one(sample_idx, env_scenarios, llm_fn, cost_model, questions, args)
 
     env.reset(sample_idx=sample_idx)
 
-    # 获取 user message
+    # 直接从 ScenarioState 取 question
     scenario = env_scenarios[sample_idx]
     s_name = getattr(scenario, "name", "")
-    user_message = questions.get(s_name, f"请优化这个数据库的性能。场景: {s_name}")
+    user_message = getattr(scenario, "question", "")
+    if not user_message:
+        raise ValueError(
+            f"场景 {s_name} 的 question 为空，请先运行迁移脚本: "
+            f"python3 -m datasets.synthesis.scenarios.migrate_add_questions --input <scenarios_dir>"
+        )
 
     result = run_episode(
         env=env,
@@ -133,8 +132,6 @@ def main():
                         help="场景数据源（目录或 JSON 文件）")
     parser.add_argument("--eval-scenarios", default=None,
                         help="评估专用场景文件（如 knob_configs_eval.json），传入则仅评估该文件中的场景")
-    parser.add_argument("--questions", default="datasets/data/mcts/questions_cache.json",
-                        help="questions_cache.json 路径")
     parser.add_argument("--knob-space", default="configs/knob_space.yaml")
     parser.add_argument("--cost-model", required=True, help="Cost Model checkpoint 目录")
 
@@ -174,7 +171,6 @@ def main():
     )
     scenarios = temp_env.scenarios
     logger.info(f"  可用场景: {len(scenarios)}")
-
     if len(scenarios) == 0:
         logger.error("没有可用的评估场景，退出")
         sys.exit(1)
@@ -184,15 +180,11 @@ def main():
     num_envs = min(num_envs, len(scenarios))
     eval_indices = list(range(num_envs))
 
-    # 4. 加载 questions
-    questions = load_questions(args.questions)
-    logger.info(f"  问题缓存: {len(questions)} 条")
-
-    # 5. 构建 LLM 函数
+    # 4. 构建 LLM 函数
     logger.info(f"LLM: {args.model} @ {args.api_base}")
     llm_fn = build_llm_fn(args)
 
-    # 6. 并发评估
+    # 5. 并发评估
     logger.info(f"开始评估: {num_envs} 个场景, 并发={args.parallel}")
     results = []
     os.makedirs(args.output, exist_ok=True)
@@ -203,7 +195,7 @@ def main():
     with ThreadPoolExecutor(max_workers=args.parallel) as pool:
         futures = {
             pool.submit(
-                evaluate_one, idx, scenarios, llm_fn, cost_model, questions, args
+                evaluate_one, idx, scenarios, llm_fn, cost_model, args
             ): idx
             for idx in eval_indices
         }

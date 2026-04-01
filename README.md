@@ -21,7 +21,7 @@
 
 1. **数据采集**：在真实 PG 上随机采样 knob 配置 + 跑 benchmark，收集性能数据
 2. **Cost Model**：用采集的数据训练性能预测模型（LightGBM）
-3. **SFT 数据合成**：MCTS 搜索最优调优轨迹，生成 SFT/DPO 训练数据
+3. **SFT 数据合成**：纯轨迹采样（N×rollout / 场景，保留 improvement_pct > 3% 的轨迹）；MCTS 作为对比基线保留
 4. **GRPO 训练**：LLM Agent 通过工具与模拟环境交互，Cost Model 预测性能作为 reward
 5. **评估**：在真实 PG 上验证 Agent 的调优效果
 
@@ -35,7 +35,13 @@
 ├── environment/
 │   └── tools/                          # 12 个 DB 调优工具（real/simulated 双模式）
 ├── cost_model/                         # Cost Model（LightGBM）
-├── datasets/                           # 数据采集 + MCTS 轨迹合成
+├── datasets/                           # 数据采集 + 轨迹合成
+│   └── synthesis/
+│       ├── scenarios/                  # 场景生成、采集、迁移脚本
+│       │   └── migrate_add_questions.py  # 为存量数据补充 question 字段
+│       ├── trajectory/                 # 纯轨迹采样器（推荐）
+│       │   └── sampler.py
+│       └── mcts/                       # MCTS（保留为对比基线）
 ├── training/                           # 训练代码
 │   ├── reward_score.py                 # Reward 计算（共享）
 │   ├── data_utils.py                   # 数据加载工具（共享）
@@ -162,45 +168,63 @@ python3 -m cost_model.train \
     --output cost_model/checkpoints/v1
 ```
 
-#### Step 5: MCTS 轨迹合成
+#### Step 5: SFT 轨迹合成（纯轨迹采样，推荐）
 
-基于 `source=llm_generated` 场景 + Cost Model，搜索最优调优轨迹。每次运行输出到带时间戳的子目录。
+对每个场景并行跑 N 次独立 rollout，Cost Model 计算 `improvement_pct`，保留提升 > 3% 的轨迹作为 SFT 正样本。
+
+**前置：场景 question 字段**
+
+每个 `ScenarioState` 包含一个 `question` 字段（用户自然语言问题，基于采集到的真实 DB 症状生成）。存量数据请先运行迁移脚本：
 
 ```bash
-# 方式 1：多中转站轮询（推荐）
+python3 -m datasets.synthesis.scenarios.migrate_add_questions \
+    --input datasets/data/scenarios/ \
+    --model gpt-5 \
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE \
+    --workers 10
+```
+
+**轨迹采样：**
+
+```bash
+python3 -m datasets.synthesis.trajectory.sampler \
+    --scenarios datasets/data/scenarios/ \
+    --cost-model cost_model/checkpoints/v7_lgbm_dedup \
+    --output-dir datasets/data/trajectory/ \
+    --num-rollouts 8 \
+    --good-threshold 0.03 \
+    --temperature 0.7 \
+    --parallel 8 \
+    --model gpt-5 \
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE
+```
+
+| 参数 | 说明 | 默认 |
+|------|------|------|
+| `--num-rollouts` | 每场景 rollout 次数 | 8 |
+| `--good-threshold` | SFT 正样本阈值（improvement_pct / 100） | 0.03 (3%) |
+| `--temperature` | LLM 采样温度 | 0.7 |
+| `--parallel` | 并发 worker 数 | 4 |
+
+输出：`datasets/data/trajectory/sft_trajectories.jsonl`
+
+#### Step 5（备选）: MCTS 轨迹合成（保留为对比基线）
+
+MCTS 作为对比基线保留，不再主动维护。每轮搜索输出到带时间戳的子目录。
+
+```bash
 python3 -m datasets.synthesis.mcts.run_search \
     --scenarios datasets/data/scenarios/ \
     --knob-space configs/knob_space.yaml \
     --cost-model cost_model/checkpoints/v7_lgbm_dedup \
     --output-dir datasets/data \
     --providers-config configs/providers.json \
-    --parallel 4 \
-    --num-workers 2 \
-    --simulations 5
-
-# 方式 2：单一 API 端点
-python3 -m datasets.synthesis.mcts.run_search \
-    --scenarios datasets/data/scenarios/ \
-    --knob-space configs/knob_space.yaml \
-    --cost-model cost_model/checkpoints/v7_lgbm_dedup \
-    --output-dir datasets/data \
-    --model gpt-5 \
-    --api-key $OPENAI_API_KEY \
-    --api-base $OPENAI_API_BASE \
-    --parallel 4 \
-    --num-workers 2 \
-    --simulations 5
+    --parallel 4 --num-workers 2 --simulations 5
 ```
 
-**参数说明**：
-
-| 参数 | 说明 | 默认 |
-|------|------|------|
-| `--scenarios` | 场景数据源（目录或文件，自动过滤 `source=llm_generated`） | - |
-| `--num-envs` | 搜索环境数（0=全量） | 0 |
-| `--parallel` | 多环境并行数（同时搜索 N 个场景） | 1 |
-| `--num-workers` | 单棵树内并发 simulation 线程数 | 1 |
-| `--simulations` | 每棵树 MCTS 迭代次数 | 5 |
+> **注意**：MCTS 也依赖 `scenario.question` 字段，运行前同样需要先执行迁移脚本。
 
 输出（在 `datasets/data/run_YYYYMMDD_HHMMSS/` 下）：
 - `sft_trajectories.jsonl` — SFT 训练数据
@@ -273,6 +297,8 @@ bash scripts/train_grpo_verl.sh
 #### Step 8: 模型评估
 
 使用 Step 5.5 合成的评估集，通过 Cost Model 模拟环境，评估模型的调优能力。支持 API 和 vLLM 两种推理后端。
+
+> **前置**：评估场景的 `question` 字段必须已填充（运行迁移脚本），否则会报错。
 
 ```bash
 python3 -m evaluate.run \
