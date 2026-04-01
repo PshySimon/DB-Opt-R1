@@ -33,6 +33,9 @@ def main():
     parser.add_argument("--lora_rank", type=int, default=64)
     parser.add_argument("--max_steps", type=int, default=-1)
     parser.add_argument("--bf16", action="store_true", default=True)
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=True)
+    parser.add_argument("--no_gradient_checkpointing", dest="gradient_checkpointing", action="store_false")
+    parser.add_argument("--flash_attn", action="store_true", default=False)
     args = parser.parse_args()
 
     # 加载数据
@@ -41,10 +44,12 @@ def main():
 
     # 加载模型
     print(f"加载模型: {args.model_path}")
+    attn_impl = "flash_attention_2" if args.flash_attn else "eager"
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
         torch_dtype=torch.bfloat16 if args.bf16 else torch.float16,
         trust_remote_code=True,
+        attn_implementation=attn_impl,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_path, trust_remote_code=True
@@ -75,7 +80,7 @@ def main():
         max_seq_length=args.max_length,
         bf16=args.bf16,
         fp16=not args.bf16,
-        gradient_checkpointing=True,
+        gradient_checkpointing=args.gradient_checkpointing,
         logging_steps=5,
         save_steps=50,
         save_total_limit=3,
