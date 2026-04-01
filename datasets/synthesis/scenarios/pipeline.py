@@ -58,11 +58,13 @@ def generate_questions_for_state(state, n: int, llm_fn) -> list:
         wl_raw = state.get("workload", "mixed")
         wl = wl_raw if isinstance(wl_raw, str) else wl_raw.get("type", "mixed")
         severity = state.get("severity", "medium")
+        knobs = state.get("knobs", {})
     else:
         description = getattr(state, "description", "") or ""
         wl_obj = getattr(state, "workload", {}) or {}
         wl = wl_obj.get("type", "mixed") if isinstance(wl_obj, dict) else str(wl_obj)
         severity = ""
+        knobs = getattr(state, "knobs", {}) or {}
 
     wl_desc = {
         "read_only": "主要读多写少的业务",
@@ -85,11 +87,24 @@ def generate_questions_for_state(state, n: int, llm_fn) -> list:
         "产品经理，关注用户体验下降，不懂技术",
     ]
 
+    # 构建 knob 偏差描述（给 LLM 内部参考，推断用户会感受到的症状）
+    knob_hint = ""
+    if knobs:
+        knob_lines = ["  - {}: {}".format(k, v) for k, v in knobs.items()]
+        knob_hint = (
+            "\n当前有问题的数据库配置（仅供你推断症状，绝对不要在问题中出现这些参数名）：\n"
+            + "\n".join(knob_lines) + "\n"
+        )
+
+    personas_str = ", ".join(personas)
+    json_fmt = '{"questions": ["...", "...", ...]}'
+
     prompt = (
-        f"你需要模拟 {n} 个不同身份的用户，分别向 AI 数据库调优助手发出一句求助或指令。\n\n"
-        f"背景：这是一个{wl_desc}的系统{severity_hint}。\n"
-        f"问题描述（内部参考，不要照搬原文）：{description}\n\n"
-        f"可选人物背景（随机分配，不同问题用不同身份）：{', '.join(personas)}\n\n"
+        "你需要模拟 {} 个不同身份的用户，分别向 AI 数据库调优助手发出一句求助或指令。\n\n"
+        "背景：这是一个{}的系统{}。\n"
+        "问题描述（内部参考，不要照搬原文）：{}\n"
+        "{}\n"
+        "可选人物背景（随机分配，不同问题用不同身份）：{}\n\n"
         "示例（仅展示风格，不要照抄内容）：\n"
         "- 「我们系统最近怎么越来越卡，下单那块尤其明显，你帮看看数据库是不是有问题」\n"
         "- 「帮我把数据库调一下，写操作现在慢得不行」\n"
@@ -97,14 +112,15 @@ def generate_questions_for_state(state, n: int, llm_fn) -> list:
         "- 「并发一高就开始堆积，能不能帮我排查一下瓶颈在哪」\n"
         "- 「数据库这几天感觉有点问题，你帮我调一调」\n\n"
         "要求：\n"
-        f"1. 生成恰好 {n} 条问题，每条使用不同身份和措辞，风格各异\n"
+        "1. 生成恰好 {} 条问题，每条使用不同身份和措辞，风格各异\n"
         "2. 完全以第一人称口吻，贴近真实对话\n"
-        "3. 绝对不能出现任何技术指标名称（如 buffer_hit_rate、seq_scan、TPS、wait_event、knob 名称等）\n"
-        "4. 不能出现任何具体数字\n"
-        "5. 每条不超过 60 字\n"
-        f'6. 输出严格的 JSON，格式为：{{"questions": ["...", "...", ...]}}（恰好 {n} 条）\n\n'
+        "3. 根据上面的配置偏差推断用户实际会感受到的症状（如卡顿、超时、磁盘响、内存不够等），体现在问题中\n"
+        "4. 绝对不能出现任何技术指标名称（如 buffer_hit_rate、seq_scan、TPS、wait_event、knob 名称等）\n"
+        "5. 不能出现任何具体数字\n"
+        "6. 每条不超过 60 字\n"
+        "7. 输出严格的 JSON，格式为：{}（恰好 {} 条）\n\n"
         "JSON:"
-    )
+    ).format(n, wl_desc, severity_hint, description, knob_hint, personas_str, n, json_fmt, n)
 
     raw = llm_fn(prompt)
     m = _re.search(r'\{.*?"questions"\s*:\s*(\[.*?\])\s*\}', raw, _re.DOTALL)
