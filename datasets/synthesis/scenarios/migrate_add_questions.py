@@ -75,10 +75,11 @@ def migrate_file(fpath: str, llm_fn, workers: int = 5):
     """为单个 JSON 文件中 question 为空的条目生成 question"""
     raw_items = _load_json_file(fpath)
 
-    # 找出需要处理的条目（question 为空或字段不存在）
+    # 只对 llm_generated 且 question 为空的条目生成 question
     pending_indices = [
         i for i, item in enumerate(raw_items)
         if not item.get("question", "")
+        and item.get("source", "llm_generated") == "llm_generated"
     ]
 
     if not pending_indices:
@@ -141,15 +142,15 @@ def main():
 
     # 收集文件列表
     if os.path.isfile(args.input):
+        if not os.path.basename(args.input).startswith("collected_"):
+            logger.error(f"只处理 collected_*.json 文件，不支持: {args.input}")
+            sys.exit(1)
         files = [args.input]
     elif os.path.isdir(args.input):
         files = sorted(glob.glob(os.path.join(args.input, "collected_*.json")))
         if not files:
-            files = sorted(
-                os.path.join(args.input, f)
-                for f in os.listdir(args.input)
-                if f.endswith(".json")
-            )
+            logger.error(f"在 {args.input} 下未找到任何 collected_*.json 文件")
+            sys.exit(1)
     else:
         logger.error(f"--input 路径不存在: {args.input}")
         sys.exit(1)

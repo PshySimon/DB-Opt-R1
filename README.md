@@ -89,7 +89,9 @@ pip install -r requirements-verl.txt  # verl 后端（需要 vLLM + Ray）
 
 #### Step 1: 维度组合蒸馏生成 knob 配置
 
-基于 `synthesis_dimensions.yaml` 中定义的 58 个场景模板（单瓶颈/组合瓶颈/应用场景/反模式/边界条件），按 **场景 × 负载类型 × 严重程度** 的笛卡尔积，让 LLM 系统性生成 knob 配置。默认 `--per-cell 5`，共生成 **~3,000 条**配置。
+基于 `synthesis_dimensions.yaml` 中定义的 58 个场景模板（单瓶颈/组合瓶颈/应用场景/反模式/边界条件），按 **场景 × 负载类型 × 严重程度** 的笛卡尔积，让 LLM 系统性生成 knob 配置。每条配置同时生成对应的 `question` 字段（用户口吻的自然语言问题，基于场景 description + workload + severity 合成）。
+
+默认 `--per-cell 5`，共生成 **~3,000 条**配置（含 question）。
 
 ```bash
 # 方式 1：多中转站轮询（推荐，高并发高吞吐）
@@ -123,7 +125,7 @@ python3 -m datasets.synthesis.scenarios.pipeline random-sample \
 
 #### Step 3: 统一真机采集（需要 PG）
 
-`collect` 支持 glob，自动合并所有 `knob_configs_*.json`（LLM 生成 + 随机采样），一次采集。
+`collect` 支持 glob，自动合并所有 `knob_configs_*.json`（LLM 生成 + 随机采样），一次采集。`collect` 会将 `knob_configs_synth.json` 里已生成的 `question` 字段直接继承到 `ScenarioState`，无需额外处理。
 
 ```bash
 # 后台执行
@@ -137,7 +139,7 @@ nohup python3 -m datasets.synthesis.scenarios.pipeline collect \
 echo $! > logs/scenarios/running.pid
 ```
 
-数据带 `source` 标签：`llm_generated`（MCTS + Cost Model）、`random_sampled`（仅 Cost Model）。
+数据带 `source` 标签：`llm_generated`（训练集来源）、`random_sampled`（仅 Cost Model 用，无 question）。
 
 #### Step 3.5: 贝叶斯优化搜索好配置（可选，需要 PG）
 
@@ -170,22 +172,9 @@ python3 -m cost_model.train \
 
 #### Step 5: SFT 轨迹合成（纯轨迹采样，推荐）
 
-对每个场景并行跑 N 次独立 rollout，Cost Model 计算 `improvement_pct`，保留提升 > 3% 的轨迹作为 SFT 正样本。
+对每个场景并行跑 N 次独立 rollout，Cost Model 计算 `improvement_pct`，保留提升 > 3% 的轨迹作为 SFT 正样本。每个 `ScenarioState` 的 `question` 字段已在 Step 1 synthesize 阶段生成完毕，无需额外处理。
 
-**前置：场景 question 字段**
-
-每个 `ScenarioState` 包含一个 `question` 字段（用户自然语言问题，基于采集到的真实 DB 症状生成）。存量数据请先运行迁移脚本：
-
-```bash
-python3 -m datasets.synthesis.scenarios.migrate_add_questions \
-    --input datasets/data/scenarios/ \
-    --model gpt-5 \
-    --api-key $OPENAI_API_KEY \
-    --api-base $OPENAI_API_BASE \
-    --workers 10
-```
-
-**轨迹采样：**
+> **注意**：若使用 Step 1 之前采集的存量数据，需先运行迁移脚本为存量数据补充 question（见下文）。
 
 ```bash
 python3 -m datasets.synthesis.trajectory.sampler \
@@ -224,12 +213,25 @@ python3 -m datasets.synthesis.mcts.run_search \
     --parallel 4 --num-workers 2 --simulations 5
 ```
 
-> **注意**：MCTS 也依赖 `scenario.question` 字段，运行前同样需要先执行迁移脚本。
-
 输出（在 `datasets/data/run_YYYYMMDD_HHMMSS/` 下）：
 - `sft_trajectories.jsonl` — SFT 训练数据
 - `contrastive_pairs.jsonl` — DPO/对比学习数据
 - `mcts_trees/` — 搜索树 debug 文件
+
+#### 存量数据迁移：补充 question 字段
+
+仅针对 Step 1 重构前采集的 `collected_*.json` 数据（`source=llm_generated` 且 `question` 为空）。
+
+```bash
+python3 -m datasets.synthesis.scenarios.migrate_add_questions \
+    --input datasets/data/scenarios/ \
+    --model gpt-5 \
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE \
+    --workers 10
+```
+
+脚本自动跳过 `random_sampled` 数据和已有 question 的条目，支持断点续跑。
 
 #### Step 5.5: 评估集 knob 配置合成
 

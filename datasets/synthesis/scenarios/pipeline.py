@@ -42,114 +42,74 @@ logger = logging.getLogger(__name__)
 
 
 def generate_question_for_state(state, llm_fn) -> str:
-    """基于采集到的 ScenarioState 真实 DB 症状，生成自然的用户问题。
+    """基于场景 description/workload/severity 生成自然的用户问题。
 
-    按优先级依次利用：
-    1. wait_events（等待事件 → 最具体的症状）
-    2. slow_queries（慢查询）
-    3. db_metrics（buffer_hit_rate/temp_files/seq_scan_ratio 等）
-    4. workload.type + hardware（兜底）
-
-    Args:
-        state: ScenarioState 实例
-        llm_fn: (prompt: str, temperature: float) -> str
-
-    Returns:
-        生成的用户问题字符串
+    接受 ScenarioState 实例或 dict（synthesize 阶段产出的原始 knob_config）。
+    llm_fn: (prompt: str) -> str
     """
     import re as _re
-
-    hw = state.hardware or {}
-    wl = state.workload or {}
-    metrics = state.db_metrics or {}
-    wait_events = state.wait_events or []
-    slow_queries = state.slow_queries or []
-
-    # 将症状翻译为用户可感知的体验描述，不暴露内部指标名称
-    experience_hints = []
-    if wait_events:
-        top_waits = [e.get("event_type", "") or e.get("event", "") for e in wait_events[:3]]
-        top_waits = [w for w in top_waits if w]
-        if any("Lock" in w for w in top_waits):
-            experience_hints.append("并发操作时经常卡住等待")
-        elif any("IO" in w or "io" in w or "Disk" in w for w in top_waits):
-            experience_hints.append("查询响应变慢，像在等磁盘")
-        else:
-            experience_hints.append("数据库有明显的响应延迟")
-    if slow_queries:
-        experience_hints.append("有些查询跑得很慢")
-    bhr = metrics.get("buffer_hit_rate", 1.0)
-    if isinstance(bhr, (int, float)) and bhr < 0.9:
-        experience_hints.append("频繁读取数据时性能下降明显")
-    tmp = metrics.get("temp_files_count", 0)
-    if isinstance(tmp, (int, float)) and tmp > 10:
-        experience_hints.append("复杂查询或排序时很慢")
-    seq_ratio = metrics.get("seq_scan_ratio", 0.0)
-    if isinstance(seq_ratio, (int, float)) and seq_ratio > 0.5:
-        experience_hints.append("大表查询特别慢")
-    deadlocks = metrics.get("deadlocks", 0)
-    if isinstance(deadlocks, (int, float)) and deadlocks > 0:
-        experience_hints.append("偶尔出现事务失败或死锁报错")
-
-    if not experience_hints:
-        experience_hints.append("整体性能感觉还有提升空间")
-
-    wl_type = wl.get("type", "mixed")
-    wl_desc = {
-        "read_only": "主要是读多写少的业务",
-        "write_heavy": "写操作比较频繁",
-        "high_concurrency": "并发用户很多",
-        "mixed": "读写都有",
-    }.get(wl_type, "读写都有")
-
-    hints_text = "；".join(experience_hints)
-
     import random
 
-    # 随机分配用户身份，打散句式
+    # 兼容 ScenarioState 和 dict 两种输入
+    if isinstance(state, dict):
+        description = state.get("description", "")
+        wl_raw = state.get("workload", "mixed")
+        wl = wl_raw if isinstance(wl_raw, str) else wl_raw.get("type", "mixed")
+        severity = state.get("severity", "medium")
+    else:
+        description = getattr(state, "description", "") or ""
+        wl_obj = getattr(state, "workload", {}) or {}
+        wl = wl_obj.get("type", "mixed") if isinstance(wl_obj, dict) else str(wl_obj)
+        severity = ""
+
+    wl_desc = {
+        "read_only": "主要读多写少的业务",
+        "write_heavy": "写操作频繁的业务",
+        "high_concurrency": "高并发业务",
+        "mixed": "读写混合业务",
+    }.get(wl, "读写混合业务")
+
+    severity_hint = ""
+    if severity in ("high", "critical"):
+        severity_hint = "，问题比较严重"
+    elif severity == "medium":
+        severity_hint = "，性能有明显下降"
+
     personas = [
-        "你是一位业务开发同学，不太懂数据库底层，只知道线上慢了",
-        "你是公司的 DBA，熟悉技术背景，说话比较直接",
+        "你是一位业务开发同学，不太懂数据库底层，只知道系统有问题",
+        "你是公司的 DBA，说话直接，知道是 PG 配置问题",
         "你是运营同学，只关心业务受影响，不懂技术细节",
-        "你是一位刚接手这个系统的后端工程师，有些不确定",
+        "你是刚接手系统的后端工程师，有些不确定",
     ]
     persona = random.choice(personas)
 
     prompt = (
         f"{persona}，向 AI 数据库调优助手发出一句求助或指令。\n\n"
-        f"背景：这是一个{wl_desc}的系统，你注意到：{hints_text}。\n\n"
+        f"背景：这是一个{wl_desc}的系统{severity_hint}。\n"
+        f"问题描述（内部参考，不要照搬原文）：{description}\n\n"
         "示例（仅展示风格，不要照抄内容）：\n"
         "- 「我们系统最近怎么越来越卡，下单那块尤其明显，你帮看看数据库是不是有问题」\n"
         "- 「帮我把数据库调一下，写操作现在慢得不行」\n"
         "- 「报表查询老半天出不来，用户投诉了，麻烦帮看看怎么优化」\n"
         "- 「并发一高就开始堆积，能不能帮我排查一下瓶颈在哪」\n"
-        "- 「数据库性能最近感觉有点问题，你帮我调一调」\n\n"
+        "- 「数据库这几天感觉有点问题，你帮我调一调」\n\n"
         "要求：\n"
         "1. 完全以你分配的身份和第一人称口吻表达，贴近真实对话\n"
-        "2. 绝对不能出现任何技术指标名称（如 buffer_hit_rate、seq_scan、TPS、wait_event 等）\n"
+        "2. 绝对不能出现任何技术指标名称（如 buffer_hit_rate、seq_scan、TPS、wait_event、knob 名称等）\n"
         "3. 不能出现任何具体数字\n"
-        "4. 不超过 60 字，不要总用固定句式开头\n"
-        "5. 输出严格的 JSON，格式为：{\"question\": \"...\"}\n\n"
+        "4. 不超过 60 字，不要用固定句式开头\n"
+        '5. 输出严格的 JSON，格式为：{"question": "..."}\n\n'
         "JSON:"
     )
 
-    try:
-        raw = llm_fn(prompt, 0.7)
-        m = _re.search(r'\{.*?"question"\s*:\s*"(.+?)"\s*\}', raw, _re.DOTALL)
-        if m:
-            return m.group(1).strip()
-        return json.loads(raw).get("question", "").strip()
-    except Exception:
-        pass
-
-    # fallback：根据最显著症状生成默认问题
-    if wait_events:
-        return "数据库有明显的等待事件，帮我分析一下瓶颈并调优。"
-    if slow_queries:
-        return "最近慢查询很多，麻烦帮我调整一下数据库配置。"
-    if isinstance(bhr, (int, float)) and bhr < 0.9:
-        return "数据库读性能变差了，帮我看看缓存配置是否合理。"
-    return "请帮我对这个数据库做一次全面的性能调优。"
+    raw = llm_fn(prompt)
+    m = _re.search(r'\{.*?"question"\s*:\s*"(.+?)"\s*\}', raw, _re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    q = json.loads(raw).get("question", "").strip()
+    if q:
+        return q
+    raise ValueError(f"LLM 未返回有效 question，原始输出: {raw[:200]}")
 
 
 # ==================== Step 1: 真机采集 ====================
@@ -389,6 +349,7 @@ def collect_scenarios(input_path: str, output_path: str,
                     "benchmark": "pgbench",
                 },
                 solution={},
+                question=config.get("question", ""),  # 继承 synthesize 阶段生成的 question
             )
             results.append(asdict(state))
             logger.info(f"  ✅ {label}")
@@ -640,7 +601,14 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
                 "severity": severity,
                 "knobs": valid,
                 "hardware_hint": hardware,
+                "question": "",
             }
+
+            # 采集完即生成 question
+            try:
+                result["question"] = generate_question_for_state(result, llm_generate)
+            except Exception as qe:
+                logger.warning(f"  [{label}] question 生成失败: {qe}")
 
             with lock:
                 results.append(result)
