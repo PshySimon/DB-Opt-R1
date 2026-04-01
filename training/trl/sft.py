@@ -56,6 +56,8 @@ def main():
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    if args.flash_attn:
+        tokenizer.padding_side = "left"
 
     # LoRA
     peft_config = LoraConfig(
