@@ -28,7 +28,7 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--grad_accum", type=int, default=4)
+    parser.add_argument("--grad_accum", type=int, default=4)  # 改这里或通过命令行传入
     parser.add_argument("--max_length", type=int, default=4096)
     parser.add_argument("--lora_rank", type=int, default=64)
     parser.add_argument("--max_steps", type=int, default=-1)

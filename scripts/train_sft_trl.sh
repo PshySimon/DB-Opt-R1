@@ -8,6 +8,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-./model_save/sft/}"
 EPOCHS="${EPOCHS:-3}"
 LR="${LR:-1e-5}"
 BATCH_SIZE="${BATCH_SIZE:-2}"
+GRAD_ACCUM="${GRAD_ACCUM:-4}"
 LORA_RANK="${LORA_RANK:-64}"
 MAX_LENGTH="${MAX_LENGTH:-4096}"
 
@@ -28,5 +29,6 @@ python -m training.trl.sft \
     --num_epochs $EPOCHS \
     --lr $LR \
     --batch_size $BATCH_SIZE \
+    --grad_accum $GRAD_ACCUM \
     --lora_rank $LORA_RANK \
     --max_length $MAX_LENGTH
