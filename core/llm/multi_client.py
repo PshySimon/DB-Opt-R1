@@ -68,6 +68,48 @@ class MultiProviderLLMClient:
         self.reload_interval = 60.0
         
         self._load_providers(is_reload=False)
+        self._health_check()
+
+    def _health_check(self):
+        """启动前并发测活所有节点，不可用的直接 ban 掉"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        if not self.stats:
+            return
+
+        logger.info("🏥 启动前测活 {} 个节点...".format(len(self.stats)))
+
+        def _probe(cs: ClientStats) -> bool:
+            try:
+                resp = cs.client.chat.completions.create(
+                    model=cs.model_name,
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=5,
+                    timeout=15,
+                )
+                content = (resp.choices[0].message.content or "").strip()
+                return bool(content)
+            except Exception:
+                return False
+
+        with ThreadPoolExecutor(max_workers=min(len(self.stats), 20)) as pool:
+            futures = {pool.submit(_probe, cs): cs for cs in self.stats}
+            for fut in as_completed(futures):
+                cs = futures[fut]
+                alive = fut.result()
+                if alive:
+                    logger.info("  ✅ {} 可用".format(cs.api_base))
+                else:
+                    cs.banned = True
+                    logger.warning("  ❌ {} 不可用，已禁用".format(cs.api_base))
+
+        alive_count = sum(1 for c in self.stats if not c.banned)
+        logger.info("🏥 测活完成: {}/{} 个节点可用".format(alive_count, len(self.stats)))
+
+        if alive_count == 0:
+            logger.error("所有节点均不可用！")
+            raise RuntimeError("No available API providers after health check")
+
 
     def _load_providers(self, is_reload=False):
         try:
