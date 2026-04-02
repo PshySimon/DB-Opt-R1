@@ -81,11 +81,17 @@ class MultiProviderLLMClient:
 
         def _probe(cs: ClientStats) -> bool:
             try:
-                resp = cs.client.chat.completions.create(
+                from openai import OpenAI
+                probe_client = OpenAI(
+                    api_key=cs.api_key_str,
+                    base_url=cs.api_base,
+                    max_retries=0,
+                    timeout=10,
+                )
+                resp = probe_client.chat.completions.create(
                     model=cs.model_name,
                     messages=[{"role": "user", "content": "hi"}],
                     max_tokens=5,
-                    timeout=15,
                 )
                 content = (resp.choices[0].message.content or "").strip()
                 return bool(content)
