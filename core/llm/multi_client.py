@@ -134,6 +134,8 @@ class MultiProviderLLMClient:
                 with open(self.providers_config, "r", encoding="utf-8") as f:
                     all_providers = json.load(f)
                 for p in all_providers:
+                    if p.get("available", True) is False:
+                        continue
                     providers.append(p)
                 if not providers and not is_reload:
                     logger.error(f"配置文件 {self.providers_config} 为空！")
