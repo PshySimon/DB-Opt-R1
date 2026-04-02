@@ -249,7 +249,7 @@ python3 -m datasets.synthesis.scenarios.pipeline synthesize \
 
 #### Step 6: SFT 训练
 
-将 MCTS 轨迹转为训练格式，进行 SFT 冷启动训练。支持 **trl** 和 **verl** 两种后端。
+将轨迹转为训练格式，进行 SFT 冷启动训练。训练前会自动按 token 数过滤超长轨迹（超过 `--max_length` 的直接丢弃，不截断），默认 8192。
 
 ```bash
 # === trl 后端（推荐，不依赖 vLLM/Ray）===
@@ -263,7 +263,8 @@ bash scripts/train_sft_trl.sh
 python -m training.trl.sft \
     --model_path ~/models/Qwen2.5-3B-Instruct \
     --data_files datasets/data/run_*/sft_trajectories.jsonl \
-    --output_dir model_save/sft/
+    --output_dir model_save/sft/ \
+    --max_length 8192
 
 # === verl 后端（需要 vLLM + Ray）===
 

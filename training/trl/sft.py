@@ -29,7 +29,7 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--grad_accum", type=int, default=4)  # 改这里或通过命令行传入
-    parser.add_argument("--max_length", type=int, default=4096)
+    parser.add_argument("--max_length", type=int, default=8192)
     parser.add_argument("--lora_rank", type=int, default=64)
     parser.add_argument("--max_steps", type=int, default=-1)
     parser.add_argument("--bf16", action="store_true", default=True)
@@ -38,8 +38,31 @@ def main():
     parser.add_argument("--flash_attn", action="store_true", default=False)
     args = parser.parse_args()
 
+    # 先加载 tokenizer（用于筛选超长轨迹）
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_path, trust_remote_code=True
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    if args.flash_attn:
+        tokenizer.padding_side = "left"
+
     # 加载数据
     records = load_sft_data(args.data_files)
+
+    # 按 token 数过滤超长轨迹（截断的轨迹不完整，直接丢弃）
+    before = len(records)
+    filtered = []
+    for r in records:
+        msgs = r.get("messages", [])
+        text = tokenizer.apply_chat_template(msgs, tokenize=False)
+        n_tokens = len(tokenizer.encode(text, add_special_tokens=False))
+        if n_tokens <= args.max_length:
+            filtered.append(r)
+    records = filtered
+    if len(records) < before:
+        print(f"过滤超长轨迹: {before} → {len(records)} 条 (max_length={args.max_length})")
+
     dataset = Dataset.from_list(records)
 
     # 加载模型
@@ -51,13 +74,7 @@ def main():
         trust_remote_code=True,
         attn_implementation=attn_impl,
     )
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.model_path, trust_remote_code=True
-    )
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    if args.flash_attn:
-        tokenizer.padding_side = "left"
+
 
     # LoRA
     peft_config = LoraConfig(
