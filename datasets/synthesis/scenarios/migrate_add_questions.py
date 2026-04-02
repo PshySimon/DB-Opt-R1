@@ -15,6 +15,14 @@
     4. 原子写回
 
 用法:
+    # 方式 1：多中转站轮询（推荐）
+    python3 -m datasets.synthesis.scenarios.migrate_add_questions \\
+        --input datasets/data/mcts/run_20260330_053333/sft_trajectories.jsonl \\
+        --scenarios datasets/data/scenarios/ \\
+        --providers-config configs/providers.json \\
+        --workers 10
+
+    # 方式 2：单一 API
     python3 -m datasets.synthesis.scenarios.migrate_add_questions \\
         --input datasets/data/mcts/run_20260330_053333/sft_trajectories.jsonl \\
         --scenarios datasets/data/scenarios/ \\
@@ -38,19 +46,16 @@ logger = logging.getLogger(__name__)
 
 
 def build_llm_fn(args):
-    from openai import OpenAI
-    client = OpenAI(api_key=args.api_key, base_url=args.api_base, timeout=120)
+    """构建 LLM 生成函数：优先使用多中转站轮询，fallback 到单 API"""
+    from core.llm.multi_client import MultiProviderLLMClient
 
-    def generate(prompt: str) -> str:
-        resp = client.chat.completions.create(
-            model=args.model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.9,
-            max_tokens=1024,
-        )
-        return resp.choices[0].message.content
-
-    return generate
+    client = MultiProviderLLMClient(
+        target_model=args.model,
+        providers_config=getattr(args, 'providers_config', None),
+        single_api_key=getattr(args, 'api_key', None),
+        single_api_base=getattr(args, 'api_base', None),
+    )
+    return lambda prompt: client.generate(prompt, temperature=0.9)
 
 
 def load_scenarios_same_as_env(scenarios_path: str) -> list:
@@ -66,11 +71,18 @@ def main():
                         help="轨迹 JSONL 文件路径（sft_trajectories.jsonl）")
     parser.add_argument("--scenarios", required=True,
                         help="场景数据源（目录或 JSON 文件，和 MCTS 运行时一致）")
+    parser.add_argument("--providers-config", default=None,
+                        help="多中转站配置文件（providers.json）")
     parser.add_argument("--model", default="gpt-5")
-    parser.add_argument("--api-key", required=True)
-    parser.add_argument("--api-base", required=True)
+    parser.add_argument("--api-key", default=None,
+                        help="单一 API key（不传 --providers-config 时必须）")
+    parser.add_argument("--api-base", default=None,
+                        help="单一 API base（不传 --providers-config 时必须）")
     parser.add_argument("--workers", type=int, default=10)
     args = parser.parse_args()
+
+    if not args.providers_config and not args.api_key:
+        parser.error("必须提供 --providers-config 或 --api-key")
 
     # 1. 加载场景（和 DBToolEnv 完全一样的顺序）
     logger.info("加载场景...")
