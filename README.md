@@ -89,9 +89,9 @@ pip install -r requirements-verl.txt  # verl 后端（需要 vLLM + Ray）
 
 #### Step 1: 维度组合蒸馏生成 knob 配置
 
-基于 `synthesis_dimensions.yaml` 中定义的 58 个场景模板（单瓶颈/组合瓶颈/应用场景/反模式/边界条件），按 **场景 × 负载类型 × 严重程度** 的笛卡尔积，让 LLM 系统性生成 knob 配置。每条配置同时生成对应的 `question` 字段（用户口吻的自然语言问题，基于场景 description + workload + severity 合成）。
+基于 `synthesis_dimensions.yaml` 中定义的 58 个场景模板（单瓶颈/组合瓶颈/应用场景/反模式/边界条件），按 **场景 × 负载类型 × 严重程度** 的笛卡尔积，让 LLM 系统性生成 knob 配置。
 
-默认 `--per-cell 5`，共生成 **~3,000 条**配置（含 question）。
+默认 `--per-cell 5`，共生成 **~3,000 条**配置。
 
 ```bash
 # 方式 1：多中转站轮询（推荐，高并发高吞吐）
@@ -125,7 +125,7 @@ python3 -m datasets.synthesis.scenarios.pipeline random-sample \
 
 #### Step 3: 统一真机采集（需要 PG）
 
-`collect` 支持 glob，自动合并所有 `knob_configs_*.json`（LLM 生成 + 随机采样），一次采集。`collect` 会将 `knob_configs_synth.json` 里已生成的 `question` 字段直接继承到 `ScenarioState`，无需额外处理。
+`collect` 支持 glob，自动合并所有 `knob_configs_*.json`（LLM 生成 + 随机采样），一次采集。
 
 ```bash
 # 后台执行
@@ -172,9 +172,7 @@ python3 -m cost_model.train \
 
 #### Step 5: SFT 轨迹合成（纯轨迹采样，推荐）
 
-对每个场景并行跑 N 次独立 rollout，Cost Model 计算 `improvement_pct`，保留提升 > 3% 的轨迹作为 SFT 正样本。每个 `ScenarioState` 的 `question` 字段已在 Step 1 synthesize 阶段生成完毕，无需额外处理。
-
-> **注意**：若使用 Step 1 之前采集的存量数据，需先运行迁移脚本为存量数据补充 question（见下文）。
+对每个场景并行跑 N 次独立 rollout，Cost Model 计算 `improvement_pct`，保留提升 > 3% 的轨迹作为 SFT 正样本。`question`（用户口吻的自然语言问题）在每次 rollout 前由 LLM **动态生成**，基于场景的 description + workload + knobs 推断用户可感知的症状，保证每条轨迹的 question 各不相同。
 
 ```bash
 python3 -m datasets.synthesis.trajectory.sampler \
@@ -218,20 +216,21 @@ python3 -m datasets.synthesis.mcts.run_search \
 - `contrastive_pairs.jsonl` — DPO/对比学习数据
 - `mcts_trees/` — 搜索树 debug 文件
 
-#### 存量数据迁移：补充 question 字段
+#### 存量数据迁移：为旧轨迹补充 question 字段
 
-仅针对 Step 1 重构前采集的 `collected_*.json` 数据（`source=llm_generated` 且 `question` 为空）。
+针对重构前 MCTS 产出的 `sft_trajectories.jsonl`（旧轨迹中的 question 含技术指标泄露），通过 `env_sample_idx` 精确匹配每条轨迹对应的 ScenarioState（含 knobs），重新生成无泄露的 question。
 
 ```bash
 python3 -m datasets.synthesis.scenarios.migrate_add_questions \
-    --input datasets/data/scenarios/ \
+    --input datasets/data/mcts/run_20260330_053333/sft_trajectories.jsonl \
+    --scenarios datasets/data/scenarios/ \
     --model gpt-5 \
     --api-key $OPENAI_API_KEY \
     --api-base $OPENAI_API_BASE \
     --workers 10
 ```
 
-脚本自动跳过 `random_sampled` 数据和已有 question 的条目，支持断点续跑。
+脚本按 `env_sample_idx` 分组，每个 unique 场景一次 LLM 调用批量生成 N 个 question（N=该场景的轨迹数），已有 question 的条目自动跳过（断点续跑）。
 
 #### Step 5.5: 评估集 knob 配置合成
 
@@ -298,30 +297,33 @@ bash scripts/train_grpo_verl.sh
 
 #### Step 8: 模型评估
 
-使用 Step 5.5 合成的评估集，通过 Cost Model 模拟环境，评估模型的调优能力。支持 API 和 vLLM 两种推理后端。
-
-> **前置**：评估场景的 `question` 字段必须已填充（运行迁移脚本），否则会报错。
+评估分两步：先用 sampler 生成 eval 轨迹，再用 `evaluate.run` 聚合报表。
 
 ```bash
-python3 -m evaluate.run \
-    --eval-scenarios datasets/data/scenarios/knob_configs_eval.json \
-    --scenarios datasets/data/scenarios/ \
-    --knob-space configs/knob_space.yaml \
+# Step 8a: 生成 eval 轨迹（sampler --num-rollouts 1）
+python3 -m datasets.synthesis.trajectory.sampler \
+    --scenarios datasets/data/scenarios/knob_configs_eval.json \
     --cost-model cost_model/checkpoints/v7_lgbm_dedup \
-    --api-key $OPENAI_API_KEY \
-    --api-base $OPENAI_API_BASE \
+    --output-dir eval_results/run_xxx/ \
+    --num-rollouts 1 \
+    --good-threshold 0.0 \
     --model gpt-5 \
-    --output eval_results/baseline_gpt5/ \
-    --max-turns 10 \
-    --parallel 8
+    --api-key $OPENAI_API_KEY \
+    --api-base $OPENAI_API_BASE
+
+# Step 8b: 聚合报表（不需要 LLM）
+python3 -m evaluate.run \
+    --eval-data eval_results/run_xxx/sft_trajectories.jsonl \
+    --output eval_results/run_xxx/
 ```
 
-评估指标输出到 `eval_results/` 下的 `report.json`，包含：
-- **avg_reward** — 平均 reward（Cost Model 预测的 TPS 提升比例）
-- **format_pass_rate** — 工具调用格式合规率
-- **effective_rate** — 有效工具调用率
+评估指标输出到 `eval_report.json`，包含：
+- **avg_improvement_pct** — 平均性能提升百分比
+- **improved_rate** — 提升 > 0% 的比例
+- **good_rate** — 提升 > 3% 的比例
+- **avg_reward** — 平均 reward
 - **avg_steps** — 平均交互轮数
-- **completion_rate** — 成功完成率（触发 `predict_performance`）
+- **predict_call_rate** — predict_performance 调用率
 
 
 
