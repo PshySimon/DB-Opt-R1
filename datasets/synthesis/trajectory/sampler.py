@@ -1,27 +1,49 @@
 """
-纯轨迹采样器
+轨迹采样器（sampler）
 
-对每个场景并行跑 N 次独立 episode，
-保留 improvement_pct > 3% 的轨迹作为 SFT 正样本。
+sampler 是数据合成的核心脚本，职责是生成 SFT 训练格式的数据。
 
-支持 --questions-only 模式：仅为场景生成 question，不跑 rollout，不需要 cost model。
+## 两种模式
 
-用法:
-    # 训练数据采样（需要 cost model）
+### 1. generate 模式 — 生成数据集
+
+  --mode generate --split train   生成训练集：动态生成 question + 跑 rollout + 按 threshold 过滤
+  --mode generate --split eval    生成评估集：动态生成 question，不跑 rollout，不需要 cost model
+
+### 2. eval 模式 — 评估模型
+
+  --mode eval --eval-questions <path>   读取固定 question，跑 rollout，保留所有轨迹
+
+## 用法
+
+    # 生成训练数据
     python3 -m datasets.synthesis.trajectory.sampler \\
-        --scenarios datasets/data/scenarios/ \\
-        --cost-model cost_model/checkpoints/v3 \\
-        --output-dir datasets/data/trajectory/ \\
+        --mode generate --split train \\
+        --scenarios datasets/data/scenarios/collected/ \\
+        --cost-model cost_model/checkpoints/v8_lgbm \\
+        --output-dir datasets/data/train/ \\
         --num-rollouts 8 \\
         --providers-config configs/providers.json \\
         --parallel 8
 
-    # 评估集只生成 question（不需要 cost model）
+    # 生成 eval question（不需要 cost model）
     python3 -m datasets.synthesis.trajectory.sampler \\
-        --scenarios datasets/data/scenarios/knob_configs_eval.json \\
-        --questions-only \\
+        --mode generate --split eval \\
+        --scenarios datasets/data/scenarios/collected/collected_eval.json \\
+        --output-dir datasets/data/eval/ \\
         --providers-config configs/providers.json \\
         --parallel 10
+
+    # 评估模型
+    python3 -m datasets.synthesis.trajectory.sampler \\
+        --mode eval \\
+        --eval-questions datasets/data/eval/eval_trajectories.jsonl \\
+        --scenarios datasets/data/scenarios/collected/collected_eval.json \\
+        --cost-model cost_model/checkpoints/v8_lgbm \\
+        --output-dir eval_results/sft_qwen3_4b/ \\
+        --model qwen3-4b-sft \\
+        --api-base http://localhost:8000/v1 \\
+        --api-key dummy
 """
 
 import argparse
@@ -85,7 +107,7 @@ def _get_improvement_pct(env) -> float:
 
 
 def _messages_to_sft(messages: list, improvement_pct: float,
-                     sample_idx: int) -> dict:
+                     sample_idx: int, question: str = "") -> dict:
     """将 rollout 的 message 列表转换为 SFT 格式，统一 role 命名。"""
     import re
     sft_messages = []
@@ -108,12 +130,15 @@ def _messages_to_sft(messages: list, improvement_pct: float,
             "content": "<think>调优流程已完成，以上为全部操作步骤。</think>",
         })
 
-    return {
+    result = {
         "messages": sft_messages,
         "reward": round(improvement_pct / 100.0, 4),
         "improvement_pct": round(improvement_pct, 2),
         "env_sample_idx": sample_idx,
     }
+    if question:
+        result["question"] = question
+    return result
 
 
 def sample_one_scenario(
@@ -126,20 +151,36 @@ def sample_one_scenario(
     num_rollouts: int,
     good_threshold: float,
     temperature: float,
+    generate_question: bool = True,
 ) -> list:
-    """对单个场景跑 num_rollouts 次 episode，返回通过阈值的 SFT 样本列表。"""
+    """对单个场景跑 num_rollouts 次 episode，返回通过阈值的 SFT 样本列表。
+
+    Args:
+        generate_question: True 时动态生成 question（generate/train 模式），
+                          False 时使用 scenario.question 预设值（eval 模式）。
+    """
     from environment.tools import DBToolEnv
     from core.agent import rollout
     scenario = scenarios[sample_idx]
     s_name = getattr(scenario, "name", f"env_{sample_idx}")
 
-    # 直接使用预先给定的 eval_scenarios 里面的问题
+    # ---- 获取 question ----
     preset_q = getattr(scenario, "question", "")
+
     if preset_q:
+        # 有预设 question（eval 模式注入的，或场景自带的）
         questions = [preset_q] * num_rollouts
+    elif generate_question:
+        # 没有预设，动态生成（generate/train 模式）
+        try:
+            from datasets.synthesis.scenarios.pipeline import generate_questions_for_state
+            questions = generate_questions_for_state(scenario, num_rollouts, llm_fn)
+        except Exception as e:
+            logger.warning(f"  [{s_name}] question 生成失败: {e}，使用默认问题")
+            questions = ["请帮我优化一下数据库的性能配置。"] * num_rollouts
     else:
-        # 如果既没有预设也没有问题库，就报错，因为 eval 必须对齐 SFT 数据集
-        logger.error(f"  [{s_name}] 缺少预设 question (必须配合 --sft-questions)")
+        # eval 模式但没有预设 question，报错
+        logger.error(f"  [{s_name}] eval 模式缺少预设 question")
         return []
 
     good_samples = []
@@ -174,7 +215,8 @@ def sample_one_scenario(
 
             if improvement_pct > threshold_pct:
                 good_samples.append(
-                    _messages_to_sft(messages, improvement_pct, sample_idx)
+                    _messages_to_sft(messages, improvement_pct, sample_idx,
+                                     question=questions[rollout_idx])
                 )
 
         except Exception as e:
@@ -211,31 +253,33 @@ def build_llm_fn(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="轨迹采样 / 场景 question 生成")
+    parser = argparse.ArgumentParser(description="轨迹采样器（生成数据集 / 评估模型）")
 
-    # 场景
+    # ---- 模式 ----
+    parser.add_argument("--mode", required=True, choices=["generate", "eval"],
+                        help="generate: 生成数据集; eval: 评估模型")
+    parser.add_argument("--split", default="train", choices=["train", "eval"],
+                        help="generate 模式下的子模式: train=生成训练集, eval=仅生成 question")
+    parser.add_argument("--eval-questions", default=None,
+                        help="eval 模式必需: 预生成的 question 文件（JSONL, 含 question + env_sample_idx）")
+
+    # ---- 场景 ----
     parser.add_argument("--scenarios", required=True,
                         help="ScenarioState 场景文件或目录")
-    parser.add_argument("--sft-questions", default=None,
-                        help="外部加载问题的 SFT JSONL 文件（常配合 evaluation 使用）")
     parser.add_argument("--knob-space", default="configs/knob_space.yaml")
     parser.add_argument("--cost-model", default=None,
-                        help="Cost Model checkpoint 目录（--questions-only 时不需要）")
+                        help="Cost Model checkpoint 目录（generate/eval 生成 question 时不需要）")
 
-    # 模式
-    parser.add_argument("--questions-only", action="store_true",
-                        help="仅生成 question 写回场景文件，不跑 rollout")
-
-    # LLM
+    # ---- LLM ----
     parser.add_argument("--providers-config", default=None,
                         help="多中转站配置文件（providers.json）")
     parser.add_argument("--model", default="gpt-5")
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--api-base", default=None)
     parser.add_argument("--api-max-concurrent", type=int, default=5,
-                        help="限制对单个 API 节点的底层并发数（用来保护外网 API 额度，跑本地 vLLM 时可通过参数手动调大）")
+                        help="限制对单个 API 节点的底层并发数")
 
-    # 采样参数
+    # ---- 采样参数 ----
     parser.add_argument("--num-rollouts", type=int, default=8,
                         help="每个场景的 rollout 次数")
     parser.add_argument("--good-threshold", type=float, default=0.03,
@@ -247,38 +291,70 @@ def main():
     parser.add_argument("--num-scenarios", type=int, default=0,
                         help="处理场景数（0=全量）")
 
-    # 输出
+    # ---- 输出 ----
     parser.add_argument("--output-dir", default="datasets/data/trajectory/",
                         help="输出目录")
-    parser.add_argument("--output-file", default="eval_trajectories.jsonl",
-                        help="输出的文件名，默认为 eval_trajectories.jsonl")
+    parser.add_argument("--output-file", default=None,
+                        help="输出文件名（默认: generate/train→sft_trajectories.jsonl, "
+                             "generate/eval→eval_trajectories.jsonl, eval→sft_trajectories.jsonl）")
     parser.add_argument("--parallel", type=int, default=4,
                         help="并发 worker 数")
 
+    # ---- 向后兼容（已废弃，解析但忽略） ----
+    parser.add_argument("--questions-only", action="store_true",
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--sft-questions", default=None,
+                        help=argparse.SUPPRESS)
+
     args = parser.parse_args()
 
-    if not args.questions_only and not args.cost_model:
-        parser.error("非 --questions-only 模式必须提供 --cost-model")
+    # ---- 向后兼容转换 ----
+    if args.questions_only:
+        logger.warning("--questions-only 已废弃，自动转为 --mode generate --split eval")
+        args.mode = "generate"
+        args.split = "eval"
+    if args.sft_questions and not args.eval_questions:
+        logger.warning("--sft-questions 已废弃，自动转为 --eval-questions")
+        args.eval_questions = args.sft_questions
+
+    # ---- 参数校验 ----
+    if args.mode == "eval" and not args.eval_questions:
+        parser.error("eval 模式必须提供 --eval-questions")
+    if args.mode == "eval" and not args.cost_model:
+        parser.error("eval 模式必须提供 --cost-model")
+    if args.mode == "generate" and args.split == "train" and not args.cost_model:
+        parser.error("generate/train 模式必须提供 --cost-model")
     if not args.providers_config and not args.api_key:
         parser.error("必须提供 --providers-config 或 --api-key")
 
-    # 构建 LLM 函数
+    # ---- 默认输出文件名 ----
+    if args.output_file is None:
+        if args.mode == "generate" and args.split == "eval":
+            args.output_file = "eval_trajectories.jsonl"
+        else:
+            args.output_file = "sft_trajectories.jsonl"
+
+    # ---- 构建 LLM 函数 ----
     llm_fn = build_llm_fn(args)
 
-    if args.questions_only:
-        _run_questions_only(args, llm_fn)
-    else:
-        _run_sampling(args, llm_fn)
+    # ---- 分派 ----
+    if args.mode == "generate" and args.split == "eval":
+        _run_generate_eval(args, llm_fn)
+    elif args.mode == "generate" and args.split == "train":
+        _run_generate_train(args, llm_fn)
+    elif args.mode == "eval":
+        _run_eval(args, llm_fn)
 
 
-def _run_questions_only(args, llm_fn):
-    """仅为场景生成 question，写回场景文件"""
+# ─────────────── generate/eval: 仅生成 question（不跑 rollout）─────────────
+
+def _run_generate_eval(args, llm_fn):
+    """generate --split eval: 为场景生成 question，不跑 rollout"""
     from datasets.synthesis.scenarios.pipeline import generate_questions_for_state
     import threading
 
     # 加载场景 JSON
-    scenario_path = args.scenarios
-    with open(scenario_path, "r", encoding="utf-8") as f:
+    with open(args.scenarios, "r", encoding="utf-8") as f:
         scenarios = json.load(f)
     logger.info(f"共 {len(scenarios)} 个场景")
 
@@ -313,9 +389,9 @@ def _run_questions_only(args, llm_fn):
                     fail[0] += 1
                 logger.warning(f"  [{idx}] 失败: {e}")
 
-    # 输出 SFT 格式 JSONL
+    # 输出 JSONL
     os.makedirs(args.output_dir, exist_ok=True)
-    out_path = os.path.join(args.output_dir, "eval_scenarios.jsonl")
+    out_path = os.path.join(args.output_dir, args.output_file)
     with open(out_path, "w", encoding="utf-8") as f:
         for i, s in enumerate(scenarios):
             q = s.get("question", "")
@@ -333,8 +409,27 @@ def _run_questions_only(args, llm_fn):
     logger.info(f"完成: {done[0]}/{len(pending)} 成功 → {out_path}")
 
 
-def _run_sampling(args, llm_fn):
-    """完整轨迹采样（需要 cost model）"""
+# ─────────────── generate/train: 生成训练集（动态 question + rollout）────────
+
+def _run_generate_train(args, llm_fn):
+    """generate --split train: 动态生成 question + 跑 rollout + 过滤"""
+    _run_rollout(args, llm_fn, generate_question=True)
+
+
+# ─────────────── eval: 评估模型（固定 question + rollout）────────────────────
+
+def _run_eval(args, llm_fn):
+    """eval 模式: 用固定 question 跑 rollout，保留所有轨迹"""
+    # eval 模式强制参数
+    args.num_rollouts = 1
+    args.good_threshold = -999.0
+    _run_rollout(args, llm_fn, generate_question=False)
+
+
+# ─────────────── 通用 rollout 执行 ───────────────────────────────────────────
+
+def _run_rollout(args, llm_fn, generate_question: bool):
+    """通用 rollout 逻辑，generate/train 和 eval 共用"""
     # 1. 加载 cost model
     logger.info("加载 Cost Model...")
     from cost_model.model import CostModel
@@ -353,12 +448,13 @@ def _run_sampling(args, llm_fn):
     scenarios = temp_env.scenarios
     logger.info(f"  可用场景: {len(scenarios)}")
 
-    # 注入 SFT JSONL 文件里的 preset questions
-    if args.sft_questions:
-        logger.info(f"加载预设 SFT 问题: {args.sft_questions}")
-        with open(args.sft_questions, "r", encoding="utf-8") as f:
+    # 3. eval 模式：注入预生成的 question
+    if not generate_question and args.eval_questions:
+        logger.info(f"加载 eval question: {args.eval_questions}")
+        with open(args.eval_questions, "r", encoding="utf-8") as f:
             for line in f:
-                if not line.strip(): continue
+                if not line.strip():
+                    continue
                 item = json.loads(line)
                 idx = item.get("env_sample_idx")
                 q = item.get("question")
@@ -369,16 +465,18 @@ def _run_sampling(args, llm_fn):
         logger.error("没有可用场景，退出")
         sys.exit(1)
 
-    # 3. 确定处理范围
+    # 4. 确定处理范围
     n = args.num_scenarios if args.num_scenarios > 0 else len(scenarios)
     n = min(n, len(scenarios))
     indices = list(range(n))
 
-    # 4. 输出文件
+    # 5. 输出文件
     os.makedirs(args.output_dir, exist_ok=True)
     sft_path = os.path.join(args.output_dir, args.output_file)
+
+    mode_label = "generate/train" if generate_question else "eval"
     logger.info(
-        f"开始采样: {n} 个场景, "
+        f"开始采样 [{mode_label}]: {n} 个场景, "
         f"每场景 {args.num_rollouts} 次 rollout, "
         f"threshold={args.good_threshold * 100:.0f}%, "
         f"并发={args.parallel}"
@@ -394,6 +492,7 @@ def _run_sampling(args, llm_fn):
                 idx, scenarios, cost_model, llm_fn,
                 args.knob_space, args.max_turns,
                 args.num_rollouts, args.good_threshold, args.temperature,
+                generate_question,
             ): idx
             for idx in indices
         }

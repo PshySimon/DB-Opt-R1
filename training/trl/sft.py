@@ -117,8 +117,68 @@ def main():
         peft_config=peft_config,
     )
 
-    print("开始 SFT 训练...")
+    # 显存 profiling
+    def print_memory_stats(tag: str):
+        if not torch.cuda.is_available():
+            return
+        alloc = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        peak = torch.cuda.max_memory_allocated() / 1024**3
+        print(f"\n{'='*60}")
+        print(f"  显存统计 [{tag}]")
+        print(f"{'='*60}")
+        print(f"  Allocated:  {alloc:.2f} GB")
+        print(f"  Reserved:   {reserved:.2f} GB")
+        print(f"  Peak:       {peak:.2f} GB")
+        print(f"{'='*60}")
+
+    def print_param_stats(model):
+        total, trainable = 0, 0
+        frozen_bytes, trainable_bytes = 0, 0
+        for p in model.parameters():
+            n = p.numel()
+            total += n
+            b = n * p.element_size()
+            if p.requires_grad:
+                trainable += n
+                trainable_bytes += b
+            else:
+                frozen_bytes += b
+
+        # 可训练参数的优化器开销: master(fp32) + m(fp32) + v(fp32) = 12 bytes/param
+        optim_bytes = trainable * 12
+        grad_bytes = trainable * 2  # bf16 梯度
+
+        print(f"\n{'='*60}")
+        print(f"  参数 & 显存拆解（理论值）")
+        print(f"{'='*60}")
+        print(f"  总参数:           {total/1e6:>10.1f} M")
+        print(f"  可训练参数:       {trainable/1e6:>10.1f} M  ({trainable/total:.2%})")
+        print(f"{'─'*60}")
+        print(f"  冻结模型 (bf16):  {frozen_bytes/1024**3:>10.2f} GB")
+        print(f"  可训练参数 (bf16):{trainable_bytes/1024**3:>10.2f} GB")
+        print(f"  梯度 (bf16):      {grad_bytes/1024**3:>10.2f} GB")
+        print(f"  优化器状态 (fp32):{optim_bytes/1024**3:>10.2f} GB")
+        print(f"{'─'*60}")
+        subtotal = frozen_bytes + trainable_bytes + grad_bytes + optim_bytes
+        print(f"  小计 (不含激活):  {subtotal/1024**3:>10.2f} GB")
+        print(f"{'='*60}")
+
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+        print_param_stats(trainer.model)
+        print_memory_stats("训练前")
+
+    print("\n开始 SFT 训练...")
     trainer.train()
+
+    if torch.cuda.is_available():
+        print_memory_stats("训练后")
+        pre_alloc = sum(p.numel() * p.element_size() for p in trainer.model.parameters()) / 1024**3
+        peak = torch.cuda.max_memory_allocated() / 1024**3
+        print(f"\n  → 激活值 + 其他开销 ≈ {peak - pre_alloc:.2f} GB (峰值 - 参数)")
+        print(f"\n{torch.cuda.memory_summary()}")
+
     trainer.save_model(args.output_dir)
     print(f"✅ 训练完成，模型保存到 {args.output_dir}")
 

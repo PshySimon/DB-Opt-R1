@@ -159,6 +159,39 @@ echo $! > logs/scenarios/bo.pid
 
 BO 产出的扰动变体（`source=bo_perturb`）需要再走一遍 `collect` 采集真实 TPS。
 
+#### Step 3.5: 增量提取 knob 配置（从 LLM 轨迹中）
+
+从 eval / 训练过程的 SFT 轨迹中提取 LLM 实际预测的 knob 配置，作为 cost model 增量训练数据的来源。
+
+**数据流**：
+```
+sft_trajectories.jsonl → extract_knobs → knob_configs_incremental_v1.json → pipeline collect → collected_incremental_v1.json
+```
+
+**数据来源**（输入的轨迹文件）：
+
+| 文件 | 条数 | 说明 |
+|------|------|------|
+| `eval_results/sft_qwen3_4b_cleaned/sft_trajectories.jsonl` | ~578 | SFT 模型 eval 输出 |
+| `datasets/data/train/sft_trajectories_cleaned.jsonl` | 1583 | GPT-5 生成的训练轨迹 |
+
+**提取命令**：
+
+```bash
+python3 -m datasets.synthesis.trajectory.extract_knobs \
+    --trajectories eval_results/sft_qwen3_4b_cleaned/sft_trajectories.jsonl \
+                   datasets/data/train/sft_trajectories_cleaned.jsonl \
+    --scenarios datasets/data/scenarios/collected/ \
+    --output datasets/data/scenarios/knobs/knob_configs_incremental_v1.json
+```
+
+输出 `knob_configs_incremental_v1.json`，每条记录包含：
+- `knobs` — LLM 预测并累积的最终 knob 配置
+- `hardware` / `workload` — 关联回原始场景的硬件和负载信息
+- `source` — `llm_trajectory`
+
+> **注意**：提取的配置需要走 `pipeline collect` 在真机上采集真实 TPS 后，才能用于 cost model 训练。
+
 #### Step 4: Cost Model 训练
 
 使用全量 `collected.json` 数据训练 Cost Model。
@@ -169,30 +202,75 @@ python3 -m cost_model.train \
     --output cost_model/checkpoints/v1
 ```
 
-#### Step 5: SFT 轨迹合成（纯轨迹采样，推荐）
+#### Step 5: SFT 轨迹合成（`sampler`）
 
-对每个场景并行跑 N 次独立 rollout，Cost Model 计算 `improvement_pct`，保留提升 > 3% 的轨迹作为 SFT 正样本。`question`（用户口吻的自然语言问题）在每次 rollout 前由 LLM **动态生成**，基于场景的 description + workload + knobs 推断用户可感知的症状，保证每条轨迹的 question 各不相同。
+`sampler` 是数据合成与评估的核心脚本。通过 `--mode` 和 `--split` 控制行为：
+
+| 命令 | 作用 | 需要 cost model | 生成 question |
+|------|------|:-:|:-:|
+| `--mode generate --split train` | 生成训练集：动态 question + rollout + 过滤 | ✅ | ✅ |
+| `--mode generate --split eval` | 生成评估集：动态 question，不跑 rollout | ❌ | ✅ |
+| `--mode eval --eval-questions <path>` | 评估模型：固定 question + rollout，保留全部 | ✅ | ❌ |
+
+**生成训练数据** (`--mode generate --split train`)
+
+对每个场景并行跑 N 次独立 rollout，question 由 LLM 动态生成，保留 improvement > threshold 的轨迹。
 
 ```bash
 python3 -m datasets.synthesis.trajectory.sampler \
+    --mode generate --split train \
     --scenarios datasets/data/scenarios/collected/ \
-    --cost-model cost_model/checkpoints/v7_lgbm_dedup \
+    --cost-model cost_model/checkpoints/v8_lgbm \
     --output-dir datasets/data/train/ \
     --num-rollouts 8 \
     --good-threshold 0.03 \
-    --temperature 0.7 \
     --parallel 8 \
     --providers-config configs/providers.json
 ```
 
+输出：`datasets/data/train/sft_trajectories.jsonl`，每条记录包含：
+- `messages` — 完整多轮对话轨迹（system/user/assistant/tool）
+- `question` — 动态生成的用户问题
+- `reward` / `improvement_pct` — 该轨迹的 reward 值
+- `env_sample_idx` — 对应的场景索引
+
+**生成评估集 question** (`--mode generate --split eval`)
+
+仅为 eval 场景生成用户问题，不需要 cost model，不跑 agent。
+
+```bash
+python3 -m datasets.synthesis.trajectory.sampler \
+    --mode generate --split eval \
+    --scenarios datasets/data/scenarios/collected/collected_eval.json \
+    --output-dir datasets/data/eval/ \
+    --providers-config configs/providers.json \
+    --parallel 10
+```
+
+输出：`datasets/data/eval/eval_trajectories.jsonl`，每条记录包含：
+- `messages` — 仅 2 条（system + user），无轨迹
+- `question` — 用户问题
+- `env_sample_idx` — 对应 `collected_eval.json` 中的场景索引
+
+**数据文件对照表**
+
+| 文件 | 来源 | 内容 | 用途 |
+|------|------|------|------|
+| `datasets/data/train/sft_trajectories.jsonl` | `generate --split train` | 完整轨迹 + question | SFT 训练 |
+| `datasets/data/eval/eval_trajectories.jsonl` | `generate --split eval` | 仅 question | 评估时注入 |
+| `datasets/data/scenarios/collected/collected_eval.json` | 真机采集 | 场景快照（无 question） | 评估场景来源 |
+
+**参数说明**
+
 | 参数 | 说明 | 默认 |
 |------|------|------|
-| `--num-rollouts` | 每场景 rollout 次数 | 8 |
-| `--good-threshold` | SFT 正样本阈值（improvement_pct / 100） | 0.03 (3%) |
+| `--mode` | `generate` 生成数据集 / `eval` 评估模型 | 必选 |
+| `--split` | generate 模式子类型：`train` / `eval` | train |
+| `--eval-questions` | eval 模式必需：预生成的 question 文件 | — |
+| `--num-rollouts` | 每场景 rollout 次数（eval 模式强制 1） | 8 |
+| `--good-threshold` | 正样本阈值（eval 模式强制 -999.0） | 0.03 |
 | `--temperature` | LLM 采样温度 | 0.7 |
 | `--parallel` | 并发 worker 数 | 4 |
-
-输出：`datasets/data/train/sft_trajectories.jsonl`
 
 #### Step 5（备选）: MCTS 轨迹合成（保留为对比基线）
 
@@ -293,22 +371,41 @@ bash scripts/train_grpo_verl.sh
 
 #### Step 8: 模型评估
 
-评估分两步：先用 sampler 生成 eval 轨迹，再用 `evaluate.run` 聚合报表。
+评估复用 sampler 的 `--mode eval`，用待评估模型在 eval 场景上跑 agent，生成轨迹后聚合指标。
+
+**数据流**：
+```
+collected_eval.json (场景)  ──┐
+                               ├→ sampler --mode eval ──→ sft_trajectories.jsonl ──→ evaluate.run ──→ eval_report.json
+eval_trajectories.jsonl (question) ─┘
+```
+
+**前置条件**：
+- `datasets/data/eval/eval_trajectories.jsonl` 已由 `--mode generate --split eval` 生成
+- 待评估模型已部署为 OpenAI-compatible API（vLLM / 中转站均可）
+
+**Step 8a: 用待评估模型跑 eval 轨迹**
+
+eval 模式自动强制 `--num-rollouts 1` 和 `--good-threshold -999.0`，无需手动指定。
 
 ```bash
-# Step 8a: 生成 eval 轨迹（sampler --num-rollouts 1）
 python3 -m datasets.synthesis.trajectory.sampler \
+    --mode eval \
+    --eval-questions datasets/data/eval/eval_trajectories.jsonl \
     --scenarios datasets/data/scenarios/collected/collected_eval.json \
-    --cost-model cost_model/checkpoints/v7_lgbm_dedup \
-    --output-dir eval_results/run_xxx/ \
-    --num-rollouts 1 \
-    --good-threshold 0.0 \
-    --providers-config configs/providers.json
+    --cost-model cost_model/checkpoints/v8_lgbm \
+    --output-dir eval_results/<模型名>/ \
+    --model <served-model-name> \
+    --api-base <vLLM或中转站地址>/v1 \
+    --api-key <api-key>
+```
 
-# Step 8b: 聚合报表（不需要 LLM）
+**Step 8b: 聚合报表（不需要 LLM）**
+
+```bash
 python3 -m evaluate.run \
-    --eval-data eval_results/run_xxx/sft_trajectories.jsonl \
-    --output eval_results/run_xxx/
+    --eval-data eval_results/<模型名>/sft_trajectories.jsonl \
+    --output eval_results/<模型名>/
 ```
 
 评估指标输出到 `eval_report.json`，包含：
