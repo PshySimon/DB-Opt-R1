@@ -55,11 +55,13 @@ class MultiProviderLLMClient:
     """多中转站 LLM 客户端，采用基于响应速度的加权随机轮询，支持指数退避冷却，并每 60 秒热更新配置文件"""
     
     def __init__(self, target_model: str, providers_config: str = None, 
-                 single_api_key: str = None, single_api_base: str = None):
+                 single_api_key: str = None, single_api_base: str = None,
+                 api_max_concurrent: int = 5):
         self.target_model = target_model
         self.providers_config = providers_config
         self.single_api_key = single_api_key
         self.single_api_base = single_api_base
+        self.api_max_concurrent = api_max_concurrent
         
         self.stats: List[ClientStats] = []
         self._stats_lock = threading.RLock()
@@ -134,8 +136,6 @@ class MultiProviderLLMClient:
                 with open(self.providers_config, "r", encoding="utf-8") as f:
                     all_providers = json.load(f)
                 for p in all_providers:
-                    if p.get("available", True) is False:
-                        continue
                     providers.append(p)
                 if not providers and not is_reload:
                     logger.error(f"配置文件 {self.providers_config} 为空！")
@@ -152,7 +152,7 @@ class MultiProviderLLMClient:
                 "api_key": self.single_api_key,
                 "api_base": self.single_api_base,
                 "model": self.target_model,
-                "max_concurrent": 5
+                "max_concurrent": self.api_max_concurrent
             }]
         else:
             if not is_reload:
@@ -262,8 +262,14 @@ class MultiProviderLLMClient:
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature,
                     max_tokens=2048,
+                    stop=["</tool_call>"]
                 )
                 res_content = response.choices[0].message.content
+                
+                # 由于设置了 stop 参数，API 返回结果会正好截断在匹配部位且不包含它，这里我们需要手补上去，确保 parser 能够提亮闭合标签
+                if res_content and "<tool_call>" in res_content and "</tool_call>" not in res_content:
+                    res_content += "</tool_call>"
+                    
                 elapsed = time.time() - t0
                 
                 if not res_content:

@@ -1,6 +1,6 @@
 """
 Cost Model 训练脚本 — Deep Ensemble (多 MLP)
-用法: python3 -m cost_model.train --data datasets/data/scenarios/collected.json
+用法: python3 -m cost_model.train --data datasets/data/scenarios/collected/
 """
 
 import argparse

@@ -224,23 +224,24 @@ def compute_score_answer(
 
     # Cost Model 预测
     try:
-        baseline_tps = ground_truth.get("baseline_tps", 0)
+        hardware = ground_truth.get("hardware", {})
+        
+        from core.db.knob_space import KnobSpace
+        ks = KnobSpace("configs/knob_space.yaml")
+        default_knobs = ks.get_default_config()
+        baseline_tps = cost_model.predict(default_knobs, hardware)
+
         if baseline_tps <= 0:
             return 0.0
 
-        hardware = ground_truth.get("hardware", {})
         predicted_tps = cost_model.predict(knobs, hardware)
 
-        # 计算改善比例
+        # 计算改善比例，cap 到 [0, 2.0]（200%）
         improvement = (predicted_tps - baseline_tps) / baseline_tps
+        improvement = min(2.0, max(0.0, improvement))
 
-        # 非对称缩放
-        if improvement >= 0:
-            # 正向：log 压缩，避免大改善爆炸
-            score = math.log(1 + improvement)
-        else:
-            # 负向：clip 到 -1，避免大劣化主导梯度
-            score = max(-1.0, improvement)
+        # log 压缩，避免大改善爆炸
+        score = math.log(1 + improvement)
 
         return score
 

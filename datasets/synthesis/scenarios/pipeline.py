@@ -956,7 +956,7 @@ if __name__ == "__main__":
     syn.add_argument("--dimensions", default="configs/synthesis_dimensions.yaml",
                      help="维度定义文件")
     syn.add_argument("--knob-space", default="configs/knob_space.yaml")
-    syn.add_argument("--output", default="datasets/data/scenarios/knob_configs_synth.json")
+    syn.add_argument("--output", default="datasets/data/scenarios/knobs/knob_configs_synth.json")
     syn.add_argument("--per-cell", type=int, default=5, help="每个维度格子生成几条配置")
     syn.add_argument("--model", default="gpt-5")
     syn.add_argument("--api-key", default=None)
@@ -968,7 +968,7 @@ if __name__ == "__main__":
     # random-sample（随机采样 knob 配置）
     rs = subparsers.add_parser("random-sample", help="随机采样 knob 配置（Cost Model 训练数据）")
     rs.add_argument("--knob-space", default="configs/knob_space.yaml")
-    rs.add_argument("--output", default="datasets/data/scenarios/knob_configs_random.json")
+    rs.add_argument("--output", default="datasets/data/scenarios/knobs/knob_configs_random.json")
     rs.add_argument("--count", type=int, default=200, help="采样数量")
     rs.add_argument("--strategy", default="mixed",
                     choices=["random", "near_default", "lhs", "mixed"],
@@ -976,9 +976,9 @@ if __name__ == "__main__":
 
     # collect（统一真机采集）
     col = subparsers.add_parser("collect", help="统一真机采集（支持 glob 合并多个 knob_configs_*.json）")
-    col.add_argument("--input", default="datasets/data/scenarios/knob_configs_*.json",
+    col.add_argument("--input", default="datasets/data/scenarios/knobs/knob_configs_*.json",
                      help="输入 JSON 路径，支持 glob 模式")
-    col.add_argument("--output", default="datasets/data/scenarios/collected.json")
+    col.add_argument("--output", default="datasets/data/scenarios/collected/collected.json")
     col.add_argument("--config", default="configs/knob_space.yaml")
     col.add_argument("--host", default="127.0.0.1")
     col.add_argument("--port", type=int, default=5432)
@@ -992,9 +992,9 @@ if __name__ == "__main__":
     # bo-search（贝叶斯优化搜索好配置）
     bo = subparsers.add_parser("bo-search", help="贝叶斯优化搜索好配置（需要 PG）")
     bo.add_argument("--knob-space", default="configs/knob_space.yaml")
-    bo.add_argument("--collected", default="datasets/data/scenarios/collected*.json",
+    bo.add_argument("--collected", default="datasets/data/scenarios/collected/collected*.json",
                     help="已有 collected 数据（glob），用于热启动")
-    bo.add_argument("--output", default="datasets/data/scenarios/collected_bo.json")
+    bo.add_argument("--output", default="datasets/data/scenarios/collected/collected_bo.json")
     bo.add_argument("--rounds", type=int, default=30, help="每种负载的 BO 轮数")
     bo.add_argument("--workloads", default="read_only,write_heavy,mixed,high_concurrency",
                     help="逗号分隔的负载类型列表")

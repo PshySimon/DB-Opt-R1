@@ -96,7 +96,6 @@ def process_scenarios(scenarios: list) -> list:
         # ground_truth 用于 reward 计算
         ground_truth = {
             "scenario_idx": idx,
-            "baseline_tps": scenario.get("workload", {}).get("tps_current", 0),
             "hardware": scenario.get("hardware", {}),
         }
 

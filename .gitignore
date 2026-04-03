@@ -4,15 +4,17 @@ __pycache__/
 *.egg-info/
 *.egg
 
-# 模型权重 & 训练产物
-cost_model/checkpoints/
+# 训练产物
 outputs/
+model_save/
 
 # 合成数据（可重新生成）
 datasets/data/mcts/*/sft_trajectories.jsonl
 datasets/data/mcts/*/contrastive_pairs.jsonl
 datasets/data/mcts/*/mcts_trees/
-datasets/data/scenarios/collected_featurize_*.json
+
+# 大文件（>100MB，GitHub 限制）
+datasets/data/scenarios/collected/collected_featurize_*.json
 
 # 评测结果
 eval_results/

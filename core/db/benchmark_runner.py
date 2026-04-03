@@ -27,9 +27,12 @@ def _cleanup_handler(signum, frame):
     raise SystemExit(1)
 
 
-# 注册信号处理
-signal.signal(signal.SIGTERM, _cleanup_handler)
-signal.signal(signal.SIGINT, _cleanup_handler)
+import threading
+
+# 注册信号处理 (确保只在主线程运行)
+if threading.current_thread() == threading.main_thread():
+    signal.signal(signal.SIGTERM, _cleanup_handler)
+    signal.signal(signal.SIGINT, _cleanup_handler)
 
 
 class BenchmarkRunner:

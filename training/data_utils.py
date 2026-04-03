@@ -103,7 +103,6 @@ def load_grpo_prompts(scenario_dir: str, system_prompt: str = None) -> List[dict
             ],
             "ground_truth": {
                 "hardware": hw,
-                "baseline_tps": s.get("workload", {}).get("tps_current", 0),
                 "knobs": s.get("knobs", {}),
             },
         })

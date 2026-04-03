@@ -128,7 +128,7 @@ knobs:
     type: integer
     min: 0
     max: 200
-    default: 0
+    default: 1
     restart: false
 
   max_parallel_workers_per_gather:
@@ -157,7 +157,7 @@ knobs:
     type: float
     min: 0.1
     max: 0.9
-    default: 0.5
+    default: 0.9
     restart: false
 
   max_wal_size:

@@ -57,6 +57,7 @@ class ScenarioState:
         """从 JSON 文件加载"""
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
+            
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
     def to_json(self, path: str):

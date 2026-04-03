@@ -1,0 +1,20 @@
+{
+  "r2": 0.9140824420277534,
+  "spearman": 0.9700850658783857,
+  "mape": 0.3028570104198173,
+  "wape": 0.268927186818664,
+  "log_mae": 0.31105850241007305,
+  "fail_recall": NaN,
+  "model_type": "mlp",
+  "n_train": 10268,
+  "n_features": 122,
+  "split_by_source": false,
+  "n_models": 5,
+  "hidden_dims": [
+    512,
+    256,
+    128,
+    64
+  ],
+  "n_test": 2568
+}

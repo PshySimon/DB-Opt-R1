@@ -220,6 +220,9 @@ class PGConfigurator:
 
     def _is_systemd_managed(self) -> bool:
         """检测 PostgreSQL 是否由 systemd 管理"""
+        import os
+        if not os.path.isdir("/run/systemd/system"):
+            return False
         try:
             result = subprocess.run(
                 ["systemctl", "is-active", "postgresql"],

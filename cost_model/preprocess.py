@@ -80,7 +80,7 @@ class KnobPreprocessor:
 
     用法：
         prep = KnobPreprocessor("configs/knob_space.yaml")
-        X, y, meta = prep.fit_transform("datasets/data/scenarios/collected.json")
+        X, y, meta = prep.fit_transform("datasets/data/scenarios/collected/collected.json")
         prep.save("cost_model/checkpoints/v1/")
 
         # 推理

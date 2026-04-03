@@ -1,0 +1,20 @@
+{
+  "r2": 0.8384701292651091,
+  "spearman": 0.9185014470746574,
+  "mape": 0.6668192126583133,
+  "wape": 0.619121661141862,
+  "log_mae": 0.5983549281796292,
+  "fail_recall": NaN,
+  "model_type": "deep_ensemble",
+  "n_models": 5,
+  "hidden_dims": [
+    256,
+    128,
+    64
+  ],
+  "n_train": 8604,
+  "n_features": 66,
+  "split_by_source": false,
+  "n_test": 2152,
+  "uncertainty_mean": 0.24865142742340304
+}

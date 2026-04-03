@@ -41,8 +41,8 @@ def compute_eval_metrics(trajectories: list) -> dict:
     if not trajectories:
         return {"error": "无轨迹数据"}
 
-    improvements = [t.get("improvement_pct", 0.0) for t in trajectories]
-    rewards = [t.get("reward", 0.0) for t in trajectories]
+    improvements = [max(0, t.get("improvement_pct", 0.0)) for t in trajectories]
+    rewards = [max(0, t.get("reward", 0.0)) for t in trajectories]
 
     def steps(t):
         msgs = t.get("messages", [])

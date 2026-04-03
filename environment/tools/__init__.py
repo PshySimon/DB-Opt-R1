@@ -110,10 +110,17 @@ class DBToolEnv(ToolEnv):
             for s in scenarios:
                 if getattr(s, 'source', 'llm_generated') != 'llm_generated':
                     continue
-                tps = float(getattr(s, 'workload', {}).get('tps_current', 0) or 0)
-                # TPS 100-5000：有优化空间（不是 crash 也不是已接近最优）
-                if 100 <= tps <= 5000:
+                
+                wl = getattr(s, 'workload', {})
+                if isinstance(wl, dict):
+                    tps = float(wl.get('tps_current', 0) or 0)
+                    # TPS 100-5000：有优化空间（不是 crash 也不是已接近最优）
+                    if 100 <= tps <= 5000:
+                        filtered.append(s)
+                else:
+                    # 还未跑过 benchmark 的数据（比如新生成的 eval set）没有 TPS，默认保留
                     filtered.append(s)
+
             if len(filtered) < len(scenarios):
                 logger.info(f"  过滤: {len(scenarios)} → {len(filtered)} 条 (llm_generated, TPS 100-5000)")
             return filtered
@@ -188,8 +195,12 @@ class DBToolEnv(ToolEnv):
         for k, v in scenario.knobs.items():
             self.env_state[f"knob_{k}"] = v
         if scenario.workload:
-            self.env_state["workload"] = scenario.workload.get("type", "mixed")
-            self.env_state["tps"] = scenario.workload.get("tps_current", 0)
+            if isinstance(scenario.workload, dict):
+                self.env_state["workload"] = scenario.workload.get("type", "mixed")
+                self.env_state["tps"] = scenario.workload.get("tps_current", 0)
+            else:
+                self.env_state["workload"] = str(scenario.workload)
+                self.env_state["tps"] = 0
 
         # 保存原始 knob
         self._original_knobs = {k: v for k, v in self.env_state.items() if k.startswith("knob_")}

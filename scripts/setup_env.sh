@@ -165,7 +165,7 @@ fi
 
 # 启动 PostgreSQL（兼容 systemd 和 pg_ctl）
 echo "  → 启动 PostgreSQL..."
-if command -v systemctl &>/dev/null && systemctl list-unit-files 'postgresql*' &>/dev/null 2>&1; then
+if [ -d /run/systemd/system ] && command -v systemctl &>/dev/null; then
     # systemd 可用且有 postgresql 服务单元（包括 degraded 状态）
     echo "  → systemd 模式"
     $SUDO systemctl restart postgresql
