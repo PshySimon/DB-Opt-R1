@@ -518,22 +518,26 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
     with open(dimensions_path, "r", encoding="utf-8") as f:
         dims = yaml.safe_load(f)
 
-    hardware = dims["hardware"]
+    hardware_list = dims["hardware"]
+    # 向后兼容：如果 hardware 是单个 dict，包装为列表
+    if isinstance(hardware_list, dict):
+        hardware_list = [hardware_list]
     workloads = dims["workloads"]
     severities = dims["severities"]
     scenarios = dims["scenarios"]
 
-    # 构建任务列表
+    # 构建任务列表（场景 × 负载 × 严重程度 × 硬件 × 变体）
     tasks = []
     for scenario in scenarios:
         severity_list = severities if scenario.get("severity_varies", True) else ["fixed"]
         for workload in workloads:
             for severity in severity_list:
-                for v in range(per_cell):
-                    tasks.append((scenario, workload, severity, v))
+                for hw in hardware_list:
+                    for v in range(per_cell):
+                        tasks.append((scenario, workload, severity, hw, v))
 
     logger.info(f"场景: {len(scenarios)}, 负载: {len(workloads)}, "
-                f"总任务: {len(tasks)}")
+                f"硬件: {len(hardware_list)}, 总任务: {len(tasks)}")
 
     # 加载已有结果（断点续跑）
     results = []
@@ -543,16 +547,17 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
         with open(output_path, "r", encoding="utf-8") as f:
             results = json.load(f)
         existing_keys = {(e["name"], e.get("variant", 0),
-                          e.get("workload", ""), e.get("severity", ""))
+                          e.get("workload", ""), e.get("severity", ""),
+                          e.get("hardware_hint", {}).get("name", ""))
                          for e in results}
         logger.info(f"已有 {len(results)} 条，断点续跑")
 
     # 过滤已完成的
     pending = []
-    for scenario, workload, severity, v in tasks:
-        key = (scenario["name"], v, workload, severity)
+    for scenario, workload, severity, hw, v in tasks:
+        key = (scenario["name"], v, workload, severity, hw.get("name", ""))
         if key not in existing_keys:
-            pending.append((scenario, workload, severity, v))
+            pending.append((scenario, workload, severity, hw, v))
 
     logger.info(f"待生成: {len(pending)} 条")
     if not pending:
@@ -579,9 +584,10 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
             json.dump(results, f, ensure_ascii=False, indent=2)
 
     def _process_one(args):
-        scenario, workload, severity, v = args
+        scenario, workload, severity, hw, v = args
         name = scenario["name"]
-        label = f"{name}_w{workload}_s{severity}_v{v}"
+        hw_name = hw.get("name", "default")
+        label = f"{name}_w{workload}_s{severity}_h{hw_name}_v{v}"
 
         try:
             severity_desc = SEVERITY_MEANINGS.get(severity, "固定配置，不区分严重程度")
@@ -592,9 +598,9 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
                 severity_desc=severity_desc,
                 severity_meaning=severity_desc,
                 workload=workload,
-                cpu=hardware["cpu_count"],
-                memory=hardware["total_memory_gb"],
-                disk=hardware["disk_type"],
+                cpu=hw["cpu_count"],
+                memory=hw["total_memory_gb"],
+                disk=hw["disk_type"],
                 knob_hints=_format_knob_hints(scenario),
                 knob_space_summary=knob_space.summarize_for_prompt(),
             )
@@ -622,7 +628,7 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
                 "workload": workload,
                 "severity": severity,
                 "knobs": valid,
-                "hardware_hint": hardware,
+                "hardware_hint": hw,
             }
 
             with lock:

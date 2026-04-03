@@ -1,10 +1,22 @@
 # 合成维度定义
-# 通过 瓶颈场景 × 负载类型 × 严重程度 的笛卡尔积，让 LLM 系统性生成 knob 配置
+# 通过 瓶颈场景 × 负载类型 × 严重程度 × 硬件规格 的笛卡尔积，让 LLM 系统性生成 knob 配置
+# 硬件规格对应真实机器，后续可在对应机器上验证
 
 hardware:
-  cpu_count: 8
-  total_memory_gb: 16
-  disk_type: HDD
+  - name: 8c16g_hdd
+    cpu_count: 8
+    total_memory_gb: 16
+    disk_type: HDD
+
+  - name: 8c16g_ssd
+    cpu_count: 8
+    total_memory_gb: 16
+    disk_type: SSD
+
+  - name: 4c8g_ssd
+    cpu_count: 4
+    total_memory_gb: 8
+    disk_type: SSD
 
 workloads:
   - read_only
