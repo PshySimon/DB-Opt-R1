@@ -159,39 +159,6 @@ echo $! > logs/scenarios/bo.pid
 
 BO 产出的扰动变体（`source=bo_perturb`）需要再走一遍 `collect` 采集真实 TPS。
 
-#### Step 3.5: 增量提取 knob 配置（从 LLM 轨迹中）
-
-从 eval / 训练过程的 SFT 轨迹中提取 LLM 实际预测的 knob 配置，作为 cost model 增量训练数据的来源。
-
-**数据流**：
-```
-sft_trajectories.jsonl → extract_knobs → knob_configs_incremental_v1.json → pipeline collect → collected_incremental_v1.json
-```
-
-**数据来源**（输入的轨迹文件）：
-
-| 文件 | 条数 | 说明 |
-|------|------|------|
-| `eval_results/sft_qwen3_4b_cleaned/sft_trajectories.jsonl` | ~578 | SFT 模型 eval 输出 |
-| `datasets/data/train/sft_trajectories_cleaned.jsonl` | 1583 | GPT-5 生成的训练轨迹 |
-
-**提取命令**：
-
-```bash
-python3 -m datasets.synthesis.trajectory.extract_knobs \
-    --trajectories eval_results/sft_qwen3_4b_cleaned/sft_trajectories.jsonl \
-                   datasets/data/train/sft_trajectories_cleaned.jsonl \
-    --scenarios datasets/data/scenarios/collected/ \
-    --output datasets/data/scenarios/knobs/knob_configs_incremental_v1.json
-```
-
-输出 `knob_configs_incremental_v1.json`，每条记录包含：
-- `knobs` — LLM 预测并累积的最终 knob 配置
-- `hardware` / `workload` — 关联回原始场景的硬件和负载信息
-- `source` — `llm_trajectory`
-
-> **注意**：提取的配置需要走 `pipeline collect` 在真机上采集真实 TPS 后，才能用于 cost model 训练。
-
 #### Step 4: Cost Model 训练
 
 使用全量 `collected.json` 数据训练 Cost Model。
