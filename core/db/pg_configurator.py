@@ -163,9 +163,10 @@ class PGConfigurator:
             ['killall', '-9', 'postgres'],
         ]:
             try:
-                self._sudo_run(stop_cmd, capture_output=True, timeout=10)
-            except Exception:
-                pass
+                r = self._sudo_run(stop_cmd, capture_output=True, text=True, timeout=10)
+                logger.info(f"force_reset: {' '.join(stop_cmd)} → rc={r.returncode}, stderr={r.stderr.strip()}")
+            except Exception as e:
+                logger.warning(f"force_reset: {' '.join(stop_cmd)} → 异常: {e}")
         time.sleep(2)
 
         # 2. 清空 auto.conf
@@ -174,10 +175,12 @@ class PGConfigurator:
             "/var/lib/postgresql/*/main/postgresql.auto.conf",
             f"{self.pg_data_dir}/postgresql.auto.conf" if self.pg_data_dir else "",
         ]
+        found_any = False
         for pattern in auto_conf_patterns:
             if not pattern:
                 continue
             for path in glob.glob(pattern):
+                found_any = True
                 try:
                     result = self._sudo_run(
                         ['truncate', '-s', '0', path],
@@ -189,6 +192,8 @@ class PGConfigurator:
                         logger.info(f"已清空 {path}")
                 except Exception as e:
                     logger.error(f"清空 {path} 失败: {e}")
+        if not found_any:
+            logger.error(f"force_reset: 未找到任何 auto.conf 文件! patterns={auto_conf_patterns}")
 
     def verify_config(self, knob_config: dict) -> dict:
         """验证配置是否已生效，返回实际值"""
