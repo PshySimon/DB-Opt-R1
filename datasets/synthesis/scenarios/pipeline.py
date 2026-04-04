@@ -301,11 +301,61 @@ def collect_scenarios(input_path: str, output_path: str,
     logger.info("开始 IO 基准测试（约 2 分钟）...")
     io_benchmarks = _run_io_benchmark()
 
+    # 获取物理内存上限（用于拦截会搞挂 PG 的内存配置）
+    try:
+        import os as _os
+        _total_mem_kb = _os.sysconf("SC_PHYS_PAGES") * _os.sysconf("SC_PAGE_SIZE") // 1024
+        _mem_limit_kb = int(_total_mem_kb * 0.8)
+    except Exception:
+        _total_mem_kb, _mem_limit_kb = 0, 0
+
+    from core.db.knob_space import parse_memory
+    _MEM_KNOBS = {"shared_buffers", "work_mem", "effective_cache_size",
+                  "maintenance_work_mem", "wal_buffers", "temp_buffers"}
+
     for i, config in enumerate(pending):
         knobs = config["knobs"]
         workload = config.get("workload", "mixed")
         label = f"{config['name']}_v{config.get('variant', 0)}"
         logger.info(f"[{i+1}/{len(pending)}] 采集 {label} (workload={workload}) ...")
+
+        # 预校验：内存类 knob 不能超物理内存 80%
+        mem_violation = None
+        if _mem_limit_kb > 0:
+            for kname, kval in knobs.items():
+                if kname in _MEM_KNOBS:
+                    try:
+                        if parse_memory(str(kval)) > _mem_limit_kb:
+                            mem_violation = f"{kname}={kval} 超过物理内存 80%"
+                            break
+                    except (ValueError, TypeError):
+                        pass
+        if mem_violation:
+            logger.warning(f"  ⚠️ {label}: {mem_violation}，记为 TPS=0")
+            from dataclasses import asdict
+            results.append(asdict(ScenarioState(
+                name=config["name"], variant=config.get("variant", 0),
+                source=config.get("source", "llm_generated"),
+                difficulty=config.get("difficulty", 1),
+                description=config.get("description", ""),
+                hardware=io_benchmarks, knobs=knobs,
+                system={}, db_metrics={}, wait_events=[], slow_queries=[],
+                logs=[{"level": "ERROR", "message": mem_violation}],
+                workload={"type": workload, "tps_current": 0, "latency_avg_ms": 0,
+                          "benchmark": "pgbench", "error": mem_violation},
+                solution={},
+            )))
+            import tempfile
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                suffix='.json', dir=os.path.dirname(output_path) or '.'
+            )
+            try:
+                with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                    json.dump(results, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, output_path)
+            except Exception:
+                os.unlink(tmp_path)
+            continue
 
         try:
             pg_ctl.reset_to_default()
