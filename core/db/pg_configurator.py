@@ -169,31 +169,31 @@ class PGConfigurator:
                 logger.warning(f"force_reset: {' '.join(stop_cmd)} → 异常: {e}")
         time.sleep(2)
 
-        # 2. 清空 auto.conf
-        import glob
-        auto_conf_patterns = [
-            "/var/lib/postgresql/*/main/postgresql.auto.conf",
-            f"{self.pg_data_dir}/postgresql.auto.conf" if self.pg_data_dir else "",
+        # 2. 清空 auto.conf（不用 glob，目录可能无读权限）
+        auto_conf_paths = [
+            "/var/lib/postgresql/16/main/postgresql.auto.conf",
+            "/var/lib/postgresql/15/main/postgresql.auto.conf",
+            "/var/lib/postgresql/14/main/postgresql.auto.conf",
         ]
+        if self.pg_data_dir:
+            auto_conf_paths.insert(0, f"{self.pg_data_dir}/postgresql.auto.conf")
+
         found_any = False
-        for pattern in auto_conf_patterns:
-            if not pattern:
-                continue
-            for path in glob.glob(pattern):
-                found_any = True
-                try:
-                    result = self._sudo_run(
-                        ['truncate', '-s', '0', path],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    if result.returncode != 0:
-                        logger.error(f"truncate {path} 失败: {result.stderr}")
-                    else:
-                        logger.info(f"已清空 {path}")
-                except Exception as e:
-                    logger.error(f"清空 {path} 失败: {e}")
+        for path in auto_conf_paths:
+            try:
+                result = self._sudo_run(
+                    ['truncate', '-s', '0', path],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    found_any = True
+                    logger.info(f"已清空 {path}")
+                else:
+                    logger.debug(f"truncate {path}: {result.stderr.strip()}")
+            except Exception as e:
+                logger.debug(f"truncate {path}: {e}")
         if not found_any:
-            logger.error(f"force_reset: 未找到任何 auto.conf 文件! patterns={auto_conf_patterns}")
+            logger.error("force_reset: 未能清空任何 auto.conf 文件!")
 
     def verify_config(self, knob_config: dict) -> dict:
         """验证配置是否已生效，返回实际值"""
