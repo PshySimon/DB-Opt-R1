@@ -156,7 +156,19 @@ class PGConfigurator:
             self.force_reset()
 
     def force_reset(self):
-        """强制重置：直接清空 postgresql.auto.conf（PG 挂掉时用）"""
+        """强制重置：停掉 PG → 清空 auto.conf → 确保能干净重启"""
+        # 1. 先停掉可能僵死的 PG 进程
+        for stop_cmd in [
+            ['pg_ctlcluster', '16', 'main', 'stop', '--force'],
+            ['killall', '-9', 'postgres'],
+        ]:
+            try:
+                self._sudo_run(stop_cmd, capture_output=True, timeout=10)
+            except Exception:
+                pass
+        time.sleep(2)
+
+        # 2. 清空 auto.conf
         import glob
         auto_conf_patterns = [
             "/var/lib/postgresql/*/main/postgresql.auto.conf",

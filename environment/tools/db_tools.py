@@ -373,6 +373,12 @@ class GetRecentLogsTool(DBTool):
 # ==================== 行动类 ====================
 
 class SetKnobTool(DBTool):
+    # 内存类 knob 名单（需要校验不超过物理内存）
+    MEMORY_KNOBS = {
+        "shared_buffers", "work_mem", "effective_cache_size",
+        "maintenance_work_mem", "wal_buffers", "temp_buffers",
+    }
+
     def __init__(self, **kwargs):
         super().__init__(
             name="set_knob",
@@ -387,11 +393,55 @@ class SetKnobTool(DBTool):
             **kwargs
         )
 
+    def _get_total_memory_gb(self) -> float:
+        """获取物理内存（GB），优先从 scenario.hardware，否则读系统"""
+        if self.scenario and self.scenario.hardware:
+            mem = self.scenario.hardware.get("total_memory_gb")
+            if mem:
+                return float(mem)
+        try:
+            import os
+            pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            return pages * page_size / (1024 ** 3)
+        except Exception:
+            return 0
+
+    def _validate_memory_knobs(self, knobs: dict) -> tuple:
+        """校验内存类 knob 不超过物理内存的 80%。返回 (合法knobs, 拒绝列表)"""
+        from core.db.knob_space import parse_memory
+        total_mem_gb = self._get_total_memory_gb()
+        if total_mem_gb <= 0:
+            return knobs, []
+
+        max_kb = int(total_mem_gb * 0.8 * 1024 * 1024)  # 80% 物理内存，单位 kB
+        accepted = {}
+        rejected = []
+        for name, value in knobs.items():
+            if name in self.MEMORY_KNOBS:
+                try:
+                    val_kb = parse_memory(str(value))
+                    if val_kb > max_kb:
+                        rejected.append({
+                            "name": name,
+                            "value": str(value),
+                            "error": f"超过物理内存限制（{total_mem_gb:.1f}GB 的 80% = {total_mem_gb*0.8:.1f}GB）"
+                        })
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            accepted[name] = value
+        return accepted, rejected
+
     def execute_real(self, args):
         knobs = json.loads(args["knobs"])
+
+        # 校验内存类 knob
+        knobs, mem_rejected = self._validate_memory_knobs(knobs)
+
         conn = self._get_conn()
         cursor = conn.cursor()
-        success, pending_restart, failed = [], [], []
+        success, pending_restart, failed = [], [], list(mem_rejected)
         for name, value in knobs.items():
             try:
                 cursor.execute(f"ALTER SYSTEM SET {name} = %s", (str(value),))
@@ -412,13 +462,19 @@ class SetKnobTool(DBTool):
 
     def execute_simulated(self, args):
         knobs = json.loads(args["knobs"])
+
+        # 校验内存类 knob
+        knobs, mem_rejected = self._validate_memory_knobs(knobs)
+
         # 更新 env_state（兼容）
         for k, v in knobs.items():
             self.env_state[f"knob_{k}"] = v
         # 更新 scenario 并联动指标
         if self.scenario:
             self.scenario.apply_knob_change(knobs)
-        return json.dumps({"success": list(knobs.keys()), "pending_restart": [], "failed": []}, indent=2)
+
+        failed = list(mem_rejected)
+        return json.dumps({"success": list(knobs.keys()), "pending_restart": [], "failed": failed}, indent=2)
 
 
 class RestartPGTool(DBTool):

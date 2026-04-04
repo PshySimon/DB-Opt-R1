@@ -391,6 +391,46 @@ def collect_scenarios(input_path: str, output_path: str,
 
         except Exception as e:
             logger.error(f"  ❌ {label}: {e}")
+
+            # 保存失败记录（TPS=0 负样本，供 cost model 学习）
+            from dataclasses import asdict
+            fail_state = ScenarioState(
+                name=config["name"],
+                variant=config.get("variant", 0),
+                source=config.get("source", "llm_generated"),
+                difficulty=config.get("difficulty", 1),
+                description=config.get("description", ""),
+                hardware=io_benchmarks,  # 至少保存 IO 基准
+                knobs=knobs,
+                system={},
+                db_metrics={},
+                wait_events=[],
+                slow_queries=[],
+                logs=[{"level": "ERROR", "message": str(e)}],
+                workload={
+                    "type": workload,
+                    "tps_current": 0,
+                    "latency_avg_ms": 0,
+                    "benchmark": "pgbench",
+                    "error": str(e),
+                },
+                solution={},
+            )
+            results.append(asdict(fail_state))
+            logger.info(f"  📝 已保存失败记录 (TPS=0)")
+
+            # 原子写入
+            import tempfile
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                suffix='.json', dir=os.path.dirname(output_path) or '.'
+            )
+            try:
+                with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                    json.dump(results, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_path, output_path)
+            except Exception:
+                os.unlink(tmp_path)
+
             try:
                 pg_ctl.safe_restart()  # force_reset → restart（不依赖 SQL）
                 logger.info(f"  PG 已恢复，继续采集")
@@ -465,11 +505,20 @@ SYNTHESIZE_PROMPT = """你是 PostgreSQL 性能调优专家。请根据以下场
 ## 场景
 {description}
 
+## 瓶颈类型
+{bottleneck_type}
+
 ## 严重程度
 {severity_desc}
 
 ## 负载类型
 {workload}
+
+## 数据规模
+{data_volume_desc}
+
+## 并发压力
+{concurrent_load_desc}
 
 ## 硬件环境
 - CPU: {cpu} 核
@@ -488,8 +537,10 @@ SYNTHESIZE_PROMPT = """你是 PostgreSQL 性能调优专家。请根据以下场
 3. 其他 knob 设置为合理值（不一定是默认值，要考虑与核心 knob 的协同关系）
 4. 配置必须可用：数据库能正常启动并跑 benchmark
 5. 严重程度 {severity} 意味着：{severity_meaning}
-6. 值的格式：memory 类型用 "128MB"/"2GB" 格式，enum 用字符串，integer/float 用数字
-7. 输出纯 JSON，不要任何多余的文字
+6. 根据数据规模合理设置内存参数（小型数据不需要大 shared_buffers，大型数据需要更大缓冲池）
+7. 根据并发压力合理设置连接数和 work_mem（高并发时 work_mem 应较小以控制总内存）
+8. 值的格式：memory 类型用 "128MB"/"2GB" 格式，enum 用字符串，integer/float 用数字
+9. 输出纯 JSON，不要任何多余的文字
 
 ## 输出格式
 {{"shared_buffers": "2GB", "work_mem": "4MB", ...所有 45 个 knob...}}"""
@@ -498,6 +549,18 @@ SEVERITY_MEANINGS = {
     "mild": "参数轻微偏移，与默认值差距约 ±20%，性能影响不大",
     "moderate": "参数中度偏移，与默认值差距约 ±50%，性能有明显影响",
     "severe": "参数严重偏离，接近极值或偏离 200%+，性能严重受影响",
+}
+
+DATA_VOLUME_DESC = {
+    "small": "数据量较小（< 1GB），表少行少，大部分数据可以放入内存",
+    "medium": "中等规模数据（1-50GB），部分热数据在内存中，冷数据需要磁盘读取",
+    "large": "大规模数据（50GB+），大量数据在磁盘上，缓冲命中率敏感，索引和并行很重要",
+}
+
+CONCURRENT_LOAD_DESC = {
+    "low": "低并发（1-10 连接），单用户或少量后台任务",
+    "moderate": "中等并发（10-50 连接），多用户在线业务",
+    "high": "高并发（50-200+ 连接），大量用户同时操作，连接和内存资源竞争激烈",
 }
 
 
@@ -524,40 +587,59 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
         hardware_list = [hardware_list]
     workloads = dims["workloads"]
     severities = dims["severities"]
+    data_volumes = dims.get("data_volumes", ["medium"])
+    concurrent_loads = dims.get("concurrent_loads", ["moderate"])
     scenarios = dims["scenarios"]
 
-    # 构建任务列表（场景 × 负载 × 严重程度 × 硬件 × 变体）
+    # 构建任务列表（场景 × 负载 × 严重程度 × 硬件 × 数据规模 × 并发 × 变体）
     tasks = []
     for scenario in scenarios:
         severity_list = severities if scenario.get("severity_varies", True) else ["fixed"]
         for workload in workloads:
             for severity in severity_list:
                 for hw in hardware_list:
-                    for v in range(per_cell):
-                        tasks.append((scenario, workload, severity, hw, v))
+                    for dv in data_volumes:
+                        for cl in concurrent_loads:
+                            for v in range(per_cell):
+                                tasks.append((scenario, workload, severity, hw, dv, cl, v))
 
     logger.info(f"场景: {len(scenarios)}, 负载: {len(workloads)}, "
-                f"硬件: {len(hardware_list)}, 总任务: {len(tasks)}")
+                f"硬件: {len(hardware_list)}, 数据规模: {len(data_volumes)}, "
+                f"并发: {len(concurrent_loads)}, 总任务: {len(tasks)}")
 
-    # 加载已有结果（断点续跑）
-    results = []
+    # 加载已有结果（断点续跑），按硬件分组存储
+    # 输出文件名规则: output_path = "xxx.json" → "xxx_{hw_name}.json"
+    results_by_hw = {}  # hw_name -> list
     existing_keys = set()
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    if os.path.exists(output_path):
-        with open(output_path, "r", encoding="utf-8") as f:
-            results = json.load(f)
-        existing_keys = {(e["name"], e.get("variant", 0),
-                          e.get("workload", ""), e.get("severity", ""),
-                          e.get("hardware_hint", {}).get("name", ""))
-                         for e in results}
-        logger.info(f"已有 {len(results)} 条，断点续跑")
+    base, ext = os.path.splitext(output_path)
+
+    for hw in hardware_list:
+        hw_name = hw.get("name", "default")
+        hw_file = f"{base}_{hw_name}{ext}"
+        if os.path.exists(hw_file):
+            with open(hw_file, "r", encoding="utf-8") as f:
+                items = json.load(f)
+            results_by_hw[hw_name] = items
+            for e in items:
+                existing_keys.add((e["name"], e.get("variant", 0),
+                                   e.get("workload", ""), e.get("severity", ""),
+                                   hw_name,
+                                   e.get("data_volume", "medium"),
+                                   e.get("concurrent_load", "moderate")))
+        else:
+            results_by_hw[hw_name] = []
+
+    loaded = sum(len(v) for v in results_by_hw.values())
+    if loaded:
+        logger.info(f"已有 {loaded} 条，断点续跑")
 
     # 过滤已完成的
     pending = []
-    for scenario, workload, severity, hw, v in tasks:
-        key = (scenario["name"], v, workload, severity, hw.get("name", ""))
+    for scenario, workload, severity, hw, dv, cl, v in tasks:
+        key = (scenario["name"], v, workload, severity, hw.get("name", ""), dv, cl)
         if key not in existing_keys:
-            pending.append((scenario, workload, severity, hw, v))
+            pending.append((scenario, workload, severity, hw, dv, cl, v))
 
     logger.info(f"待生成: {len(pending)} 条")
     if not pending:
@@ -580,24 +662,32 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
     counter = {"done": 0, "success": 0, "total": len(pending)}
 
     def _save():
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+        for hw_name, items in results_by_hw.items():
+            hw_file = f"{base}_{hw_name}{ext}"
+            with open(hw_file, "w", encoding="utf-8") as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
 
     def _process_one(args):
-        scenario, workload, severity, hw, v = args
+        scenario, workload, severity, hw, dv, cl, v = args
         name = scenario["name"]
         hw_name = hw.get("name", "default")
-        label = f"{name}_w{workload}_s{severity}_h{hw_name}_v{v}"
+        label = f"{name}_w{workload}_s{severity}_h{hw_name}_d{dv}_c{cl}_v{v}"
 
         try:
             severity_desc = SEVERITY_MEANINGS.get(severity, "固定配置，不区分严重程度")
+            bottleneck_type = scenario.get("category", "unknown")
+            data_volume_desc = DATA_VOLUME_DESC.get(dv, dv)
+            concurrent_load_desc = CONCURRENT_LOAD_DESC.get(cl, cl)
 
             prompt = SYNTHESIZE_PROMPT.format(
                 description=scenario["description"],
+                bottleneck_type=bottleneck_type,
                 severity=severity,
                 severity_desc=severity_desc,
                 severity_meaning=severity_desc,
                 workload=workload,
+                data_volume_desc=data_volume_desc,
+                concurrent_load_desc=concurrent_load_desc,
                 cpu=hw["cpu_count"],
                 memory=hw["total_memory_gb"],
                 disk=hw["disk_type"],
@@ -623,16 +713,19 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
                 "variant": v,
                 "source": "llm_generated",
                 "difficulty": scenario.get("difficulty", 1),
-                "category": scenario.get("category", ""),
+                "category": bottleneck_type,
                 "description": scenario["description"],
                 "workload": workload,
                 "severity": severity,
+                "data_volume": dv,
+                "concurrent_load": cl,
                 "knobs": valid,
                 "hardware_hint": hw,
             }
 
             with lock:
-                results.append(result)
+                hw_name = hw.get("name", "default")
+                results_by_hw[hw_name].append(result)
                 counter["done"] += 1
                 counter["success"] += 1
                 logger.info(f"  [{counter['done']}/{counter['total']}] "
@@ -658,8 +751,12 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
         for t in pending:
             _process_one(t)
 
+    total_items = sum(len(v) for v in results_by_hw.values())
+    hw_summary = ", ".join(f"{k}={len(v)}" for k, v in results_by_hw.items())
     logger.info(f"合成完成: 成功 {counter['success']}/{counter['total']}，"
-                f"总计 {len(results)} 条 → {output_path}")
+                f"总计 {total_items} 条 ({hw_summary})")
+    for hw_name in results_by_hw:
+        logger.info(f"  → {base}_{hw_name}{ext}")
 
 
 # ==================== Step 5: 贝叶斯优化搜索好配置 ====================
