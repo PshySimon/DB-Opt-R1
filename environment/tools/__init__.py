@@ -90,40 +90,23 @@ class DBToolEnv(ToolEnv):
         super().__init__(tools=tools, max_turns=max_turns)
 
     @staticmethod
-    def _load_scenarios(source: str) -> list:
-        """加载场景：支持单 JSON 文件、目录（自动合并 collected_*.json）
-
-        只加载 source=llm_generated 的场景（random_sampled 仅用于 Cost Model）。
-        """
+    def _load_scenarios(source) -> list:
+        """加载场景：支持单 JSON 文件、目录、或多个路径列表"""
         import glob
-        from datasets.synthesis.scenarios.schema import ScenarioState
-        from datasets.synthesis.scenarios.loader import dedup_scenarios
+        from data_pipeline.synthesis.scenarios.schema import ScenarioState
+        from data_pipeline.synthesis.scenarios.loader import dedup_scenarios
+
+        # 多路径列表：逐个加载后合并
+        if isinstance(source, list):
+            all_scenarios = []
+            for s in source:
+                all_scenarios.extend(DBToolEnv._load_scenarios(s))
+            return all_scenarios
 
         def _parse_items(items):
             return [ScenarioState(**{k: v for k, v in item.items()
                     if k in ScenarioState.__dataclass_fields__})
                     for item in items]
-
-        def _filter_llm(scenarios):
-            """过滤：只保留 llm_generated 且 TPS 有优化空间的场景"""
-            filtered = []
-            for s in scenarios:
-                if getattr(s, 'source', 'llm_generated') != 'llm_generated':
-                    continue
-                
-                wl = getattr(s, 'workload', {})
-                if isinstance(wl, dict):
-                    tps = float(wl.get('tps_current', 0) or 0)
-                    # TPS 100-5000：有优化空间（不是 crash 也不是已接近最优）
-                    if 100 <= tps <= 5000:
-                        filtered.append(s)
-                else:
-                    # 还未跑过 benchmark 的数据（比如新生成的 eval set）没有 TPS，默认保留
-                    filtered.append(s)
-
-            if len(filtered) < len(scenarios):
-                logger.info(f"  过滤: {len(scenarios)} → {len(filtered)} 条 (llm_generated, TPS 100-5000)")
-            return filtered
 
         if os.path.isfile(source):
             # 单文件（JSON 数组）
@@ -132,7 +115,7 @@ class DBToolEnv(ToolEnv):
             items = dedup_scenarios(items, fname=source, logger=logger)
             scenarios = _parse_items(items)
             logger.info(f"  加载 {source}: {len(scenarios)} 个场景")
-            return _filter_llm(scenarios)
+            return scenarios
 
         elif os.path.isdir(source):
             # 目录：优先匹配 collected_*.json（每个是数组），否则逐个 .json
@@ -146,14 +129,14 @@ class DBToolEnv(ToolEnv):
                     batch = _parse_items(items)
                     logger.info(f"  加载 {os.path.basename(fpath)}: {len(batch)} 个场景")
                     scenarios.extend(batch)
-                return _filter_llm(scenarios)
+                return scenarios
             else:
                 # 每个 .json 是单个场景
                 scenarios = []
                 for fname in sorted(os.listdir(source)):
                     if fname.endswith(".json"):
                         scenarios.append(ScenarioState.from_json(os.path.join(source, fname)))
-                return _filter_llm(scenarios)
+                return scenarios
 
         return []
 
@@ -224,7 +207,7 @@ class DBToolEnv(ToolEnv):
 
         # 尝试构造 ScenarioState 兼容
         try:
-            from datasets.synthesis.scenarios.schema import ScenarioState
+            from data_pipeline.synthesis.scenarios.schema import ScenarioState
             scenario = ScenarioState.from_csv_row(row.to_dict())
             for tool in self.tools:
                 tool.scenario = scenario

@@ -105,7 +105,11 @@ For each function call, return a json object with function name and arguments wi
         if not match:
             return self.INVALID_ACTION
         try:
-            data = json.loads(match.group(1).strip())
+            raw = match.group(1).strip()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data, _ = json.JSONDecoder().raw_decode(raw)
             if "name" not in data:
                 return self.INVALID_ACTION
             return {"tool": data["name"], "args": data.get("arguments", {})}

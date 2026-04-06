@@ -45,20 +45,36 @@ def rollout(
     ]
 
     for _ in range(max_turns):
-        # LLM 生成
-        try:
-            action = llm_fn(messages, temperature)
-        except Exception as e:
-            logger.error(f"LLM 生成失败: {e}")
+        # LLM 生成（格式错误时重试最多 3 次）
+        action = None
+        for retry in range(3):
+            try:
+                action = llm_fn(messages, temperature)
+            except Exception as e:
+                logger.error(f"LLM 生成失败: {e}")
+                break
+
+            # 试执行，检查格式是否合法
+            obs, reward, done, info = env.step(action)
+
+            if info.get("action_is_valid", True):
+                # 格式正确，正常流程
+                messages.append({"role": "assistant", "content": action})
+                messages.append({"role": "tool", "content": obs})
+                break
+            else:
+                # 格式错误，把错误信息拼进上下文让 LLM 重试
+                if retry < 2:
+                    messages.append({"role": "assistant", "content": action})
+                    messages.append({"role": "tool", "content": obs})
+                    logger.debug(f"格式错误，重试 {retry + 1}/3")
+                else:
+                    # 3 次都失败，保留最后一次结果继续
+                    messages.append({"role": "assistant", "content": action})
+                    messages.append({"role": "tool", "content": obs})
+
+        if action is None:
             break
-
-        messages.append({"role": "assistant", "content": action})
-
-        # 环境执行（解析 tool_call + 执行 + tracking 全在 env.step 里）
-        obs, reward, done, info = env.step(action)
-
-        # 追加 observation
-        messages.append({"role": "user", "content": f"<tool_response>\n{obs}\n</tool_response>"})
 
         if done:
             break

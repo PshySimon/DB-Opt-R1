@@ -1,79 +1,79 @@
 [
   {
-    "api_base": "https://newapi.431128hys.site/v1",
-    "api_key": "sk-CMDOrlE4bUGq5yEvV9z1aZlEwBQZtTWfVnS3eZlzo1wRRat0",
-    "model": "anthropic/claude-sonnet-4.6",
-    "available": false
-  },
-  {
-    "api_base": "https://api.b022mc.us.ci/v1",
-    "api_key": "sk-8a415773a29f5729fda0a34040b9001583dce9a9e05639cd77097a90c2d0da3c",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://free.9e.nz/v1",
-    "api_key": "sk-e545b507284e88bf4562e159802cf2229042f267cb7337641ebda7131498415a",
-    "model": "gpt-5-codex",
-    "available": true
-  },
-  {
-    "api_base": "https://openai.xuya.dev/v1",
-    "api_key": "sk-e21bd10c1c8ffbac0302f2a638e4236d32b0cf4dde639a72969d598b179c0625",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://elysiver.h-e.top/v1",
-    "api_key": "sk-c5Zl6Ot5rO94Iv82kftb8RXoupJbfbMAPbMPwypJVBCCaX0A",
-    "model": "gpt-5.2",
-    "available": false
-  },
-  {
-    "api_base": "https://api.jichuangpro.cn/v1",
-    "api_key": "sk-352880131d48e7237f4b1fba93279b82085d8b1682cf657362ea30de718de600",
+    "api_base": "http://107.173.38.30:8317/v1",
+    "api_key": "sk-ant-api03-P9kL2mR5zXqW8vT4uY7nJ1aB6dF0sH3gK5jM9pL2oN4iU6yT8rE1wQ4qA7sD0fG2hJ5kL8mN1bV3cR",
     "model": "gpt-5",
     "available": false
   },
   {
-    "api_base": "https://runanytime.hxi.me/v1",
-    "api_key": "sk-mtfQk1xlnn1p2jiMYArKEyFFamIXOwO45wj5TVQGEJfHRFpE",
-    "model": "claude-sonnet-4-6",
-    "available": false
-  },
-  {
-    "api_base": "https://wbz-api.939593.xyz/v1",
-    "api_key": "sk-ZHxqWPbzKv0XxpA5yHkr6f9CtSHvsNw0oMoXRTyZRiXW23s4",
-    "model": "gpt-5.4",
-    "available": true
-  },
-  {
-    "api_base": "https://api.nih.cc/v1",
-    "api_key": "sk-lnK0KGarT3YXaVHaWndPwEG4K4ZMEnmvC6xStw4Y99B24fTI",
-    "model": "gpt-5",
-    "available": false
-  },
-  {
-    "api_base": "https://liao.bot/v1",
-    "api_key": "sk-Pt7qmjiQuUIW43JwGwYWBUeOLFOdCSxSmRIATkTbGr7B1UXI",
+    "api_base": "https://sub.662027.xyz/v1",
+    "api_key": "sk-2fe0ca8b5888f6a2f93e549468eed54661e6b62dc410ef512ce3a30513806838",
     "model": "gpt-5",
     "available": true
   },
   {
-    "api_base": "https://newapi.zhx47.xyz/v1",
-    "api_key": "sk-W8aAh39Rl79g2IfhFeq9fgzQY64FnjS2KowyLcyxpWxDGalW",
+    "api_base": "https://code.fovts.com/v1",
+    "api_key": "sk-ce7c851830b1cecff4e68f9694f758d2632a9797d3f771b1e7cabec5f7dfe47c",
     "model": "gpt-5",
     "available": true
   },
   {
-    "api_base": "https://windhub.cc/v1",
-    "api_key": "sk-vTBFgFG78S3osqsjTdoYd1eh2QGriScPKpkDqGGVJYOZme3K",
-    "model": "gpt-5.4",
-    "available": false
+    "api_base": "http://160.202.238.42:8080/v1",
+    "api_key": "sk-89042b018ba2ed0515aa973f6a22a388113c8cbbe5e5f03d32e34120d7d189fb",
+    "model": "gpt-5",
+    "available": true
   },
   {
-    "api_base": "https://openai.api-test.us.ci/v1",
-    "api_key": "sk-axJJUzazlALn3Vb5Et8KdGLqEqsUx9DsMUlupG0fgadLV6gb",
+    "api_base": "https://sub.hdd.sb/v1",
+    "api_key": "sk-f0551b1a8f4b80390816abfcec8792bbb1906c816470ea0955278c9b8792d1f3",
+    "model": "gpt-5",
+    "available": true
+  },
+  {
+    "api_base": "https://api.fakerclaw.online/v1",
+    "api_key": "sk-dvoHrkSIyRsXbXl11Ottq68QGwTxh4yaAf0fETNAQPYTBusz",
+    "model": "gpt-5",
+    "available": true
+  },
+  {
+    "api_base": "https://fastzz.weistuday.com/v1",
+    "api_key": "sk-997ab879b507e1bafb292a055805ae69e501a4c4c0d5ebae9503200699d3202b",
+    "model": "gpt-5",
+    "available": true
+  },
+  {
+    "api_base": "https://api.weistuday.com/v1",
+    "api_key": "sk-997ab879b507e1bafb292a055805ae69e501a4c4c0d5ebae9503200699d3202b",
+    "model": "gpt-5",
+    "available": true
+  },
+  {
+    "api_base": "https://api.qquu.ccwu.cc/v1",
+    "api_key": "sk-b20864b79e2204551758d4ff5820ae2d9eed560cadb477523d4fe93d6e9b79a0",
+    "model": "gpt-5",
+    "available": true
+  },
+  {
+    "api_base": "https://api.heabl.top/v1",
+    "api_key": "sk-0uguQRhSztLzct9t1az2NyVBGnceDrfP9h2yG749g64WzzFa",
+    "model": "gpt-5",
+    "available": true
+  },
+  {
+    "api_base": "https://sub.devbin.de/v1",
+    "api_key": "sk-9fd1b5f10bafd827911e18812a0be40f63ebfb3003130ca25e435195de18cbc1",
+    "model": "gpt-5",
+    "available": true
+  },
+  {
+    "api_base": "https://api.jucode.cn/v1",
+    "api_key": "sk-zfLf1fKKdm5SgrhX0UO8ScslGj8drga9mSbAthowJgpch1zm",
+    "model": "gpt-5",
+    "available": true
+  },
+  {
+    "api_base": "https://www.codexapis.com/v1",
+    "api_key": "sk-e96MKgFQjOkUgqLwsjSMApaHfY0qLknPO9WOjDFhyUGvirg8",
     "model": "gpt-5",
     "available": false
   }

@@ -13,3 +13,5 @@ datasets
 accelerate
 openai
 scikit-optimize
+optuna
+tqdm

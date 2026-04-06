@@ -89,6 +89,7 @@ class MultiProviderLLMClient:
                     base_url=cs.api_base,
                     max_retries=0,
                     timeout=10,
+                    default_headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
                 )
                 resp = probe_client.chat.completions.create(
                     model=cs.model_name,
