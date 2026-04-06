@@ -139,3 +139,70 @@ class KnobSpace:
             elif t == "enum":
                 lines.append(f"  {name}: type=enum, values={info['values']}, default={info['default']}")
         return "\n".join(lines)
+
+    # ─────────────── 空间转换 ───────────────
+
+
+    def build_skopt_space(self):
+        """构建 skopt 搜索空间。
+
+        Returns:
+            (dimensions, dim_names, knob_types)
+        """
+        from skopt.space import Real, Integer, Categorical
+
+        dimensions = []
+        dim_names = []
+        knob_types = {}
+
+        for name, info in self.knobs.items():
+            ktype = info["type"]
+            knob_types[name] = info
+
+            if ktype == "memory":
+                lo = parse_memory(str(info["min"]))
+                hi = parse_memory(str(info["max"]))
+                dimensions.append(Real(float(lo), float(hi), name=name))
+            elif ktype == "integer":
+                dimensions.append(Integer(int(info["min"]), int(info["max"]), name=name))
+            elif ktype == "float":
+                dimensions.append(Real(float(info["min"]), float(info["max"]), name=name))
+            elif ktype == "enum":
+                dimensions.append(Categorical(info["values"], name=name))
+
+            dim_names.append(name)
+
+        return dimensions, dim_names, knob_types
+
+    def knobs_to_vector(self, knobs_dict: dict, dim_names: list) -> list:
+        """knob dict → skopt 向量"""
+        x = []
+        for name in dim_names:
+            info = self.knobs[name]
+            val = knobs_dict.get(name, info["default"])
+            if info["type"] == "memory":
+                x.append(float(parse_memory(str(val))))
+            elif info["type"] == "integer":
+                x.append(int(val))
+            elif info["type"] == "float":
+                x.append(float(val))
+            elif info["type"] == "enum":
+                x.append(str(val))
+        return x
+
+    def vector_to_knobs(self, x: list, dim_names: list) -> dict:
+        """skopt 向量 → knob dict"""
+        knobs = {}
+        for i, name in enumerate(dim_names):
+            info = self.knobs[name]
+            val = x[i]
+            if info["type"] == "memory":
+                knobs[name] = format_memory(int(round(val)))
+            elif info["type"] == "integer":
+                knobs[name] = int(round(val))
+            elif info["type"] == "float":
+                knobs[name] = round(float(val), 4)
+            elif info["type"] == "enum":
+                knobs[name] = str(val)
+        return knobs
+

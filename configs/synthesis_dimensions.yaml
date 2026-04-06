@@ -29,6 +29,16 @@ severities:
   - moderate    # 中度偏移，±50% 左右
   - severe      # 严重偏离，200%+ 或接近极值
 
+data_volumes:
+  - small       # 数据量 < 1GB，表少行少
+  - medium      # 数据量 1-50GB，中等规模
+  - large       # 数据量 50GB+，大表多索引
+
+concurrent_loads:
+  - low         # 1-10 并发连接
+  - moderate    # 10-50 并发连接
+  - high        # 50-200+ 并发连接
+
 # ===== 场景模板 =====
 # 每个场景定义：名称、类别、描述、涉及的 knob 方向
 # LLM 会根据这些信息 + workload + severity 生成具体的 knob 值

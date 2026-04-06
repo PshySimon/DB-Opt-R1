@@ -29,3 +29,7 @@ logs/
 # 环境
 .env
 .venv/
+
+# data_pipeline 大文件（>100MB）
+data_pipeline/data/scenarios/collected/collected_featurize_*.json
+data_pipeline/data/mcts/

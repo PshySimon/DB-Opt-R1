@@ -7,7 +7,7 @@ reward 函数从生成文本中提取 knob，通过 Cost Model 评分。
 Usage:
     python -m training.trl.grpo \
         --model_path model_save/sft/checkpoint-xxx \
-        --scenario_dir datasets/data/scenarios/ \
+        --scenario_dir data_pipeline/data/scenarios/ \
         --cost_model cost_model/checkpoints/v1 \
         --output_dir model_save/grpo/
 """

@@ -14,7 +14,7 @@ Modal 部署 vLLM 推理服务（OpenAI 兼容）
 
 本地评估调用：
     python3 -m evaluate.run \
-        --scenarios datasets/data/scenarios/ \
+        --scenarios data_pipeline/data/scenarios/ \
         --knob-space configs/knob_space.yaml \
         --cost-model cost_model/checkpoints/v7_lgbm_dedup \
         --api-key "EMPTY" \

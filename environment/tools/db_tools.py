@@ -588,10 +588,9 @@ class PredictPerformanceTool(DBTool):
             current_knobs = {k.replace("knob_", ""): v for k, v in self.env_state.items() if k.startswith("knob_")}
             current_knobs["workload"] = wl_type
 
-        # baseline 配置：统一使用 PostgreSQL 官方默认配置
-        from core.db.knob_space import KnobSpace
-        ks = KnobSpace("configs/knob_space.yaml")
-        baseline_knobs = ks.get_default_config()
+        # baseline 配置：使用场景原始配置（模型看到的是相对起始状态的提升）
+        raw_snapshot = self._original_knobs_snapshot or {}
+        baseline_knobs = {k.replace("knob_", ""): v for k, v in raw_snapshot.items()}
         baseline_knobs["workload"] = wl_type
 
         try:

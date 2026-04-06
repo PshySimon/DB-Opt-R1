@@ -18,12 +18,6 @@
     "available": true
   },
   {
-    "api_base": "http://160.202.238.42:8080/v1",
-    "api_key": "sk-89042b018ba2ed0515aa973f6a22a388113c8cbbe5e5f03d32e34120d7d189fb",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
     "api_base": "https://sub.hdd.sb/v1",
     "api_key": "sk-f0551b1a8f4b80390816abfcec8792bbb1906c816470ea0955278c9b8792d1f3",
     "model": "gpt-5",
@@ -32,18 +26,6 @@
   {
     "api_base": "https://api.fakerclaw.online/v1",
     "api_key": "sk-dvoHrkSIyRsXbXl11Ottq68QGwTxh4yaAf0fETNAQPYTBusz",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://fastzz.weistuday.com/v1",
-    "api_key": "sk-997ab879b507e1bafb292a055805ae69e501a4c4c0d5ebae9503200699d3202b",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://api.weistuday.com/v1",
-    "api_key": "sk-997ab879b507e1bafb292a055805ae69e501a4c4c0d5ebae9503200699d3202b",
     "model": "gpt-5",
     "available": true
   },

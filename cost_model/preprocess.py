@@ -80,7 +80,7 @@ class KnobPreprocessor:
 
     用法：
         prep = KnobPreprocessor("configs/knob_space.yaml")
-        X, y, meta = prep.fit_transform("datasets/data/scenarios/collected/collected.json")
+        X, y, meta = prep.fit_transform("data_pipeline/data/scenarios/collected/collected.json")
         prep.save("cost_model/checkpoints/v1/")
 
         # 推理
@@ -214,7 +214,7 @@ class KnobPreprocessor:
 
         if os.path.isdir(path):
             # 目录：用 loader 统一加载 + 去重所有 collected_*.json
-            from datasets.synthesis.scenarios.loader import load_scenario_files
+            from data_pipeline.synthesis.scenarios.loader import load_scenario_files
             items = load_scenario_files(path, logger=logger)
             return self._items_to_df(items)
         elif path.endswith(".json"):
@@ -249,7 +249,7 @@ class KnobPreprocessor:
     def _load_json(self, json_path: str) -> pd.DataFrame:
         """加载单个 JSON 文件，去重后展平为 DataFrame"""
         import json as json_mod
-        from datasets.synthesis.scenarios.loader import dedup_scenarios
+        from data_pipeline.synthesis.scenarios.loader import dedup_scenarios
         with open(json_path, "r", encoding="utf-8") as f:
             items = json_mod.load(f)
         items = dedup_scenarios(items, fname=json_path, logger=logger)

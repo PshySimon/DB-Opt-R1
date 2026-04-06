@@ -465,7 +465,7 @@ if __name__ == "__main__":
     parser.add_argument("--user", default="postgres", help="PG 用户")
     parser.add_argument("--password", default="", help="PG 密码")
     parser.add_argument("--database", default="postgres", help="PG 数据库名")
-    parser.add_argument("--output", default="./datasets/data/cost_model", help="输出目录")
+    parser.add_argument("--output", default="./data_pipeline/data/cost_model", help="输出目录")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)

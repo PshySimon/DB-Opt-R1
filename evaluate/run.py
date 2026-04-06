@@ -1,32 +1,35 @@
 """
-评估脚本入口（指标聚合）
+评估报表生成（三 baseline 体系）
+
+从 sampler eval 模式产出的轨迹中提取模型设置的 knobs，
+用 Cost Model 重新预测 TPS，与三个 baseline 对比：
+  1. scenario_tps  — 场景原始 tps_current
+  2. default_tps   — PG 默认配置的 Cost Model 预测
+  3. optimal_tps   — BO 搜索的 Cost Model 最优预测
+
+核心指标：gap_closed = (model - default) / (optimal - default)
 
 用法：
-    # 1. 先用 sampler 生成 eval 轨迹
-    python3 -m datasets.synthesis.trajectory.sampler \\
-        --scenarios datasets/data/scenarios/knob_configs_eval.json \\
-        --num-rollouts 1 \\
-        --cost-model cost_model/checkpoints/v7_lgbm_dedup \\
-        --output-dir eval_results/run_xxx/ \\
-        --model gpt-5 --api-key sk-xxx --api-base https://xxx/v1
-
-    # 2. 再用本脚本聚合报表
-    python3 -m evaluate.run \\
-        --eval-data eval_results/run_xxx/sft_trajectories.jsonl \\
-        --output eval_results/run_xxx/
+    python3 -m evaluate.run \
+        --eval-data eval_results/gpt5_v2/sft_trajectories.jsonl \
+        --scenarios data_pipeline/data/scenarios/collected/collected_eval.json \
+        --cost-model cost_model/checkpoints/v8_lgbm \
+        --output eval_results/gpt5_v2/
 """
 
 import os
 import sys
 import json
+import re
 import logging
 import argparse
+import numpy as np
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def load_trajectories(path: str) -> list:
-    """读取 sampler 产出的轨迹 JSONL 文件"""
     items = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -36,92 +39,245 @@ def load_trajectories(path: str) -> list:
     return items
 
 
-def compute_eval_metrics(trajectories: list) -> dict:
-    """从轨迹列表计算评估指标"""
+def extract_model_knobs(trajectory: dict) -> dict:
+    """从轨迹的 messages 中提取模型最终设置的 knobs（累积所有 set_knob 调用）。"""
+    knobs = {}
+    for msg in trajectory.get("messages", []):
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", "")
+        match = re.search(r'<tool_call>\s*(\{.*?\})\s*</tool_call>', content, re.DOTALL)
+        if not match:
+            continue
+        try:
+            call = json.loads(match.group(1))
+            if call.get("name") != "set_knob":
+                continue
+            args = call.get("arguments", {})
+            if isinstance(args, str):
+                args = json.loads(args)
+            ks = args.get("knobs", "{}")
+            if isinstance(ks, str):
+                ks = json.loads(ks)
+            knobs.update(ks)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+    return knobs
+
+
+def bo_search_optimal(cost_model, hw_info: dict, workload: str,
+                      knob_space, n_trials: int = 200) -> float:
+    """用 BO 搜索 Cost Model 下给定硬件+负载的最优 TPS。"""
+    from core.db.optimizer import optuna_search
+
+    def objective(knobs):
+        knobs_with_wl = {**knobs, "workload": workload}
+        return cost_model.predict(knobs_with_wl, hw_info)
+
+    best_value, _ = optuna_search(knob_space, objective, n_trials=n_trials)
+    return best_value
+
+
+def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
+                         n_bo_trials=200) -> dict:
+    """三 baseline 体系评估。"""
     if not trajectories:
         return {"error": "无轨迹数据"}
 
-    improvements = [max(0, t.get("improvement_pct", 0.0)) for t in trajectories]
-    rewards = [max(0, t.get("reward", 0.0)) for t in trajectories]
+    from core.db.knob_space import KnobSpace
+    default_knobs = knob_space.get_default_config()
 
-    def steps(t):
+    # BO 缓存：(hw_hash, wl_type) → optimal_tps
+    bo_cache = {}
+
+    per_episode = []
+
+    for t in trajectories:
+        env_idx = t.get("env_sample_idx")
+        if env_idx is None or env_idx >= len(scenarios):
+            continue
+
+        s = scenarios[env_idx]
+        hw = s.get("hardware", {})
+        wl = s.get("workload", {})
+        wl_type = wl.get("type", "mixed") if isinstance(wl, dict) else str(wl)
+
+        # 场景原始配置 TPS（用 Cost Model 预测，和其他 baseline 保持一致）
+        original_knobs = s.get("knobs", {})
+        ok = {**original_knobs, "workload": wl_type}
+        try:
+            scenario_tps = cost_model.predict(ok, hw)
+        except Exception:
+            scenario_tps = 0.0
+
+        # 默认配置 TPS
+        dk = default_knobs.copy()
+        dk["workload"] = wl_type
+        try:
+            default_tps = cost_model.predict(dk, hw)
+        except Exception:
+            default_tps = 0.0
+
+        # BO 最优 TPS（按 hw+wl 缓存）
+        cache_key = json.dumps(hw, sort_keys=True) + "|" + wl_type
+        if cache_key not in bo_cache:
+            bo_cache[cache_key] = bo_search_optimal(
+                cost_model, hw, wl_type, knob_space, n_bo_trials)
+            logger.info(f"  BO ({len(bo_cache)}): wl={wl_type}, "
+                        f"optimal={bo_cache[cache_key]:.1f}")
+        optimal_tps = bo_cache[cache_key]
+
+        # 模型预测 TPS（以场景原始 knobs 为基底，叠加模型的修改）
+        model_changes = extract_model_knobs(t)
+        if model_changes:
+            mk = {**original_knobs, **model_changes, "workload": wl_type}
+            try:
+                model_tps = cost_model.predict(mk, hw)
+            except Exception:
+                model_tps = 0.0
+        else:
+            model_tps = 0.0
+
+        # 三个 improvement（与 predict_performance 保持一致：下限 0%，上限 200%）
+        IMPROVEMENT_CAP = 200.0
+        raw_vs_scenario = ((model_tps - scenario_tps) / scenario_tps * 100
+                           if scenario_tps > 0 else 0)
+        imp_vs_scenario = min(IMPROVEMENT_CAP, max(0, raw_vs_scenario))
+
+        raw_vs_default = ((model_tps - default_tps) / default_tps * 100
+                          if default_tps > 0 else 0)
+        imp_vs_default = min(IMPROVEMENT_CAP, max(0, raw_vs_default))
+
+        raw_vs_optimal = ((model_tps - optimal_tps) / optimal_tps * 100
+                          if optimal_tps > 0 else 0)
+        imp_vs_optimal = min(IMPROVEMENT_CAP, max(0, raw_vs_optimal))
+
+        gap = optimal_tps - default_tps
+        gap_closed = ((model_tps - default_tps) / gap * 100
+                      if gap > 0 else 0)
+        gap_closed = min(IMPROVEMENT_CAP, max(0, gap_closed))
+
+        # 行为
         msgs = t.get("messages", [])
-        return sum(1 for m in msgs if m.get("role") == "assistant")
+        n_steps = sum(1 for m in msgs if m.get("role") == "assistant")
+        called_predict = any("predict_performance" in m.get("content", "")
+                             for m in msgs)
 
-    def called_predict(t):
-        msgs = t.get("messages", [])
-        return any("predict_performance" in m.get("content", "") for m in msgs)
+        per_episode.append({
+            "env_sample_idx": env_idx,
+            "name": s.get("name", f"env_{env_idx}"),
+            "model_tps": round(model_tps, 1),
+            "scenario_tps": round(scenario_tps, 1),
+            "default_tps": round(default_tps, 1),
+            "optimal_tps": round(optimal_tps, 1),
+            "imp_vs_scenario_pct": round(imp_vs_scenario, 2),
+            "imp_vs_default_pct": round(imp_vs_default, 2),
+            "imp_vs_optimal_pct": round(imp_vs_optimal, 2),
+            "gap_closed_pct": round(gap_closed, 2),
+            "steps": n_steps,
+            "num_knobs_set": len(model_changes),
+            "called_predict": called_predict,
+        })
 
-    steps_list = [steps(t) for t in trajectories]
-    predict_flags = [called_predict(t) for t in trajectories]
+    # 聚合
+    n = len(per_episode)
+    if n == 0:
+        return {"error": "无有效轨迹"}
 
-    total = len(improvements)
-    improved = sum(1 for v in improvements if v > 0)
-    good = sum(1 for v in improvements if v > 3.0)
+    imp_s = [e["imp_vs_scenario_pct"] for e in per_episode]
+    imp_d = [e["imp_vs_default_pct"] for e in per_episode]
+    imp_o = [e["imp_vs_optimal_pct"] for e in per_episode]
+    gc = [e["gap_closed_pct"] for e in per_episode]
 
-    return {
-        "total_episodes": total,
-        "improved_count": improved,
-        "improved_rate": round(improved / total, 4) if total else 0,
-        "good_count": good,
-        "good_rate": round(good / total, 4) if total else 0,
-        "avg_improvement_pct": round(sum(improvements) / total, 2) if total else 0,
-        "max_improvement_pct": round(max(improvements), 2) if improvements else 0,
-        "median_improvement_pct": round(sorted(improvements)[total // 2], 2) if improvements else 0,
-        "avg_reward": round(sum(rewards) / total, 4) if total else 0,
-        "avg_steps": round(sum(steps_list) / total, 1) if total else 0,
-        "predict_call_rate": round(sum(predict_flags) / total, 4) if total else 0,
+    summary = {
+        "total_episodes": n,
+        # vs 场景原始配置
+        "avg_imp_vs_scenario_pct": round(np.mean(imp_s), 2),
+        "median_imp_vs_scenario_pct": round(np.median(imp_s), 2),
+        "improved_vs_scenario_rate": round(sum(1 for v in imp_s if v > 0) / n, 4),
+        # vs PG 默认配置
+        "avg_imp_vs_default_pct": round(np.mean(imp_d), 2),
+        "median_imp_vs_default_pct": round(np.median(imp_d), 2),
+        "improved_vs_default_rate": round(sum(1 for v in imp_d if v > 0) / n, 4),
+        # vs BO 最优配置
+        "avg_imp_vs_optimal_pct": round(np.mean(imp_o), 2),
+        "median_imp_vs_optimal_pct": round(np.median(imp_o), 2),
+        # gap closing
+        "avg_gap_closed_pct": round(np.mean(gc), 2),
+        "median_gap_closed_pct": round(np.median(gc), 2),
+        # 行为
+        "avg_steps": round(np.mean([e["steps"] for e in per_episode]), 1),
+        "predict_call_rate": round(
+            sum(e["called_predict"] for e in per_episode) / n, 4),
     }
+
+    return {"summary": summary, "per_episode": per_episode}
 
 
 def print_summary(metrics: dict):
-    """打印评估报表"""
-    print("\n" + "=" * 50)
-    print("📊 评估报表")
-    print("=" * 50)
-    print(f"  总场景数:           {metrics.get('total_episodes', 0)}")
-    print(f"  提升 > 0%:          {metrics.get('improved_count', 0)} ({metrics.get('improved_rate', 0)*100:.1f}%)")
-    print(f"  提升 > 3%（好样本）: {metrics.get('good_count', 0)} ({metrics.get('good_rate', 0)*100:.1f}%)")
-    print(f"  平均提升:           {metrics.get('avg_improvement_pct', 0):.2f}%")
-    print(f"  最大提升:           {metrics.get('max_improvement_pct', 0):.2f}%")
-    print(f"  中位数提升:         {metrics.get('median_improvement_pct', 0):.2f}%")
-    print(f"  平均 reward:        {metrics.get('avg_reward', 0):.4f}")
-    print(f"  平均步数:           {metrics.get('avg_steps', 0):.1f}")
-    print(f"  predict 调用率:     {metrics.get('predict_call_rate', 0)*100:.1f}%")
-    print("=" * 50)
+    s = metrics.get("summary", {})
+    print("\n" + "=" * 60)
+    print("📊 评估报表（三 baseline 体系）")
+    print("=" * 60)
+    print(f"  总场景数:              {s.get('total_episodes', 0)}")
+    print()
+    print("  ── vs 场景原始配置（Cost Model 预测）──")
+    print(f"  平均提升:              {s.get('avg_imp_vs_scenario_pct', 0):.2f}%")
+    print(f"  中位数提升:            {s.get('median_imp_vs_scenario_pct', 0):.2f}%")
+    print(f"  提升 > 0% 比例:        {s.get('improved_vs_scenario_rate', 0)*100:.1f}%")
+    print()
+    print("  ── vs PG 默认配置（Cost Model 预测）──")
+    print(f"  平均提升:              {s.get('avg_imp_vs_default_pct', 0):.2f}%")
+    print(f"  中位数提升:            {s.get('median_imp_vs_default_pct', 0):.2f}%")
+    print(f"  提升 > 0% 比例:        {s.get('improved_vs_default_rate', 0)*100:.1f}%")
+    print()
+    print("  ── vs BO 最优配置（Cost Model 预测）──")
+    print(f"  平均差距:              {s.get('avg_imp_vs_optimal_pct', 0):.2f}%")
+    print(f"  中位数差距:            {s.get('median_imp_vs_optimal_pct', 0):.2f}%")
+    print()
+    print("  ── Gap Closing（核心）──")
+    print(f"  平均 gap closed:       {s.get('avg_gap_closed_pct', 0):.2f}%")
+    print(f"  中位数 gap closed:     {s.get('median_gap_closed_pct', 0):.2f}%")
+    print()
+    print("  ── 行为指标 ──")
+    print(f"  平均步数:              {s.get('avg_steps', 0):.1f}")
+    print(f"  predict 调用率:        {s.get('predict_call_rate', 0)*100:.1f}%")
+    print("=" * 60)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="评估报表生成（读取 sampler 产出的 eval_trajectories.jsonl）"
-    )
-    parser.add_argument(
-        "--eval-data", required=True,
-        help="sampler 产出的轨迹文件路径（sft_trajectories.jsonl）"
-    )
-    parser.add_argument(
-        "--output", default=None,
-        help="报表输出目录（默认与 eval-data 同目录）"
-    )
+    parser = argparse.ArgumentParser(description="评估报表生成（三 baseline 体系）")
+    parser.add_argument("--eval-data", required=True,
+                        help="sampler eval 模式产出的轨迹文件")
+    parser.add_argument("--scenarios", required=True,
+                        help="eval 场景文件")
+    parser.add_argument("--cost-model", required=True,
+                        help="Cost Model 路径")
+    parser.add_argument("--knob-space", default="configs/knob_space.yaml")
+    parser.add_argument("--output", default=None,
+                        help="报表输出目录")
+    parser.add_argument("--bo-trials", type=int, default=200,
+                        help="BO 搜索试验次数")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-    )
-
-    if not os.path.exists(args.eval_data):
-        logger.error(f"轨迹文件不存在: {args.eval_data}")
-        sys.exit(1)
-
-    logger.info(f"读取轨迹文件: {args.eval_data}")
+    logger.info(f"读取轨迹: {args.eval_data}")
     trajectories = load_trajectories(args.eval_data)
-    logger.info(f"  共 {len(trajectories)} 条轨迹")
+    logger.info(f"  共 {len(trajectories)} 条")
 
-    metrics = compute_eval_metrics(trajectories)
+    logger.info(f"读取场景: {args.scenarios}")
+    with open(args.scenarios, "r", encoding="utf-8") as f:
+        scenarios = json.load(f)
+
+    logger.info(f"加载 Cost Model: {args.cost_model}")
+    from cost_model.model import CostModel
+    from core.db.knob_space import KnobSpace
+    cost_model = CostModel.load(args.cost_model)
+    knob_space = KnobSpace(args.knob_space)
+
+    metrics = compute_eval_metrics(
+        trajectories, scenarios, cost_model, knob_space, args.bo_trials)
     print_summary(metrics)
 
-    # 保存 JSON 报表
     output_dir = args.output or os.path.dirname(os.path.abspath(args.eval_data))
     os.makedirs(output_dir, exist_ok=True)
     report_path = os.path.join(output_dir, "eval_report.json")
