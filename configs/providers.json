@@ -58,5 +58,11 @@
     "api_key": "sk-e96MKgFQjOkUgqLwsjSMApaHfY0qLknPO9WOjDFhyUGvirg8",
     "model": "gpt-5",
     "available": false
+  },
+  {
+    "api_base": "https://code.strova.top/v1",
+    "api_key": "sk-0IhAsgXYyBUuJk263phEv7A4neZEuKfvxveY3INEEWwdD4uZ",
+    "model": "gpt-5.4",
+    "available": true
   }
 ]
