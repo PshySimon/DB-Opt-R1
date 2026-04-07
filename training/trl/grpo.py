@@ -1,64 +1,247 @@
 """
 trl GRPO 多轮工具调用训练入口
 
-通过 TRL 原生 environment_factory 实现多轮 agent ↔ 环境交互训练。
-模型在训练时真正与工具环境交互，reward 基于 predict_performance 的 TPS 提升。
+与 verl 路径完全对齐：
+- 普通 chat 格式，不走 function calling
+- 工具描述写在 system prompt
+- 模型生成 <tool_call>...</tool_call> 文本
+- 代码用正则提取、调用 ToolEnv.step()
+- tool response 用 <|im_start|>user\n<tool_response>...\n</tool_response><|im_end|> 拼回去
+
+使用 TRL 的 rollout_func 手动控制多轮生成。
 
 Usage:
-    python -m training.trl.grpo \
-        --model_path model_save/sft/checkpoint-xxx \
-        --scenario_dir data_pipeline/data/scenarios/collected/ \
-        --cost_model cost_model/checkpoints/v9_lgbm \
-        --output_dir model_save/grpo/
-
-    # 指定场景文件
-    python -m training.trl.grpo \
-        --model_path model_save/sft/checkpoint-xxx \
-        --scenario_files \
-            data_pipeline/data/scenarios/collected/collected_server1.json \
-            data_pipeline/data/scenarios/collected/collected_server2.json \
-        --cost_model cost_model/checkpoints/v9_lgbm \
+    PYTHONPATH=. python -m training.trl.grpo \\
+        --model_path model_save/sft/checkpoint-xxx \\
+        --scenario_dir data_pipeline/data/scenarios/collected/ \\
+        --cost_model cost_model/checkpoints/v9_lgbm \\
         --output_dir model_save/grpo/
 """
 
-import argparse
+import re
+import json
 import math
+import argparse
+import logging
+import random
+from copy import deepcopy
+
 import torch
 from datasets import Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig, GRPOTrainer
 from peft import LoraConfig
 
-from training.data_utils import load_grpo_prompts, SYSTEM_PROMPT
+from training.data_utils import SYSTEM_PROMPT
 from training.reward_score import compute_score_format
+
+logger = logging.getLogger(__name__)
+
+# 与 verl grpo_trainer.yaml 中 tool_custom_response_template 完全一致
+TOOL_RESPONSE_TEMPLATE = """
+<|im_start|>user
+<tool_response>
+{tool_response}
+</tool_response><|im_end|>
+<|im_start|>assistant
+<think>
+"""
+
+
+# ============================================================
+# 多轮 Rollout
+# ============================================================
+
+def multi_turn_rollout(prompts, trainer):
+    """
+    自定义 rollout_func，与 verl 的 ToolGenerationManager.run_llm_loop 对齐。
+
+    流程（每个 prompt）：
+    1. tokenize prompt（含 system prompt + 工具描述）
+    2. model.generate() 生成文本
+    3. 检测 <tool_call>...</tool_call>
+    4. 用 ToolEnv.step() 执行工具
+    5. 拼接 tool_response 到上下文，继续生成
+    6. 重复直到没有 tool_call 或达到 max_turns
+    7. 用完整轨迹做一次 forward pass 得到 logprobs
+
+    Args:
+        prompts: 当前进程分配到的 prompt 列表
+        trainer: GRPOTrainer 实例
+
+    Returns:
+        dict with prompt_ids, completion_ids, logprobs, + reward 用的额外字段
+    """
+    model = trainer.model
+    tokenizer = trainer.processing_class
+    device = model.device
+
+    num_generations = trainer.args.num_generations
+    max_completion_length = trainer.args.max_completion_length
+
+    # 从 trainer 的自定义属性读取配置
+    max_turns = getattr(trainer, '_max_turns', 10)
+    envs_factory = getattr(trainer, '_envs_factory', None)
+
+    all_prompt_ids = []
+    all_completion_ids = []
+    all_logprobs = []
+    all_improvements = []  # 传给 reward 函数
+
+    for prompt in prompts:
+        # 每个 prompt 生成 num_generations 个 rollout
+        for _ in range(num_generations):
+            # 创建独立的环境
+            env = envs_factory()
+            env.reset()
+
+            # 构建 messages（与 core/agent.py 的 rollout 完全一致）
+            tools_desc = env.tools_format_func()
+            full_system = f"{SYSTEM_PROMPT}\n\n{tools_desc}"
+
+            if isinstance(prompt, list):
+                # conversational format
+                messages = list(prompt)  # copy
+                # 确保 system prompt 包含 tool 描述
+                if messages and messages[0]["role"] == "system":
+                    messages[0]["content"] = full_system
+                else:
+                    messages.insert(0, {"role": "system", "content": full_system})
+            else:
+                messages = [
+                    {"role": "system", "content": full_system},
+                    {"role": "user", "content": str(prompt)},
+                ]
+
+            # tokenize prompt
+            prompt_text = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            prompt_ids = tokenizer.encode(
+                prompt_text, return_tensors="pt", add_special_tokens=False
+            ).to(device)
+
+            # 多轮生成
+            full_completion_ids = torch.tensor([], dtype=torch.long, device=device)
+            generation_masks = []  # True = 模型生成, False = tool response
+
+            for turn in range(max_turns):
+                current_input = torch.cat(
+                    [prompt_ids, full_completion_ids.unsqueeze(0)] if full_completion_ids.numel() > 0
+                    else [prompt_ids],
+                    dim=1
+                )
+
+                # 检查长度
+                remaining = max_completion_length - full_completion_ids.numel()
+                if remaining <= 0:
+                    break
+
+                # 生成
+                with torch.no_grad():
+                    outputs = model.generate(
+                        input_ids=current_input,
+                        max_new_tokens=min(remaining, 1024),
+                        do_sample=True,
+                        temperature=1.0,
+                        top_p=1.0,
+                        pad_token_id=tokenizer.pad_token_id,
+                        eos_token_id=tokenizer.eos_token_id,
+                    )
+
+                new_ids = outputs[0, current_input.shape[1]:]
+                new_text = tokenizer.decode(new_ids, skip_special_tokens=False)
+
+                # 检测 </tool_call>
+                if "</tool_call>" in new_text:
+                    # 截断到第一个 </tool_call>
+                    cut_text = new_text.split("</tool_call>")[0] + "</tool_call>"
+                    cut_ids = tokenizer.encode(
+                        cut_text, return_tensors="pt", add_special_tokens=False
+                    ).to(device)[0]
+
+                    full_completion_ids = torch.cat([full_completion_ids, cut_ids])
+                    generation_masks.extend([True] * len(cut_ids))
+
+                    # 用 env.step() 执行工具（与 verl 一致）
+                    obs, reward, done, info = env.step(cut_text)
+
+                    # 拼接 tool response（与 verl tool_custom_response_template 一致）
+                    tool_resp_text = TOOL_RESPONSE_TEMPLATE.format(tool_response=obs)
+                    tool_resp_ids = tokenizer.encode(
+                        tool_resp_text, return_tensors="pt", add_special_tokens=False
+                    ).to(device)[0]
+
+                    full_completion_ids = torch.cat([full_completion_ids, tool_resp_ids])
+                    generation_masks.extend([False] * len(tool_resp_ids))
+
+                    if done:
+                        break
+                else:
+                    # 没有 tool_call，模型正常结束
+                    full_completion_ids = torch.cat([full_completion_ids, new_ids])
+                    generation_masks.extend([True] * len(new_ids))
+                    break
+
+            # 截断到 max_completion_length
+            if full_completion_ids.numel() > max_completion_length:
+                full_completion_ids = full_completion_ids[:max_completion_length]
+                generation_masks = generation_masks[:max_completion_length]
+
+            # 计算 logprobs：forward pass 整个轨迹
+            full_input = torch.cat([prompt_ids[0], full_completion_ids]).unsqueeze(0)
+            with torch.no_grad():
+                model_output = model(input_ids=full_input)
+                # logits 对应 completion 部分
+                logits = model_output.logits[0, prompt_ids.shape[1] - 1:-1, :]
+                log_probs = torch.log_softmax(logits, dim=-1)
+                token_log_probs = log_probs.gather(
+                    -1, full_completion_ids.unsqueeze(-1)
+                ).squeeze(-1)
+
+            # 获取 improvement（用于 reward 计算）
+            improvement = getattr(env, 'improvement_pct', 0.0)
+            if improvement == 0.0:
+                # 尝试最后调一次 predict_performance
+                try:
+                    predict_text = '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>'
+                    obs, _, _, _ = env.step(predict_text)
+                    parsed = json.loads(obs) if isinstance(obs, str) else obs
+                    improvement = float(parsed.get("improvement_pct", 0.0))
+                except Exception:
+                    pass
+
+            all_prompt_ids.append(prompt_ids[0].cpu())
+            all_completion_ids.append(full_completion_ids.cpu())
+            all_logprobs.append(token_log_probs.cpu())
+            all_improvements.append(improvement)
+
+    return {
+        "prompt_ids": all_prompt_ids,
+        "completion_ids": all_completion_ids,
+        "logprobs": all_logprobs,
+        "improvement_pct": all_improvements,
+    }
 
 
 # ============================================================
 # Reward 函数
 # ============================================================
 
-def reward_fn(completions, environments=None, **kwargs):
+def reward_fn(completions, improvement_pct=None, **kwargs):
     """
-    多轮交互 reward 函数。
-
-    通过 environment_factory 传入的 env 实例获取 improvement_pct。
+    Reward 函数，与 verl 的 DBRewardManager 对齐。
 
     总分 = format_score + answer_score
-    - format_score: 检查 response 格式（think/tool_call 标签）
-    - answer_score: env.improvement_pct 经 log 压缩
-
-    Args:
-        completions: 模型生成的 completion 列表
-        environments: TRL 传入的 env 实例列表
-
-    Returns:
-        list[float]: 每个 completion 的 reward
+    - format_score: compute_score_format（0~1.5）
+    - answer_score: log(1 + improvement)，improvement 从 rollout 传入
     """
     rewards = []
+    improvements = improvement_pct or [0.0] * len(completions)
+
     for i, completion in enumerate(completions):
-        # 提取 completion 文本
+        # 提取文本
         if isinstance(completion, list):
-            # conversational format: list of dicts
             content = " ".join(
                 m.get("content", "") for m in completion
                 if m.get("role") == "assistant"
@@ -66,16 +249,13 @@ def reward_fn(completions, environments=None, **kwargs):
         else:
             content = str(completion)
 
-        # 格式分 (0 ~ 1.5)
+        # 格式分
         format_score = compute_score_format(content)
 
-        # 任务分: 从 env 读取 improvement_pct
-        answer_score = 0.0
-        if environments and i < len(environments):
-            env = environments[i]
-            improvement = getattr(env, "improvement_pct", 0.0) / 100.0
-            improvement = min(2.0, max(0.0, improvement))
-            answer_score = math.log(1 + improvement) if improvement > 0 else 0.0
+        # 任务分
+        imp = improvements[i] / 100.0 if i < len(improvements) else 0.0
+        imp = min(2.0, max(0.0, imp))
+        answer_score = math.log(1 + imp) if imp > 0 else 0.0
 
         rewards.append(format_score + answer_score)
 
@@ -94,29 +274,23 @@ def main():
     parser.add_argument("--output_dir", default="./model_save/grpo/")
 
     # 场景数据
-    parser.add_argument("--scenario_dir", default=None,
-                        help="场景数据目录")
-    parser.add_argument("--scenario_files", nargs="+", default=None,
-                        help="场景 JSON 文件列表（优先于 scenario_dir）")
+    parser.add_argument("--scenario_dir", default=None)
+    parser.add_argument("--scenario_files", nargs="+", default=None)
 
     # Cost Model
-    parser.add_argument("--cost_model", default=None,
-                        help="Cost Model checkpoint 目录")
+    parser.add_argument("--cost_model", default=None)
 
     # 训练超参
     parser.add_argument("--num_epochs", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--grad_accum", type=int, default=16)
-    parser.add_argument("--num_generations", type=int, default=4,
-                        help="GRPO 每个 prompt 生成的 completion 数")
-    parser.add_argument("--max_completion_length", type=int, default=4096,
-                        help="每轮 completion 最大 token 数")
+    parser.add_argument("--num_generations", type=int, default=4)
+    parser.add_argument("--max_completion_length", type=int, default=4096)
     parser.add_argument("--max_prompt_length", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=5e-7)
     parser.add_argument("--lora_rank", type=int, default=64)
     parser.add_argument("--max_steps", type=int, default=-1)
-    parser.add_argument("--max_turns", type=int, default=10,
-                        help="agent 最大交互轮数")
+    parser.add_argument("--max_turns", type=int, default=10)
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--knob_space", default="configs/knob_space.yaml")
     parser.add_argument("--flash_attn", action="store_true", default=False)
@@ -130,9 +304,11 @@ def main():
             cost_model = CostModel.load(args.cost_model)
             print(f"✅ 加载 Cost Model: {args.cost_model}")
         except Exception as e:
-            print(f"[WARNING] Cost Model 加载失败: {e}，answer_score 将为 0")
+            print(f"[WARNING] Cost Model 加载失败: {e}")
 
-    # 构建 prompt 数据集
+    # 构建 prompt 数据集（与 verl 数据格式对齐）
+    from training.data_utils import load_grpo_prompts
+
     scenario_source = args.scenario_files or args.scenario_dir
     if not scenario_source:
         raise ValueError("必须指定 --scenario_dir 或 --scenario_files")
@@ -141,12 +317,11 @@ def main():
         scenario_source if isinstance(scenario_source, str) else scenario_source[0]
     )
 
-    # TRL 要求 conversational format
     dataset = Dataset.from_list([
         {"prompt": item["prompt"]}
         for item in prompt_data
     ])
-    print(f"📊 数据集大小: {len(dataset)} 条 prompt")
+    print(f"📊 数据集: {len(dataset)} 条 prompt")
 
     # 加载模型
     print(f"🔄 加载模型: {args.model_path}")
@@ -176,7 +351,7 @@ def main():
         task_type="CAUSAL_LM",
     )
 
-    # 训练配置
+    # GRPOConfig
     training_config = GRPOConfig(
         output_dir=args.output_dir,
         num_train_epochs=args.num_epochs,
@@ -196,21 +371,25 @@ def main():
         report_to="none",
         max_steps=args.max_steps,
         seed=42,
-        # 禁用 thinking 模式
-        chat_template_kwargs={"enable_thinking": False},
     )
 
-    # environment_factory: TRL 每个 rollout 创建一个 env 实例
-    from training.trl.db_env import DBTuningTRLEnv
+    # 环境工厂（与 verl 的 DBToolEnv 使用完全相同）
+    from environment.tools import DBToolEnv
+
+    scenario_files = args.scenario_files
+    scenario_dir = args.scenario_dir
 
     def env_factory():
-        return DBTuningTRLEnv(
+        env = DBToolEnv(
+            mode="train",
+            scenario_dir=scenario_dir,
             cost_model=cost_model,
-            scenario_dir=args.scenario_dir,
-            scenario_files=args.scenario_files,
-            knob_space_path=args.knob_space,
             max_turns=args.max_turns,
+            knob_space_path=args.knob_space,
         )
+        if scenario_files:
+            env.scenarios = DBToolEnv._load_scenarios(scenario_files)
+        return env
 
     # Trainer
     trainer = GRPOTrainer(
@@ -220,18 +399,19 @@ def main():
         reward_funcs=reward_fn,
         train_dataset=dataset,
         peft_config=peft_config,
-        environment_factory=env_factory,
+        rollout_func=multi_turn_rollout,
     )
+
+    # 把环境工厂和配置挂到 trainer 上，rollout_func 里读取
+    trainer._max_turns = args.max_turns
+    trainer._envs_factory = env_factory
 
     # 显存统计
     if torch.cuda.is_available():
-        total_params = sum(p.numel() for p in trainer.model.parameters())
-        trainable_params = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
+        total_p = sum(p.numel() for p in trainer.model.parameters())
+        train_p = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
         print(f"\n{'='*60}")
-        print(f"  参数统计")
-        print(f"{'='*60}")
-        print(f"  总参数:     {total_params/1e6:.1f}M")
-        print(f"  可训练参数: {trainable_params/1e6:.1f}M ({trainable_params/total_params:.2%})")
+        print(f"  总参数: {total_p/1e6:.1f}M | 可训练: {train_p/1e6:.1f}M ({train_p/total_p:.2%})")
         print(f"{'='*60}")
         torch.cuda.reset_peak_memory_stats()
 
@@ -243,7 +423,7 @@ def main():
         print(f"\n📊 峰值显存: {peak:.2f} GB")
 
     trainer.save_model(args.output_dir)
-    print(f"✅ 训练完成，模型保存到 {args.output_dir}")
+    print(f"✅ 模型保存到 {args.output_dir}")
 
 
 if __name__ == "__main__":
