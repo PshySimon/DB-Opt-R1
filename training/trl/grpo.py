@@ -13,7 +13,11 @@ trl GRPO 多轮工具调用训练入口
 Usage:
     PYTHONPATH=. python -m training.trl.grpo \\
         --model_path model_save/sft/checkpoint-xxx \\
-        --scenario_dir data_pipeline/data/scenarios/collected/ \\
+        --train_data data_pipeline/data/train/sft_trajectories_v2.jsonl \\
+        --scenario_files \\
+            data_pipeline/data/scenarios/collected/collected_server1.json \\
+            data_pipeline/data/scenarios/collected/collected_server2.json \\
+            data_pipeline/data/scenarios/collected/collected_server3.json \\
         --cost_model cost_model/checkpoints/v9_lgbm \\
         --output_dir model_save/grpo/
 """
@@ -89,11 +93,32 @@ def multi_turn_rollout(prompts, trainer):
     all_improvements = []  # 传给 reward 函数
 
     for prompt in prompts:
+        # prompt 是 dict: {"role": ..., "content": ...} 列表
+        # dataset 额外列 env_sample_idx, question 会由 TRL 传入
+        # 但 rollout_func 只收到 prompts，所以我们把 env_sample_idx 编码在 prompt 里
+        # prompt format: [{"role":"system",...}, {"role":"user","content":"..."}]
+        # env_sample_idx 从 trainer._prompt_env_map 查询
+
         # 每个 prompt 生成 num_generations 个 rollout
         for _ in range(num_generations):
             # 创建独立的环境
             env = envs_factory()
-            env.reset()
+
+            # 从 prompt 中提取 user question，查找对应的 env_sample_idx
+            prompt_env_map = getattr(trainer, '_prompt_env_map', {})
+            if isinstance(prompt, list):
+                user_msg = next(
+                    (m["content"] for m in prompt if m["role"] == "user"), ""
+                )
+            else:
+                user_msg = str(prompt)
+            sample_idx = prompt_env_map.get(user_msg)
+
+            # reset 到对应场景
+            if sample_idx is not None:
+                env.reset(sample_idx=sample_idx)
+            else:
+                env.reset()  # 随机场景
 
             # 构建 messages（与 core/agent.py 的 rollout 完全一致）
             tools_desc = env.tools_format_func()
@@ -273,9 +298,11 @@ def main():
     parser.add_argument("--model_path", required=True)
     parser.add_argument("--output_dir", default="./model_save/grpo/")
 
-    # 场景数据
-    parser.add_argument("--scenario_dir", default=None)
-    parser.add_argument("--scenario_files", nargs="+", default=None)
+    # 数据
+    parser.add_argument("--train_data", required=True,
+                        help="SFT 轨迹文件（JSONL），从中提取 prompt")
+    parser.add_argument("--scenario_files", nargs="+", required=True,
+                        help="场景 JSON 文件（与 SFT 数据的 env_sample_idx 对应）")
 
     # Cost Model
     parser.add_argument("--cost_model", default=None)
@@ -306,22 +333,39 @@ def main():
         except Exception as e:
             print(f"[WARNING] Cost Model 加载失败: {e}")
 
-    # 构建 prompt 数据集（与 verl 数据格式对齐）
-    from training.data_utils import load_grpo_prompts
+    # ---- 从 SFT 轨迹提取 prompt ----
+    # 每条轨迹有 question + env_sample_idx
+    # question 作为 user message，env_sample_idx 用于 rollout 时 reset 到对应场景
+    prompt_records = []  # [{"question": str, "env_sample_idx": int}]
+    prompt_env_map = {}  # question -> env_sample_idx
+    seen_questions = set()
 
-    scenario_source = args.scenario_files or args.scenario_dir
-    if not scenario_source:
-        raise ValueError("必须指定 --scenario_dir 或 --scenario_files")
+    with open(args.train_data, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            data = json.loads(line)
+            question = data.get("question", "")
+            idx = data.get("env_sample_idx", None)
+            if not question or question in seen_questions:
+                continue
+            seen_questions.add(question)
+            prompt_records.append({"question": question, "env_sample_idx": idx})
+            if idx is not None:
+                prompt_env_map[question] = idx
 
-    prompt_data = load_grpo_prompts(
-        scenario_source if isinstance(scenario_source, str) else scenario_source[0]
-    )
-
+    # 构建 TRL dataset（conversational format）
     dataset = Dataset.from_list([
-        {"prompt": item["prompt"]}
-        for item in prompt_data
+        {
+            "prompt": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": r["question"]},
+            ]
+        }
+        for r in prompt_records
     ])
-    print(f"📊 数据集: {len(dataset)} 条 prompt")
+    print(f"📊 数据集: {len(dataset)} 条独立 prompt（从 {args.train_data} 提取）")
 
     # 加载模型
     print(f"🔄 加载模型: {args.model_path}")
@@ -376,19 +420,18 @@ def main():
     # 环境工厂（与 verl 的 DBToolEnv 使用完全相同）
     from environment.tools import DBToolEnv
 
-    scenario_files = args.scenario_files
-    scenario_dir = args.scenario_dir
+    # 预加载场景（只加载一次，所有 env 共享）
+    all_scenarios = DBToolEnv._load_scenarios(args.scenario_files)
+    print(f"📦 加载 {len(all_scenarios)} 个场景")
 
     def env_factory():
         env = DBToolEnv(
             mode="train",
-            scenario_dir=scenario_dir,
             cost_model=cost_model,
             max_turns=args.max_turns,
             knob_space_path=args.knob_space,
         )
-        if scenario_files:
-            env.scenarios = DBToolEnv._load_scenarios(scenario_files)
+        env.scenarios = all_scenarios
         return env
 
     # Trainer
@@ -402,9 +445,10 @@ def main():
         rollout_func=multi_turn_rollout,
     )
 
-    # 把环境工厂和配置挂到 trainer 上，rollout_func 里读取
+    # 把环境工厂、配置、prompt→场景映射挂到 trainer 上
     trainer._max_turns = args.max_turns
     trainer._envs_factory = env_factory
+    trainer._prompt_env_map = prompt_env_map
 
     # 显存统计
     if torch.cuda.is_available():

@@ -3,7 +3,8 @@
 set -e
 
 MODEL_PATH="${MODEL_PATH:-./model_save/sft/}"
-SCENARIO_DIR="${SCENARIO_DIR:-./data_pipeline/data/scenarios/collected/}"
+TRAIN_DATA="${TRAIN_DATA:-./data_pipeline/data/train/sft_trajectories_v2.jsonl}"
+SCENARIO_FILES="${SCENARIO_FILES:-data_pipeline/data/scenarios/collected/collected_server1.json data_pipeline/data/scenarios/collected/collected_server2.json data_pipeline/data/scenarios/collected/collected_server3.json}"
 COST_MODEL="${COST_MODEL:-./cost_model/checkpoints/v9_lgbm}"
 OUTPUT_DIR="${OUTPUT_DIR:-./model_save/grpo/}"
 EPOCHS="${EPOCHS:-2}"
@@ -18,7 +19,8 @@ echo "============================================"
 echo "  GRPO 多轮工具调用训练 (trl)"
 echo "============================================"
 echo "模型:         $MODEL_PATH"
-echo "场景数据:     $SCENARIO_DIR"
+echo "训练数据:     $TRAIN_DATA"
+echo "场景数据:     $SCENARIO_FILES"
 echo "Cost Model:   $COST_MODEL"
 echo "输出:         $OUTPUT_DIR"
 echo "Batch:        ${BATCH_SIZE} x ${GRAD_ACCUM} = $((BATCH_SIZE * GRAD_ACCUM))"
@@ -28,7 +30,8 @@ echo "============================================"
 
 PYTHONPATH=. python -m training.trl.grpo \
     --model_path "$MODEL_PATH" \
-    --scenario_dir "$SCENARIO_DIR" \
+    --train_data "$TRAIN_DATA" \
+    --scenario_files $SCENARIO_FILES \
     --cost_model "$COST_MODEL" \
     --output_dir "$OUTPUT_DIR" \
     --num_epochs $EPOCHS \
