@@ -1,35 +1,26 @@
 """
-trl GRPO 多轮工具调用训练（vLLM 加速版）
+trl GRPO 多轮工具调用训练（vLLM 进程内加速）
 
 架构：
-- 生成：通过 vLLM OpenAI API 并发多轮 rollout（快）
+- 生成：vllm.LLM 进程内批量生成（快，无需启动 server）
 - 训练：HF 模型 forward + backward（LoRA）
-- 生成策略固定为 SFT 模型，训练策略实时更新
+- 两个模型共享 GPU 显存（vLLM 占 30%，训练占 70%）
 
 Usage:
-    # 1. 启动 vLLM（限制显存给训练留空间）
-    GPU_UTIL=0.25 bash scripts/serve_vllm.sh
-
-    # 2. 启动训练
     PYTHONPATH=. python -m training.trl.grpo \\
         --model_path model_save/sft_qwen3_4b_cleaned_merged \\
         --train_data data_pipeline/data/train/sft_trajectories.jsonl \\
-        --scenario_files \\
-            data_pipeline/data/scenarios/collected/collected_server1.json \\
-            data_pipeline/data/scenarios/collected/collected_server2.json \\
-            data_pipeline/data/scenarios/collected/collected_server3.json \\
+        --scenario_files ... \\
         --cost_model cost_model/checkpoints/v9_lgbm \\
-        --vllm_base_url http://localhost:8000/v1 \\
-        --vllm_model qwen3-4b-sft \\
         --output_dir model_save/grpo/
 """
 
 import json
 import math
+import time
 import argparse
 import logging
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Union
 
 import torch
@@ -40,7 +31,6 @@ from trl.trainer.utils import pad, selective_log_softmax
 from trl.data_utils import maybe_apply_chat_template, is_conversational
 from peft import LoraConfig
 from accelerate.utils import gather
-from trl.models import unwrap_model_for_generation
 
 from training.data_utils import SYSTEM_PROMPT
 from training.reward_score import compute_score_format
@@ -49,135 +39,143 @@ logger = logging.getLogger(__name__)
 
 
 class MultiTurnGRPOTrainer(GRPOTrainer):
-    """vLLM 加速的多轮工具交互 GRPO Trainer"""
+    """vLLM 进程内加速的多轮工具交互 GRPO Trainer"""
 
     def __init__(self, *args, env_factory=None, prompt_env_map=None,
-                 max_turns=10, vllm_base_url=None, vllm_model_name=None,
-                 rollout_concurrency=4, **kwargs):
+                 max_turns=10, vllm_llm=None, vllm_tokenizer=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.env_factory = env_factory
         self.prompt_env_map = prompt_env_map or {}
         self.max_turns = max_turns
-        self.vllm_model_name = vllm_model_name
-        self.rollout_concurrency = rollout_concurrency
+        self.vllm_llm = vllm_llm
+        self.vllm_tokenizer = vllm_tokenizer
 
-        from openai import OpenAI
-        self.vllm_api = OpenAI(api_key="dummy", base_url=vllm_base_url)
-        logger.info(f"vLLM API: {vllm_base_url}, model: {vllm_model_name}")
+    def _do_rollouts_batched(self, prompts):
+        """
+        批量多轮 rollout：每轮把所有活跃 rollout 一起交给 vLLM 批量生成。
+        比逐条串行快 N 倍（N = num_generations）。
+        """
+        from vllm import SamplingParams
+        sampling_params = SamplingParams(
+            temperature=1.0, top_p=1.0, max_tokens=1024,
+            stop=["</tool_call>"], include_stop_str_in_output=True,
+        )
 
-    def _do_single_rollout(self, prompt):
-        """单条多轮 rollout（通过 vLLM API）"""
-        if isinstance(prompt, list):
-            user_msg = next((m["content"] for m in prompt if m["role"] == "user"), "")
-        else:
-            user_msg = str(prompt)
+        n = len(prompts)
+        # 每条 rollout 的状态
+        envs = []
+        prompt_msgs_list = []  # 用于 tokenize 的 prompt
+        messages_list = []     # 完整对话
+        improvements = [0.0] * n
+        active = list(range(n))  # 当前活跃的 rollout 索引
 
-        sample_idx = self.prompt_env_map.get(user_msg)
-        env = self.env_factory()
-        env.reset(sample_idx=sample_idx) if sample_idx is not None else env.reset()
-
-        tools_desc = env.tools_format_func()
-        full_system = f"{SYSTEM_PROMPT}\n\n{tools_desc}"
-        prompt_msgs = [
-            {"role": "system", "content": full_system},
-            {"role": "user", "content": user_msg},
-        ]
-        messages = list(prompt_msgs)
-
-        for turn in range(self.max_turns):
-            text = ""
-            for retry in range(3):
-                try:
-                    resp = self.vllm_api.chat.completions.create(
-                        model=self.vllm_model_name,
-                        messages=messages,
-                        temperature=1.0,
-                        max_tokens=1024,
-                    )
-                    text = resp.choices[0].message.content or ""
-                    if not text:
-                        text = getattr(resp.choices[0].message, 'reasoning_content', None) or ""
-                    break
-                except Exception as e:
-                    logger.warning(f"vLLM 生成失败 (retry {retry+1}/3): {e}")
-                    import time; time.sleep(5)
-            if not text:
-                break
-
-            if "</tool_call>" in text:
-                text = text.split("</tool_call>")[0] + "</tool_call>"
-
-            messages.append({"role": "assistant", "content": text})
-
-            if "</tool_call>" in text:
-                obs, _, done, _ = env.step(text)
-                messages.append({"role": "user", "content": f"<tool_response>\n{obs}\n</tool_response>"})
-                if done:
-                    break
+        for i in range(n):
+            prompt = prompts[i]
+            if isinstance(prompt, list):
+                user_msg = next((m["content"] for m in prompt if m["role"] == "user"), "")
             else:
+                user_msg = str(prompt)
+
+            sample_idx = self.prompt_env_map.get(user_msg)
+            env = self.env_factory()
+            env.reset(sample_idx=sample_idx) if sample_idx is not None else env.reset()
+            envs.append(env)
+
+            tools_desc = env.tools_format_func()
+            full_system = f"{SYSTEM_PROMPT}\n\n{tools_desc}"
+            pm = [{"role": "system", "content": full_system},
+                  {"role": "user", "content": user_msg}]
+            prompt_msgs_list.append(pm)
+            messages_list.append(list(pm))
+
+        # 多轮循环
+        for turn in range(self.max_turns):
+            if not active:
                 break
+
+            # 把活跃 rollout 的 messages 格式化成 prompt 文本
+            batch_texts = []
+            for i in active:
+                text = self.vllm_tokenizer.apply_chat_template(
+                    messages_list[i], tokenize=False, add_generation_prompt=True
+                )
+                batch_texts.append(text)
+
+            # vLLM 批量生成
+            outputs = self.vllm_llm.generate(batch_texts, sampling_params)
+
+            # 处理每条输出
+            still_active = []
+            for j, i in enumerate(active):
+                gen_text = outputs[j].outputs[0].text or ""
+
+                # 补全 stop token（include_stop_str_in_output 有时不可靠）
+                if "<tool_call>" in gen_text and "</tool_call>" not in gen_text:
+                    gen_text += "</tool_call>"
+
+                messages_list[i].append({"role": "assistant", "content": gen_text})
+
+                if "</tool_call>" in gen_text:
+                    obs, _, done, _ = envs[i].step(gen_text)
+                    messages_list[i].append({
+                        "role": "user",
+                        "content": f"<tool_response>\n{obs}\n</tool_response>"
+                    })
+                    if not done:
+                        still_active.append(i)
+                    # done 了就不再继续
+                # else: 没有 tool_call，结束
+
+            active = still_active
 
         # 获取 improvement
-        improvement = getattr(env, 'improvement_pct', 0.0)
-        if improvement == 0.0:
-            try:
-                obs, _, _, _ = env.step('<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>')
-                improvement = float(json.loads(obs).get("improvement_pct", 0.0))
-            except Exception:
-                pass
+        for i in range(n):
+            imp = getattr(envs[i], 'improvement_pct', 0.0)
+            if imp == 0.0:
+                try:
+                    obs, _, _, _ = envs[i].step(
+                        '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>'
+                    )
+                    imp = float(json.loads(obs).get("improvement_pct", 0.0))
+                except Exception:
+                    pass
+            improvements[i] = imp
 
-        return prompt_msgs, messages, improvement
+        return prompt_msgs_list, messages_list, improvements
 
     def _generate_and_score_completions(self, inputs):
         device = self.accelerator.device
         prompts = [x["prompt"] for x in inputs]
 
-        # ==================== 并发 rollout（vLLM） ====================
-        results = [None] * len(prompts)
-        workers = min(len(prompts), self.rollout_concurrency)
-
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futs = {pool.submit(self._do_single_rollout, p): i for i, p in enumerate(prompts)}
-            for fut in as_completed(futs):
-                idx = futs[fut]
-                try:
-                    results[idx] = fut.result()
-                except Exception as e:
-                    logger.error(f"Rollout {idx} 异常: {e}")
-                    dummy_msgs = [{"role": "system", "content": SYSTEM_PROMPT},
-                                  {"role": "user", "content": ""},
-                                  {"role": "assistant", "content": ""}]
-                    results[idx] = (dummy_msgs[:2], dummy_msgs, 0.0)
+        # ==================== 批量多轮 rollout ====================
+        prompt_msgs_list, messages_list, improvements = self._do_rollouts_batched(prompts)
 
         # ==================== Tokenize ====================
         all_prompt_texts = []
         all_completion_ids = []
-        all_improvements = []
 
-        for prompt_msgs, full_msgs, improvement in results:
-            prompt_text = self.processing_class.apply_chat_template(
-                prompt_msgs, tokenize=False, add_generation_prompt=True
+        for i in range(len(prompts)):
+            prompt_text = self.vllm_tokenizer.apply_chat_template(
+                prompt_msgs_list[i], tokenize=False, add_generation_prompt=True
             )
-            full_text = self.processing_class.apply_chat_template(
-                full_msgs, tokenize=False, add_generation_prompt=False
+            full_text = self.vllm_tokenizer.apply_chat_template(
+                messages_list[i], tokenize=False, add_generation_prompt=False
             )
             all_prompt_texts.append(prompt_text)
-            all_improvements.append(improvement)
 
-            # 提取 completion ids
-            prompt_token_len = len(self.processing_class.encode(prompt_text, add_special_tokens=False))
-            full_ids = self.processing_class.encode(full_text, add_special_tokens=False)
-            comp_ids = full_ids[prompt_token_len:]
+            # 提取 completion token ids
+            prompt_len = len(self.vllm_tokenizer.encode(prompt_text, add_special_tokens=False))
+            full_ids = self.vllm_tokenizer.encode(full_text, add_special_tokens=False)
+            comp_ids = full_ids[prompt_len:]
 
             if len(comp_ids) > self.max_completion_length:
                 comp_ids = comp_ids[:self.max_completion_length]
-            # 兜底：至少有一个 eos token，防止空 tensor 导致 argmax 崩溃
             if len(comp_ids) == 0:
-                comp_ids = [self.processing_class.eos_token_id]
+                comp_ids = [self.vllm_tokenizer.eos_token_id]
 
             all_completion_ids.append(torch.tensor(comp_ids, dtype=torch.long, device=device))
 
-        # Prompt tokenize（left pad）
+        # Prompt（left pad）
         prompt_inputs = self.processing_class(
             text=all_prompt_texts, return_tensors="pt", padding=True,
             padding_side="left", add_special_tokens=False
@@ -196,7 +194,8 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         # Completion mask
         is_eos = completion_ids == self.processing_class.eos_token_id
         eos_idx = torch.full((is_eos.size(0),), is_eos.size(1), dtype=torch.long, device=device)
-        eos_idx[is_eos.any(dim=1)] = is_eos.int().argmax(dim=1)[is_eos.any(dim=1)]
+        if is_eos.any(dim=1).any():
+            eos_idx[is_eos.any(dim=1)] = is_eos.int().argmax(dim=1)[is_eos.any(dim=1)]
         seq_indices = torch.arange(is_eos.size(1), device=device).expand(is_eos.size(0), -1)
         completion_mask = ((seq_indices <= eos_idx.unsqueeze(1)) &
                            (completion_ids != self.processing_class.pad_token_id)).int()
@@ -204,7 +203,7 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
         attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
 
-        # ==================== Logprobs（HF 模型） ====================
+        # ==================== Logprobs（HF 模型）====================
         logits_to_keep = completion_ids.size(1)
         with torch.no_grad():
             old_per_token_logps = (
@@ -228,7 +227,7 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         for i in range(len(prompts)):
             text = self.processing_class.decode(all_completion_ids[i], skip_special_tokens=True)
             fmt = compute_score_format(text)
-            imp = min(2.0, max(0.0, all_improvements[i] / 100.0))
+            imp = min(2.0, max(0.0, improvements[i] / 100.0))
             ans = math.log(1 + imp) if imp > 0 else 0.0
             rewards_list.append(fmt + ans)
 
@@ -249,7 +248,7 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         )
         advantages = advantages[process_slice]
 
-        # ==================== Metrics ====================
+        # Metrics
         mode = "eval" if self.control.should_evaluate else "train"
         if mode == "train":
             self._total_train_tokens += self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item()
@@ -260,7 +259,7 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         self._metrics[mode]["reward"].append(rewards.mean().item())
         self._metrics[mode]["reward_std"].append(std_r.mean().item())
         self._metrics[mode]["avg_improvement_pct"].append(
-            sum(all_improvements) / max(len(all_improvements), 1)
+            sum(improvements) / max(len(improvements), 1)
         )
 
         return {
@@ -285,8 +284,6 @@ def main():
     parser.add_argument("--train_data", required=True)
     parser.add_argument("--scenario_files", nargs="+", required=True)
     parser.add_argument("--cost_model", default=None)
-    parser.add_argument("--vllm_base_url", default="http://localhost:8000/v1")
-    parser.add_argument("--vllm_model", default="qwen3-4b-sft")
     parser.add_argument("--num_epochs", type=int, default=2)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--grad_accum", type=int, default=16)
@@ -300,7 +297,8 @@ def main():
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--knob_space", default="configs/knob_space.yaml")
     parser.add_argument("--flash_attn", action="store_true", default=False)
-    parser.add_argument("--rollout_concurrency", type=int, default=8)
+    parser.add_argument("--vllm_gpu_util", type=float, default=0.30,
+                        help="vLLM 显存占比（剩余给训练）")
     args = parser.parse_args()
 
     # Cost Model
@@ -312,6 +310,19 @@ def main():
             print(f"✅ Cost Model: {args.cost_model}")
         except Exception as e:
             print(f"[WARNING] Cost Model 加载失败: {e}")
+
+    # ---- 先启动 vLLM（在 HF 模型之前，优先分配显存）----
+    print(f"🔄 启动 vLLM（gpu_util={args.vllm_gpu_util}）: {args.model_path}")
+    from vllm import LLM
+    vllm_llm = LLM(
+        model=args.model_path,
+        dtype="bfloat16",
+        gpu_memory_utilization=args.vllm_gpu_util,
+        trust_remote_code=True,
+        max_model_len=4096,
+    )
+    vllm_tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
+    print("✅ vLLM 就绪")
 
     # 从 SFT 轨迹提取 prompt
     prompt_records, prompt_env_map, seen = [], {}, set()
@@ -335,7 +346,7 @@ def main():
     ])
     print(f"📊 {len(dataset)} 条 prompt")
 
-    # 模型
+    # HF 模型（训练用，加载到剩余显存）
     print(f"🔄 加载 HF 模型（训练用）: {args.model_path}")
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
@@ -390,17 +401,15 @@ def main():
         processing_class=tokenizer, train_dataset=dataset, peft_config=peft_config,
         env_factory=env_factory, prompt_env_map=prompt_env_map,
         max_turns=args.max_turns,
-        vllm_base_url=args.vllm_base_url, vllm_model_name=args.vllm_model,
-        rollout_concurrency=args.rollout_concurrency,
+        vllm_llm=vllm_llm, vllm_tokenizer=vllm_tokenizer,
     )
 
     if torch.cuda.is_available():
         tp = sum(p.numel() for p in trainer.model.parameters())
         trp = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
         print(f"\n  总参数: {tp/1e6:.1f}M | 可训练: {trp/1e6:.1f}M ({trp/tp:.2%})")
-        torch.cuda.reset_peak_memory_stats()
 
-    print("\n🚀 开始 GRPO 训练（vLLM 加速）...")
+    print("\n🚀 开始 GRPO 训练（vLLM 进程内加速）...")
     trainer.train()
 
     if torch.cuda.is_available():
