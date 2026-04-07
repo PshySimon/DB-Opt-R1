@@ -85,19 +85,23 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         messages = list(prompt_msgs)
 
         for turn in range(self.max_turns):
-            try:
-                resp = self.vllm_api.chat.completions.create(
-                    model=self.vllm_model_name,
-                    messages=messages,
-                    temperature=1.0,
-                    max_tokens=1024,
-                )
-                text = resp.choices[0].message.content or ""
-                # fallback: reasoning_content
-                if not text:
-                    text = getattr(resp.choices[0].message, 'reasoning_content', None) or ""
-            except Exception as e:
-                logger.warning(f"vLLM 生成失败: {e}")
+            text = ""
+            for retry in range(3):
+                try:
+                    resp = self.vllm_api.chat.completions.create(
+                        model=self.vllm_model_name,
+                        messages=messages,
+                        temperature=1.0,
+                        max_tokens=1024,
+                    )
+                    text = resp.choices[0].message.content or ""
+                    if not text:
+                        text = getattr(resp.choices[0].message, 'reasoning_content', None) or ""
+                    break
+                except Exception as e:
+                    logger.warning(f"vLLM 生成失败 (retry {retry+1}/3): {e}")
+                    import time; time.sleep(5)
+            if not text:
                 break
 
             if "</tool_call>" in text:
@@ -167,6 +171,9 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
 
             if len(comp_ids) > self.max_completion_length:
                 comp_ids = comp_ids[:self.max_completion_length]
+            # 兜底：至少有一个 eos token，防止空 tensor 导致 argmax 崩溃
+            if len(comp_ids) == 0:
+                comp_ids = [self.processing_class.eos_token_id]
 
             all_completion_ids.append(torch.tensor(comp_ids, dtype=torch.long, device=device))
 
