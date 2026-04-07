@@ -1,19 +1,13 @@
 """
 trl GRPO 多轮工具调用训练入口
 
-与 verl 路径完全对齐：
-- 普通 chat 格式，不走 function calling
-- 工具描述写在 system prompt
-- 模型生成 <tool_call>...</tool_call> 文本
-- 代码用正则提取、调用 ToolEnv.step()
-- tool response 用 <|im_start|>user\n<tool_response>...\n</tool_response><|im_end|> 拼回去
-
-使用 TRL 的 rollout_func 手动控制多轮生成。
+子类化 TRL 0.16.1 的 GRPOTrainer，覆写 _generate_and_score_completions
+实现多轮工具交互（与 verl 路径完全对齐）。
 
 Usage:
     PYTHONPATH=. python -m training.trl.grpo \\
         --model_path model_save/sft/checkpoint-xxx \\
-        --train_data data_pipeline/data/train/sft_trajectories_v2.jsonl \\
+        --train_data data_pipeline/data/train/sft_trajectories.jsonl \\
         --scenario_files \\
             data_pipeline/data/scenarios/collected/collected_server1.json \\
             data_pipeline/data/scenarios/collected/collected_server2.json \\
@@ -22,19 +16,23 @@ Usage:
         --output_dir model_save/grpo/
 """
 
-import re
 import json
 import math
 import argparse
 import logging
-import random
-from copy import deepcopy
+from collections import defaultdict
+from typing import Any, Union
 
 import torch
 from datasets import Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import GRPOConfig, GRPOTrainer
+from trl.trainer.utils import pad, selective_log_softmax
+from trl.data_utils import maybe_apply_chat_template, is_conversational, apply_chat_template
 from peft import LoraConfig
+
+from accelerate.utils import gather, gather_object, broadcast_object_list
+from trl.models import unwrap_model_for_generation
 
 from training.data_utils import SYSTEM_PROMPT
 from training.reward_score import compute_score_format
@@ -52,239 +50,280 @@ TOOL_RESPONSE_TEMPLATE = """
 """
 
 
-# ============================================================
-# 多轮 Rollout
-# ============================================================
-
-def multi_turn_rollout(prompts, trainer):
+class MultiTurnGRPOTrainer(GRPOTrainer):
     """
-    自定义 rollout_func，与 verl 的 ToolGenerationManager.run_llm_loop 对齐。
+    覆写 _generate_and_score_completions，实现多轮工具交互。
 
-    流程（每个 prompt）：
-    1. tokenize prompt（含 system prompt + 工具描述）
-    2. model.generate() 生成文本
-    3. 检测 <tool_call>...</tool_call>
-    4. 用 ToolEnv.step() 执行工具
-    5. 拼接 tool_response 到上下文，继续生成
-    6. 重复直到没有 tool_call 或达到 max_turns
-    7. 用完整轨迹做一次 forward pass 得到 logprobs
-
-    Args:
-        prompts: 当前进程分配到的 prompt 列表
-        trainer: GRPOTrainer 实例
-
-    Returns:
-        dict with prompt_ids, completion_ids, logprobs, + reward 用的额外字段
+    核心改动：
+    - 生成阶段：逐条 prompt 循环生成，检测 <tool_call>，调用 ToolEnv.step()，
+      拼回 tool_response 继续生成，直到没有 tool_call 或达到 max_turns
+    - 评分阶段：用自定义 reward_fn（format_score + answer_score）
+    - 返回格式：与原版 _generate_and_score_completions 完全一致
     """
-    model = trainer.model
-    tokenizer = trainer.processing_class
-    device = model.device
 
-    num_generations = trainer.args.num_generations
-    max_completion_length = trainer.args.max_completion_length
+    def __init__(self, *args, env_factory=None, prompt_env_map=None,
+                 max_turns=10, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.env_factory = env_factory
+        self.prompt_env_map = prompt_env_map or {}
+        self.max_turns = max_turns
 
-    # 从 trainer 的自定义属性读取配置
-    max_turns = getattr(trainer, '_max_turns', 10)
-    envs_factory = getattr(trainer, '_envs_factory', None)
+    def _generate_and_score_completions(
+        self, inputs: dict[str, Union[torch.Tensor, Any]]
+    ) -> dict[str, Union[torch.Tensor, Any]]:
+        """
+        多轮工具交互版本的生成与评分。
 
-    all_prompt_ids = []
-    all_completion_ids = []
-    all_logprobs = []
-    all_improvements = []  # 传给 reward 函数
+        与原版保持相同的返回格式：
+        {
+            "prompt_ids", "prompt_mask",
+            "completion_ids", "completion_mask",
+            "old_per_token_logps", "ref_per_token_logps",
+            "advantages"
+        }
+        """
+        device = self.accelerator.device
+        prompts = [x["prompt"] for x in inputs]
+        prompts_text = [
+            maybe_apply_chat_template(example, self.processing_class)["prompt"]
+            for example in inputs
+        ]
 
-    for prompt in prompts:
-        # prompt 是 dict: {"role": ..., "content": ...} 列表
-        # dataset 额外列 env_sample_idx, question 会由 TRL 传入
-        # 但 rollout_func 只收到 prompts，所以我们把 env_sample_idx 编码在 prompt 里
-        # prompt format: [{"role":"system",...}, {"role":"user","content":"..."}]
-        # env_sample_idx 从 trainer._prompt_env_map 查询
+        # tokenize prompts（与原版一致）
+        prompt_inputs = self.processing_class(
+            text=prompts_text, return_tensors="pt", padding=True,
+            padding_side="left", add_special_tokens=False
+        )
+        prompt_inputs = super(GRPOTrainer, self)._prepare_inputs(prompt_inputs)
+        prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
 
-        # 每个 prompt 生成 num_generations 个 rollout
-        for _ in range(num_generations):
-            # 创建独立的环境
-            env = envs_factory()
+        if self.max_prompt_length is not None:
+            prompt_ids = prompt_ids[:, -self.max_prompt_length:]
+            prompt_mask = prompt_mask[:, -self.max_prompt_length:]
 
-            # 从 prompt 中提取 user question，查找对应的 env_sample_idx
-            prompt_env_map = getattr(trainer, '_prompt_env_map', {})
-            if isinstance(prompt, list):
-                user_msg = next(
-                    (m["content"] for m in prompt if m["role"] == "user"), ""
-                )
-            else:
-                user_msg = str(prompt)
-            sample_idx = prompt_env_map.get(user_msg)
+        # ==================== 多轮生成 ====================
+        # inputs 里同一个 prompt 会重复 num_generations 次（TRL sampler 机制）
+        # 我们需要对每条都独立做 rollout
 
-            # reset 到对应场景
-            if sample_idx is not None:
-                env.reset(sample_idx=sample_idx)
-            else:
-                env.reset()  # 随机场景
+        all_completion_ids = []
+        all_improvements = []
 
-            # 构建 messages（与 core/agent.py 的 rollout 完全一致）
-            tools_desc = env.tools_format_func()
-            full_system = f"{SYSTEM_PROMPT}\n\n{tools_desc}"
+        with unwrap_model_for_generation(
+            self.model_wrapped, self.accelerator,
+            gather_deepspeed3_params=self.args.ds3_gather_for_generation
+        ) as unwrapped_model:
 
-            if isinstance(prompt, list):
-                # conversational format
-                messages = list(prompt)  # copy
-                # 确保 system prompt 包含 tool 描述
-                if messages and messages[0]["role"] == "system":
-                    messages[0]["content"] = full_system
+            for batch_idx in range(len(prompts)):
+                prompt = prompts[batch_idx]
+                prompt_text = prompts_text[batch_idx]
+                single_prompt_ids = prompt_ids[batch_idx:batch_idx+1]
+
+                # 提取 user question 找对应 env_sample_idx
+                if isinstance(prompt, list):
+                    user_msg = next(
+                        (m["content"] for m in prompt if m["role"] == "user"), ""
+                    )
                 else:
-                    messages.insert(0, {"role": "system", "content": full_system})
-            else:
-                messages = [
-                    {"role": "system", "content": full_system},
-                    {"role": "user", "content": str(prompt)},
-                ]
+                    user_msg = str(prompt)
+                sample_idx = self.prompt_env_map.get(user_msg)
 
-            # tokenize prompt
-            prompt_text = tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            prompt_ids = tokenizer.encode(
-                prompt_text, return_tensors="pt", add_special_tokens=False
-            ).to(device)
+                # 创建并 reset 环境
+                env = self.env_factory()
+                if sample_idx is not None:
+                    env.reset(sample_idx=sample_idx)
+                else:
+                    env.reset()
 
-            # 多轮生成
-            full_completion_ids = torch.tensor([], dtype=torch.long, device=device)
-            generation_masks = []  # True = 模型生成, False = tool response
+                # 多轮生成循环
+                current_ids = single_prompt_ids  # (1, prompt_len)
+                completion_tokens = []  # 收集所有 completion token ids
 
-            for turn in range(max_turns):
-                current_input = torch.cat(
-                    [prompt_ids, full_completion_ids.unsqueeze(0)] if full_completion_ids.numel() > 0
-                    else [prompt_ids],
-                    dim=1
-                )
+                for turn in range(self.max_turns):
+                    remaining = self.max_completion_length - len(completion_tokens)
+                    if remaining <= 0:
+                        break
 
-                # 检查长度
-                remaining = max_completion_length - full_completion_ids.numel()
-                if remaining <= 0:
-                    break
+                    with torch.no_grad():
+                        outputs = unwrapped_model.generate(
+                            input_ids=current_ids,
+                            attention_mask=torch.ones_like(current_ids),
+                            generation_config=self.generation_config,
+                            max_new_tokens=min(remaining, self.max_completion_length),
+                        )
 
-                # 生成
-                with torch.no_grad():
-                    outputs = model.generate(
-                        input_ids=current_input,
-                        max_new_tokens=min(remaining, 1024),
-                        do_sample=True,
-                        temperature=1.0,
-                        top_p=1.0,
-                        pad_token_id=tokenizer.pad_token_id,
-                        eos_token_id=tokenizer.eos_token_id,
+                    new_ids = outputs[0, current_ids.shape[1]:]  # 生成的新 token
+                    new_text = self.processing_class.decode(
+                        new_ids, skip_special_tokens=False
                     )
 
-                new_ids = outputs[0, current_input.shape[1]:]
-                new_text = tokenizer.decode(new_ids, skip_special_tokens=False)
+                    if "</tool_call>" in new_text:
+                        # 截断到第一个 </tool_call>
+                        cut_text = new_text.split("</tool_call>")[0] + "</tool_call>"
+                        cut_ids = self.processing_class.encode(
+                            cut_text, add_special_tokens=False
+                        )
+                        completion_tokens.extend(cut_ids)
 
-                # 检测 </tool_call>
-                if "</tool_call>" in new_text:
-                    # 截断到第一个 </tool_call>
-                    cut_text = new_text.split("</tool_call>")[0] + "</tool_call>"
-                    cut_ids = tokenizer.encode(
-                        cut_text, return_tensors="pt", add_special_tokens=False
-                    ).to(device)[0]
+                        # 执行工具
+                        obs, reward, done, info = env.step(cut_text)
 
-                    full_completion_ids = torch.cat([full_completion_ids, cut_ids])
-                    generation_masks.extend([True] * len(cut_ids))
+                        # 拼接 tool response
+                        tool_resp_text = TOOL_RESPONSE_TEMPLATE.format(
+                            tool_response=obs
+                        )
+                        tool_resp_ids = self.processing_class.encode(
+                            tool_resp_text, add_special_tokens=False
+                        )
+                        completion_tokens.extend(tool_resp_ids)
 
-                    # 用 env.step() 执行工具（与 verl 一致）
-                    obs, reward, done, info = env.step(cut_text)
+                        # 更新 current_ids 用于下一轮
+                        all_ids = list(single_prompt_ids[0].cpu().numpy()) + completion_tokens
+                        current_ids = torch.tensor(
+                            [all_ids], dtype=torch.long, device=device
+                        )
 
-                    # 拼接 tool response（与 verl tool_custom_response_template 一致）
-                    tool_resp_text = TOOL_RESPONSE_TEMPLATE.format(tool_response=obs)
-                    tool_resp_ids = tokenizer.encode(
-                        tool_resp_text, return_tensors="pt", add_special_tokens=False
-                    ).to(device)[0]
-
-                    full_completion_ids = torch.cat([full_completion_ids, tool_resp_ids])
-                    generation_masks.extend([False] * len(tool_resp_ids))
-
-                    if done:
+                        if done:
+                            break
+                    else:
+                        # 无 tool_call，正常结束
+                        completion_tokens.extend(new_ids.tolist())
                         break
-                else:
-                    # 没有 tool_call，模型正常结束
-                    full_completion_ids = torch.cat([full_completion_ids, new_ids])
-                    generation_masks.extend([True] * len(new_ids))
-                    break
 
-            # 截断到 max_completion_length
-            if full_completion_ids.numel() > max_completion_length:
-                full_completion_ids = full_completion_ids[:max_completion_length]
-                generation_masks = generation_masks[:max_completion_length]
+                # 截断到 max_completion_length
+                if len(completion_tokens) > self.max_completion_length:
+                    completion_tokens = completion_tokens[:self.max_completion_length]
 
-            # 计算 logprobs：forward pass 整个轨迹
-            full_input = torch.cat([prompt_ids[0], full_completion_ids]).unsqueeze(0)
-            with torch.no_grad():
-                model_output = model(input_ids=full_input)
-                # logits 对应 completion 部分
-                logits = model_output.logits[0, prompt_ids.shape[1] - 1:-1, :]
-                log_probs = torch.log_softmax(logits, dim=-1)
-                token_log_probs = log_probs.gather(
-                    -1, full_completion_ids.unsqueeze(-1)
-                ).squeeze(-1)
+                all_completion_ids.append(
+                    torch.tensor(completion_tokens, dtype=torch.long, device=device)
+                )
 
-            # 获取 improvement（用于 reward 计算）
-            improvement = getattr(env, 'improvement_pct', 0.0)
-            if improvement == 0.0:
-                # 尝试最后调一次 predict_performance
-                try:
-                    predict_text = '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>'
-                    obs, _, _, _ = env.step(predict_text)
-                    parsed = json.loads(obs) if isinstance(obs, str) else obs
-                    improvement = float(parsed.get("improvement_pct", 0.0))
-                except Exception:
-                    pass
+                # 获取 improvement
+                improvement = getattr(env, 'improvement_pct', 0.0)
+                if improvement == 0.0:
+                    try:
+                        predict_text = '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>'
+                        obs, _, _, _ = env.step(predict_text)
+                        parsed = json.loads(obs) if isinstance(obs, str) else obs
+                        improvement = float(parsed.get("improvement_pct", 0.0))
+                    except Exception:
+                        pass
+                all_improvements.append(improvement)
 
-            all_prompt_ids.append(prompt_ids[0].cpu())
-            all_completion_ids.append(full_completion_ids.cpu())
-            all_logprobs.append(token_log_probs.cpu())
-            all_improvements.append(improvement)
+        # ==================== Pad completions ====================
+        completion_ids = pad(
+            all_completion_ids,
+            padding_value=self.processing_class.pad_token_id
+        )
 
-    return {
-        "prompt_ids": all_prompt_ids,
-        "completion_ids": all_completion_ids,
-        "logprobs": all_logprobs,
-        "improvement_pct": all_improvements,
-    }
+        # Mask: 非 pad 部分
+        is_eos = completion_ids == self.processing_class.eos_token_id
+        eos_idx = torch.full(
+            (is_eos.size(0),), is_eos.size(1), dtype=torch.long, device=device
+        )
+        eos_idx[is_eos.any(dim=1)] = is_eos.int().argmax(dim=1)[is_eos.any(dim=1)]
+        sequence_indices = torch.arange(
+            is_eos.size(1), device=device
+        ).expand(is_eos.size(0), -1)
+        completion_mask = (sequence_indices <= eos_idx.unsqueeze(1)).int()
+        # 也要 mask 掉 pad
+        completion_mask = completion_mask * (
+            completion_ids != self.processing_class.pad_token_id
+        ).int()
 
+        prompt_completion_ids = torch.cat([prompt_ids, completion_ids], dim=1)
+        attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
 
-# ============================================================
-# Reward 函数
-# ============================================================
+        # ==================== 计算 logprobs ====================
+        logits_to_keep = completion_ids.size(1)
 
-def reward_fn(completions, improvement_pct=None, **kwargs):
-    """
-    Reward 函数，与 verl 的 DBRewardManager 对齐。
+        with torch.no_grad():
+            if self.num_iterations > 1:
+                old_per_token_logps = self._get_per_token_logps(
+                    self.model, prompt_completion_ids, attention_mask, logits_to_keep
+                )
+            else:
+                old_per_token_logps = None
 
-    总分 = format_score + answer_score
-    - format_score: compute_score_format（0~1.5）
-    - answer_score: log(1 + improvement)，improvement 从 rollout 传入
-    """
-    rewards = []
-    improvements = improvement_pct or [0.0] * len(completions)
+            if self.beta == 0.0:
+                ref_per_token_logps = None
+            elif self.ref_model is not None:
+                ref_per_token_logps = self._get_per_token_logps(
+                    self.ref_model, prompt_completion_ids, attention_mask, logits_to_keep
+                )
+            else:
+                with self.accelerator.unwrap_model(self.model).disable_adapter():
+                    ref_per_token_logps = self._get_per_token_logps(
+                        self.model, prompt_completion_ids, attention_mask, logits_to_keep
+                    )
 
-    for i, completion in enumerate(completions):
-        # 提取文本
-        if isinstance(completion, list):
-            content = " ".join(
-                m.get("content", "") for m in completion
-                if m.get("role") == "assistant"
+        # ==================== 评分 ====================
+        completions_text = self.processing_class.batch_decode(
+            completion_ids, skip_special_tokens=True
+        )
+
+        # 用自定义 reward 计算
+        rewards_list = []
+        for i, text in enumerate(completions_text):
+            format_score = compute_score_format(text)
+            imp = all_improvements[i] / 100.0 if i < len(all_improvements) else 0.0
+            imp = min(2.0, max(0.0, imp))
+            answer_score = math.log(1 + imp) if imp > 0 else 0.0
+            rewards_list.append(format_score + answer_score)
+
+        rewards = torch.tensor(rewards_list, dtype=torch.float32, device=device)
+
+        # 需要 gather 用于 group normalize
+        rewards = gather(rewards)
+
+        # Grouped rewards
+        mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
+        std_grouped_rewards = rewards.view(-1, self.num_generations).std(dim=1)
+
+        mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(
+            self.num_generations, dim=0
+        )
+        std_grouped_rewards = std_grouped_rewards.repeat_interleave(
+            self.num_generations, dim=0
+        )
+        advantages = rewards - mean_grouped_rewards
+        if self.args.scale_rewards:
+            advantages = advantages / (std_grouped_rewards + 1e-4)
+
+        # 切片回当前进程
+        process_slice = slice(
+            self.accelerator.process_index * len(prompts),
+            (self.accelerator.process_index + 1) * len(prompts),
+        )
+        advantages = advantages[process_slice]
+
+        # ==================== Metrics ====================
+        mode = "eval" if self.control.should_evaluate else "train"
+        if mode == "train":
+            self._total_train_tokens += (
+                self.accelerator.gather_for_metrics(attention_mask.sum()).sum().item()
             )
-        else:
-            content = str(completion)
+        self._metrics[mode]["num_tokens"] = [self._total_train_tokens]
+        completion_length = (
+            self.accelerator.gather_for_metrics(completion_mask.sum(1))
+            .float().mean().item()
+        )
+        self._metrics[mode]["completion_length"].append(completion_length)
+        self._metrics[mode]["reward"].append(rewards.mean().item())
+        self._metrics[mode]["reward_std"].append(std_grouped_rewards.mean().item())
 
-        # 格式分
-        format_score = compute_score_format(content)
+        # improvement 统计
+        avg_imp = sum(all_improvements) / max(len(all_improvements), 1)
+        self._metrics[mode]["avg_improvement_pct"].append(avg_imp)
 
-        # 任务分
-        imp = improvements[i] / 100.0 if i < len(improvements) else 0.0
-        imp = min(2.0, max(0.0, imp))
-        answer_score = math.log(1 + imp) if imp > 0 else 0.0
-
-        rewards.append(format_score + answer_score)
-
-    return rewards
+        return {
+            "prompt_ids": prompt_ids,
+            "prompt_mask": prompt_mask,
+            "completion_ids": completion_ids,
+            "completion_mask": completion_mask,
+            "old_per_token_logps": old_per_token_logps,
+            "ref_per_token_logps": ref_per_token_logps,
+            "advantages": advantages,
+        }
 
 
 # ============================================================
@@ -334,10 +373,8 @@ def main():
             print(f"[WARNING] Cost Model 加载失败: {e}")
 
     # ---- 从 SFT 轨迹提取 prompt ----
-    # 每条轨迹有 question + env_sample_idx
-    # question 作为 user message，env_sample_idx 用于 rollout 时 reset 到对应场景
-    prompt_records = []  # [{"question": str, "env_sample_idx": int}]
-    prompt_env_map = {}  # question -> env_sample_idx
+    prompt_records = []
+    prompt_env_map = {}
     seen_questions = set()
 
     with open(args.train_data, "r", encoding="utf-8") as f:
@@ -396,10 +433,13 @@ def main():
     )
 
     # GRPOConfig
+    # 注意：per_device_train_batch_size 必须能被 num_generations 整除
+    # batch_size=4, num_generations=4 → 每个 step 1 个独立 prompt × 4 generations
+    effective_batch = args.batch_size * args.num_generations
     training_config = GRPOConfig(
         output_dir=args.output_dir,
         num_train_epochs=args.num_epochs,
-        per_device_train_batch_size=args.batch_size,
+        per_device_train_batch_size=effective_batch,
         gradient_accumulation_steps=args.grad_accum,
         learning_rate=args.lr,
         warmup_ratio=0.1,
@@ -415,12 +455,14 @@ def main():
         report_to="none",
         max_steps=args.max_steps,
         seed=42,
+        # GRPO 特有
+        beta=0.0,  # 不需要 ref model（用 LoRA disable_adapter 替代）
+        scale_rewards=True,
     )
 
-    # 环境工厂（与 verl 的 DBToolEnv 使用完全相同）
+    # 环境工厂
     from environment.tools import DBToolEnv
 
-    # 预加载场景（只加载一次，所有 env 共享）
     all_scenarios = DBToolEnv._load_scenarios(args.scenario_files)
     print(f"📦 加载 {len(all_scenarios)} 个场景")
 
@@ -434,21 +476,22 @@ def main():
         env.scenarios = all_scenarios
         return env
 
+    # 用自定义的 reward_fn 作为占位（实际评分在 _generate_and_score_completions 里做）
+    def dummy_reward_fn(prompts, completions, **kwargs):
+        return [0.0] * len(completions)
+
     # Trainer
-    trainer = GRPOTrainer(
+    trainer = MultiTurnGRPOTrainer(
         model=model,
+        reward_funcs=dummy_reward_fn,
         args=training_config,
         processing_class=tokenizer,
-        reward_funcs=reward_fn,
         train_dataset=dataset,
         peft_config=peft_config,
-        rollout_func=multi_turn_rollout,
+        env_factory=env_factory,
+        prompt_env_map=prompt_env_map,
+        max_turns=args.max_turns,
     )
-
-    # 把环境工厂、配置、prompt→场景映射挂到 trainer 上
-    trainer._max_turns = args.max_turns
-    trainer._envs_factory = env_factory
-    trainer._prompt_env_map = prompt_env_map
 
     # 显存统计
     if torch.cuda.is_available():
