@@ -297,7 +297,7 @@ def main():
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--knob_space", default="configs/knob_space.yaml")
     parser.add_argument("--flash_attn", action="store_true", default=False)
-    parser.add_argument("--vllm_gpu_util", type=float, default=0.30,
+    parser.add_argument("--vllm_gpu_util", type=float, default=0.40,
                         help="vLLM 显存占比（剩余给训练）")
     args = parser.parse_args()
 
@@ -319,7 +319,7 @@ def main():
         dtype="bfloat16",
         gpu_memory_utilization=args.vllm_gpu_util,
         trust_remote_code=True,
-        max_model_len=4096,
+        max_model_len=16384,
     )
     vllm_tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
     print("✅ vLLM 就绪")
