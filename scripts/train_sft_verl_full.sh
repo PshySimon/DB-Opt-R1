@@ -50,7 +50,7 @@ torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
     ++data.response_dict_keys='[answer]' \
     data.max_length=$MAX_LENGTH \
     optim.lr=$LR \
-    ++model.partial_pretrain=$BASE_MODEL \
+    ++model.path=$BASE_MODEL \
     ++model.torch_dtype=bfloat16 \
     ++model.attn_implementation=flash_attention_2 \
     trainer.default_local_dir=$SFT_OUTPUT_DIR \

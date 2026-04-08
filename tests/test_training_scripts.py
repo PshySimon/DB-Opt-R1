@@ -11,7 +11,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn('DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"', content)
         self.assertIn("++data.prompt_key=extra_info", content)
         self.assertIn("++data.response_key=extra_info", content)
-        self.assertIn("++model.partial_pretrain=$BASE_MODEL", content)
+        self.assertIn("++model.path=$BASE_MODEL", content)
         self.assertIn(
             "python -m data_pipeline.preprocess_sft",
             content,
@@ -27,7 +27,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn('DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"', content)
         self.assertIn("++data.prompt_key=extra_info", content)
         self.assertIn("++data.response_key=extra_info", content)
-        self.assertIn("++model.partial_pretrain=$BASE_MODEL", content)
+        self.assertIn("++model.path=$BASE_MODEL", content)
         self.assertIn(
             "python -m data_pipeline.preprocess_sft",
             content,
