@@ -11,7 +11,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn('DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"', content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', content)
         self.assertIn("model.path=$BASE_MODEL", content)
-        self.assertIn("model.override_config.attn_implementation=$ATTN_IMPL", content)
+        self.assertNotIn("model.override_config.attn_implementation", content)
         self.assertIn("data.ignore_input_ids_mismatch=True", content)
         self.assertIn("model.lora_rank=$LORA_RANK", content)
         self.assertIn("model.lora_alpha=$LORA_ALPHA", content)
@@ -28,7 +28,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn('DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"', content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', content)
         self.assertIn("model.path=$BASE_MODEL", content)
-        self.assertIn("model.override_config.attn_implementation=$ATTN_IMPL", content)
+        self.assertNotIn("model.override_config.attn_implementation", content)
         self.assertIn("data.ignore_input_ids_mismatch=True", content)
         self.assertNotIn("prompt_key", content)
         self.assertNotIn("response_key", content)
@@ -45,7 +45,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         for name in ["train_grpo_verl_lora.sh", "train_grpo_verl_full.sh"]:
             content = (ROOT / "scripts" / name).read_text()
             self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', content)
-            self.assertIn("actor_rollout_ref.model.override_config.attn_implementation=$ATTN_IMPL", content)
+            self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", content)
             self.assertNotIn("actor_rollout_ref.model.torch_dtype", content)
 
 

@@ -50,7 +50,6 @@ python3 -m training.verl.main_grpo \
   \
   actor_rollout_ref.model.path=$SFT_CHECKPOINT \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
-  actor_rollout_ref.model.override_config.attn_implementation=$ATTN_IMPL \
   actor_rollout_ref.model.lora_rank=$LORA_RANK \
   actor_rollout_ref.model.lora_alpha=$LORA_ALPHA \
   actor_rollout_ref.model.target_modules=$TARGET_MODULES \

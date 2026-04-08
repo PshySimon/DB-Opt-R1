@@ -55,7 +55,6 @@ torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
     data.ignore_input_ids_mismatch=True \
     optim.lr=$LR \
     model.path=$BASE_MODEL \
-    model.override_config.attn_implementation=$ATTN_IMPL \
     model.lora_rank=$LORA_RANK \
     model.lora_alpha=$LORA_ALPHA \
     model.target_modules=$TARGET_MODULES \

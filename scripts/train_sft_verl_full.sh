@@ -50,7 +50,6 @@ torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
     data.ignore_input_ids_mismatch=True \
     optim.lr=$LR \
     model.path=$BASE_MODEL \
-    model.override_config.attn_implementation=$ATTN_IMPL \
     trainer.default_local_dir=$SFT_OUTPUT_DIR \
     trainer.project_name=$PROJECT_NAME \
     trainer.experiment_name=$SFT_EXPERIMENT_NAME \
