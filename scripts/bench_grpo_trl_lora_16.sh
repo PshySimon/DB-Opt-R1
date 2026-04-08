@@ -29,11 +29,24 @@ echo "vLLM tokens:        $VLLM_MAX_TOKENS"
 echo "vLLM 服务:          http://${VLLM_SERVER_HOST}:${VLLM_SERVER_PORT}/v1"
 echo "============================================"
 
-PYTHONPATH=. python - <<'PY'
+PYTHONPATH=. python - \
+  "$MODEL_PATH" \
+  "$TRAIN_DATA" \
+  "$SCENARIO_FILES" \
+  "$COST_MODEL" \
+  "$NUM_SAMPLES" \
+  "$NUM_GEN" \
+  "$MAX_TURNS" \
+  "$VLLM_SERVER_HOST" \
+  "$VLLM_SERVER_PORT" \
+  "$VLLM_MODEL_NAME" \
+  "$VLLM_TIMEOUT" \
+  "$VLLM_MAX_TOKENS" \
+  "$ROLLOUT_LOG_INTERVAL" <<'PY'
 import json
 import logging
-import os
 import time
+import sys
 
 from openai import OpenAI
 from transformers import AutoTokenizer
@@ -58,19 +71,30 @@ def format_rollout_turn_log(turn_idx, active_count, batch_size, prompt_token_len
     )
 
 
-model_path = os.environ["MODEL_PATH"]
-train_data = os.environ["TRAIN_DATA"]
-scenario_files = os.environ["SCENARIO_FILES"].split()
-cost_model_path = os.environ["COST_MODEL"]
-num_samples = int(os.environ["NUM_SAMPLES"])
-num_gen = int(os.environ["NUM_GEN"])
-max_turns = int(os.environ["MAX_TURNS"])
-vllm_host = os.environ["VLLM_SERVER_HOST"]
-vllm_port = int(os.environ["VLLM_SERVER_PORT"])
-vllm_model_name = os.environ["VLLM_MODEL_NAME"]
-vllm_timeout = int(os.environ["VLLM_TIMEOUT"])
-vllm_max_tokens = int(os.environ["VLLM_MAX_TOKENS"])
-rollout_log_interval = int(os.environ["ROLLOUT_LOG_INTERVAL"])
+(
+    model_path,
+    train_data,
+    scenario_files_raw,
+    cost_model_path,
+    num_samples,
+    num_gen,
+    max_turns,
+    vllm_host,
+    vllm_port,
+    vllm_model_name,
+    vllm_timeout,
+    vllm_max_tokens,
+    rollout_log_interval,
+) = sys.argv[1:14]
+
+scenario_files = scenario_files_raw.split()
+num_samples = int(num_samples)
+num_gen = int(num_gen)
+max_turns = int(max_turns)
+vllm_port = int(vllm_port)
+vllm_timeout = int(vllm_timeout)
+vllm_max_tokens = int(vllm_max_tokens)
+rollout_log_interval = int(rollout_log_interval)
 
 base_url = vllm_host.strip()
 if "://" not in base_url:
