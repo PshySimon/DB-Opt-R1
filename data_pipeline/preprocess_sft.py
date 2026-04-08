@@ -1,15 +1,9 @@
 """
-将 SFT JSONL 轨迹转换为 verl 所需的 Parquet 格式
+将 SFT JSONL 轨迹转换为 verl 0.7.1 所需的多轮 Parquet 格式。
 
-输入：MCTS 输出的 trajectories.jsonl 或手工编写的 cold_start.jsonl
-输出：verl fsdp_sft_trainer 所需的 train.parquet / validation.parquet
-
-Usage:
-    cd project/db-opt-r1
-    python -m datasets.preprocess_sft \
-        --input_files datasets/sft/cold_start.jsonl \
-        --output_dir datasets/sft/ \
-        --train_ratio 0.95
+输入：包含 ``messages`` 字段的 JSONL 轨迹。
+输出：verl ``sft_trainer`` 所需的 ``train.parquet`` / ``validation.parquet``，
+字段以多轮会话列为主，例如 ``messages``、``tools``、``enable_thinking``。
 """
 
 import argparse
@@ -28,47 +22,31 @@ logger = logging.getLogger(__name__)
 # 格式转换
 # ============================================================
 
-def messages_to_qa(messages: list) -> dict:
-    """将 chat messages 格式转为 verl SFT 所需的 question/answer 格式。
+def convert_record(item: dict, min_turns: int = 2) -> dict | None:
+    """将单条 JSONL 轨迹转换为 verl 0.7.1 的多轮 SFT 样本。
 
-    策略：把多轮工具交互打平成一个长 answer（与 Agent-R1 一致）。
-      - question = system + 第一个 user turn
-      - answer   = 所有后续 assistant/tool turn
+    verl 0.7.1 的 ``sft_trainer`` 默认读取 ``messages`` 列，而不是
+    ``question/answer`` 或自定义 ``prompt_key/response_key``。
     """
-    question_parts = []
-    answer_parts = []
+    messages = item.get("messages", [])
+    if not messages:
+        return None
 
-    seen_first_user = False
-    for msg in messages:
-        role = msg["role"]
-        content = msg["content"]
+    assistant_turns = sum(1 for m in messages if m.get("role") == "assistant")
+    if assistant_turns < min_turns:
+        return None
 
-        if role == "system":
-            question_parts.append(
-                f"<|im_start|>system\n{content}<|im_end|>"
-            )
-        elif role == "user" and not seen_first_user:
-            question_parts.append(
-                f"<|im_start|>user\n{content}<|im_end|>"
-            )
-            seen_first_user = True
-        elif role == "assistant":
-            answer_parts.append(
-                f"<|im_start|>assistant\n{content}<|im_end|>"
-            )
-        elif role in ("tool", "user"):
-            # tool response 或后续 user turn 都编码为 user turn
-            body = content
-            if role == "tool":
-                body = f"<tool_response>\n{content}\n</tool_response>"
-            answer_parts.append(
-                f"<|im_start|>user\n{body}\n<|im_end|>"
-            )
-
-    return {
-        "question": "\n".join(question_parts),
-        "answer": "\n".join(answer_parts),
+    converted = {
+        "messages": messages,
+        "data_source": item.get("data_source", "db_tuning"),
     }
+
+    if "tools" in item:
+        converted["tools"] = item["tools"]
+    if "enable_thinking" in item:
+        converted["enable_thinking"] = item["enable_thinking"]
+
+    return converted
 
 
 def load_jsonl(path: str) -> list:
@@ -92,7 +70,7 @@ def load_jsonl(path: str) -> list:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="将 SFT 轨迹 JSONL 转换为 verl Parquet 格式"
+        description="将 SFT 轨迹 JSONL 转换为 verl 0.7.1 多轮 Parquet 格式"
     )
     parser.add_argument(
         "--input_files", nargs="+", required=True,
@@ -132,25 +110,11 @@ def main():
     converted = []
     skipped = 0
     for item in all_records:
-        messages = item.get("messages", [])
-
-        # 过滤过短轨迹
-        assistant_turns = sum(1 for m in messages if m["role"] == "assistant")
-        if assistant_turns < args.min_turns:
+        converted_item = convert_record(item, min_turns=args.min_turns)
+        if converted_item is None:
             skipped += 1
             continue
-
-        qa = messages_to_qa(messages)
-
-        # 检查 answer 非空
-        if not qa["answer"].strip():
-            skipped += 1
-            continue
-
-        converted.append({
-            "extra_info": qa,
-            "data_source": "db_tuning",
-        })
+        converted.append(converted_item)
 
     if skipped:
         logger.info(f"过滤 {skipped} 条（过短或空 answer）")
@@ -185,10 +149,10 @@ def main():
     # 5. 打印样例
     if converted:
         sample = converted[0]
-        q = sample["extra_info"]["question"]
-        a = sample["extra_info"]["answer"]
-        logger.info(f"\n{'='*60}\n样例 question (前 200 字):\n{q[:200]}...")
-        logger.info(f"\n样例 answer (前 300 字):\n{a[:300]}...")
+        logger.info(f"\n{'='*60}\n样例 messages 条数: {len(sample['messages'])}")
+        logger.info(f"首条消息: {sample['messages'][0]}")
+        if "tools" in sample:
+            logger.info(f"tools 数量: {len(sample['tools'])}")
 
 
 if __name__ == "__main__":
