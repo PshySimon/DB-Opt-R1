@@ -20,6 +20,7 @@ MAX_TURNS="${MAX_TURNS:-10}"
 LORA_RANK="${LORA_RANK:-64}"
 LORA_ALPHA="${LORA_ALPHA:-$LORA_RANK}"
 TARGET_MODULES="${TARGET_MODULES:-all-linear}"
+ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"
 
 export CUDA_VISIBLE_DEVICES=$CUDA_DEVICES
 
@@ -33,6 +34,7 @@ echo "N_REPEAT: $N_REPEAT"
 echo "总步数: $TOTAL_STEPS"
 echo "LoRA r/a: $LORA_RANK / $LORA_ALPHA"
 echo "modules:  $TARGET_MODULES"
+echo "attn_impl: $ATTN_IMPL"
 echo "============================================"
 
 python3 -m training.verl.main_grpo \
@@ -47,12 +49,11 @@ python3 -m training.verl.main_grpo \
   data.max_tool_response_length=2048 \
   \
   actor_rollout_ref.model.path=$SFT_CHECKPOINT \
-  +actor_rollout_ref.model.torch_dtype=bfloat16 \
-  +actor_rollout_ref.model.attn_implementation=flash_attention_2 \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
-  +actor_rollout_ref.model.lora_rank=$LORA_RANK \
-  +actor_rollout_ref.model.lora_alpha=$LORA_ALPHA \
-  +actor_rollout_ref.model.target_modules=$TARGET_MODULES \
+  actor_rollout_ref.model.override_config.attn_implementation=$ATTN_IMPL \
+  actor_rollout_ref.model.lora_rank=$LORA_RANK \
+  actor_rollout_ref.model.lora_alpha=$LORA_ALPHA \
+  actor_rollout_ref.model.target_modules=$TARGET_MODULES \
   \
   actor_rollout_ref.actor.optim.lr=$LR \
   actor_rollout_ref.actor.ppo_mini_batch_size=4 \

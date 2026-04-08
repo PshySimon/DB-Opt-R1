@@ -17,6 +17,7 @@ EPOCHS="${EPOCHS:-3}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
 MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-4}"
 N_GPUS="${N_GPUS:-2}"
+ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"
 
 if [ ! -f "$DATA_DIR/train.parquet" ]; then
     echo "错误: 未找到 $DATA_DIR/train.parquet"
@@ -36,6 +37,7 @@ echo "lr:           $LR"
 echo "epochs:       $EPOCHS"
 echo "batch_size:   $BATCH_SIZE"
 echo "GPU 数量:     $N_GPUS"
+echo "attn_impl:    $ATTN_IMPL"
 echo "============================================================"
 
 torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
@@ -45,8 +47,10 @@ torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
     data.train_batch_size=$BATCH_SIZE \
     data.micro_batch_size_per_gpu=$MICRO_BATCH_SIZE \
     data.max_length=$MAX_LENGTH \
+    data.ignore_input_ids_mismatch=True \
     optim.lr=$LR \
     model.path=$BASE_MODEL \
+    model.override_config.attn_implementation=$ATTN_IMPL \
     trainer.default_local_dir=$SFT_OUTPUT_DIR \
     trainer.project_name=$PROJECT_NAME \
     trainer.experiment_name=$SFT_EXPERIMENT_NAME \

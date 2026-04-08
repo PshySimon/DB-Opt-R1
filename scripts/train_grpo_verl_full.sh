@@ -17,6 +17,7 @@ N_REPEAT="${N_REPEAT:-5}"
 TOTAL_STEPS="${TOTAL_STEPS:-100}"
 SAVE_FREQ="${SAVE_FREQ:-5}"
 MAX_TURNS="${MAX_TURNS:-10}"
+ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"
 
 export CUDA_VISIBLE_DEVICES=$CUDA_DEVICES
 
@@ -28,6 +29,7 @@ echo "训练数据: $TRAIN_DATA"
 echo "GPU 数量: $N_GPUS"
 echo "N_REPEAT: $N_REPEAT"
 echo "总步数: $TOTAL_STEPS"
+echo "attn_impl: $ATTN_IMPL"
 echo "============================================"
 
 python3 -m training.verl.main_grpo \
@@ -42,9 +44,8 @@ python3 -m training.verl.main_grpo \
   data.max_tool_response_length=2048 \
   \
   actor_rollout_ref.model.path=$SFT_CHECKPOINT \
-  +actor_rollout_ref.model.torch_dtype=bfloat16 \
-  +actor_rollout_ref.model.attn_implementation=flash_attention_2 \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
+  actor_rollout_ref.model.override_config.attn_implementation=$ATTN_IMPL \
   \
   actor_rollout_ref.actor.optim.lr=$LR \
   actor_rollout_ref.actor.ppo_mini_batch_size=4 \

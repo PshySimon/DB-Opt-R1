@@ -20,6 +20,7 @@ N_GPUS="${N_GPUS:-2}"
 LORA_RANK="${LORA_RANK:-64}"
 LORA_ALPHA="${LORA_ALPHA:-$LORA_RANK}"
 TARGET_MODULES="${TARGET_MODULES:-all-linear}"
+ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"
 
 if [ ! -f "$DATA_DIR/train.parquet" ]; then
     echo "错误: 未找到 $DATA_DIR/train.parquet"
@@ -41,6 +42,7 @@ echo "batch_size:   $BATCH_SIZE"
 echo "GPU 数量:     $N_GPUS"
 echo "LoRA r/a:     $LORA_RANK / $LORA_ALPHA"
 echo "modules:      $TARGET_MODULES"
+echo "attn_impl:    $ATTN_IMPL"
 echo "============================================================"
 
 torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
@@ -50,8 +52,10 @@ torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
     data.train_batch_size=$BATCH_SIZE \
     data.micro_batch_size_per_gpu=$MICRO_BATCH_SIZE \
     data.max_length=$MAX_LENGTH \
+    data.ignore_input_ids_mismatch=True \
     optim.lr=$LR \
     model.path=$BASE_MODEL \
+    model.override_config.attn_implementation=$ATTN_IMPL \
     model.lora_rank=$LORA_RANK \
     model.lora_alpha=$LORA_ALPHA \
     model.target_modules=$TARGET_MODULES \
