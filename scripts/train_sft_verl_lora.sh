@@ -10,7 +10,7 @@ BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-3B-Instruct}"
 PROJECT_NAME="${PROJECT_NAME:-db_tuning}"
 SFT_OUTPUT_DIR="${SFT_OUTPUT_DIR:-./model_save/sft_lora/}"
 SFT_EXPERIMENT_NAME="${SFT_EXPERIMENT_NAME:-sft-lora-$(basename "$BASE_MODEL")-$(date +%Y%m%d)}"
-DATA_DIR="${DATA_DIR:-./datasets/sft}"
+DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"
 MAX_LENGTH="${MAX_LENGTH:-8192}"
 LR="${LR:-1e-6}"
 EPOCHS="${EPOCHS:-3}"
@@ -24,7 +24,7 @@ TARGET_MODULES="${TARGET_MODULES:-all-linear}"
 if [ ! -f "$DATA_DIR/train.parquet" ]; then
     echo "错误: 未找到 $DATA_DIR/train.parquet"
     echo "请先运行数据预处理:"
-    echo "  python -m datasets.preprocess_sft --input_files datasets/sft/cold_start.jsonl --output_dir datasets/sft/"
+    echo "  python -m data_pipeline.preprocess_sft --input_files data_pipeline/data/train/sft_trajectories_cleaned.jsonl --output_dir ./datasets/sft_cleaned/"
     exit 1
 fi
 
