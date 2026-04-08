@@ -1,25 +1,15 @@
 #!/bin/bash
-# 基准脚本：抽取 16 条样本，跑 1 个 GRPO LoRA step，测整体耗时
+# 纯 rollout 基准：抽取 16 条 prompt，测多轮工具交互耗时
 set -euo pipefail
 
 MODEL_PATH="${MODEL_PATH:-/root/private_data/DB-Opt-R1/model_save/sft_qwen3_4b_cleaned_merged}"
 TRAIN_DATA="${TRAIN_DATA:-./data_pipeline/data/train/sft_trajectories.jsonl}"
 SCENARIO_FILES="${SCENARIO_FILES:-data_pipeline/data/scenarios/collected/collected_server1.json data_pipeline/data/scenarios/collected/collected_server2.json data_pipeline/data/scenarios/collected/collected_server3.json}"
 COST_MODEL="${COST_MODEL:-./cost_model/checkpoints/v9_lgbm}"
-OUTPUT_DIR="${OUTPUT_DIR:-./model_save/grpo_bench_16/}"
 
 NUM_SAMPLES="${NUM_SAMPLES:-16}"
-EPOCHS="${EPOCHS:-1}"
-MAX_STEPS="${MAX_STEPS:-1}"
-LR="${LR:-5e-7}"
-BATCH_SIZE="${BATCH_SIZE:-1}"
-GRAD_ACCUM="${GRAD_ACCUM:-16}"
 NUM_GEN="${NUM_GEN:-4}"
-LORA_RANK="${LORA_RANK:-64}"
 MAX_TURNS="${MAX_TURNS:-10}"
-MAX_COMPLETION_LENGTH="${MAX_COMPLETION_LENGTH:-4096}"
-MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-1024}"
-ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"
 VLLM_SERVER_HOST="${VLLM_SERVER_HOST:-127.0.0.1}"
 VLLM_SERVER_PORT="${VLLM_SERVER_PORT:-8000}"
 VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-qwen3-4b-sft}"
@@ -27,84 +17,248 @@ VLLM_TIMEOUT="${VLLM_TIMEOUT:-300}"
 VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-1024}"
 ROLLOUT_LOG_INTERVAL="${ROLLOUT_LOG_INTERVAL:-1}"
 
-TMP_TRAIN_DATA="$(mktemp /tmp/grpo-bench-16.XXXXXX.jsonl)"
-trap 'rm -f "$TMP_TRAIN_DATA"' EXIT
+echo "============================================"
+echo "  GRPO 16 样本纯 Rollout 基准"
+echo "============================================"
+echo "模型(仅 tokenizer): $MODEL_PATH"
+echo "训练数据:           $TRAIN_DATA"
+echo "样本数:             $NUM_SAMPLES"
+echo "每样本轨迹数:       $NUM_GEN"
+echo "最大轮数:           $MAX_TURNS"
+echo "vLLM tokens:        $VLLM_MAX_TOKENS"
+echo "vLLM 服务:          http://${VLLM_SERVER_HOST}:${VLLM_SERVER_PORT}/v1"
+echo "============================================"
 
-python - "$TRAIN_DATA" "$TMP_TRAIN_DATA" "$NUM_SAMPLES" <<'PY'
+PYTHONPATH=. python - <<'PY'
 import json
-import sys
+import logging
+import os
+import time
 
-src_path, dst_path, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])
+from openai import OpenAI
+from transformers import AutoTokenizer
+
+from environment.tools import DBToolEnv
+from training.data_utils import SYSTEM_PROMPT
+
+
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
+logger = logging.getLogger("rollout_bench")
+
+
+def format_rollout_turn_log(turn_idx, active_count, batch_size, prompt_token_lengths, elapsed_s):
+    avg_prompt_tokens = int(sum(prompt_token_lengths) / max(len(prompt_token_lengths), 1))
+    max_prompt_tokens = max(prompt_token_lengths) if prompt_token_lengths else 0
+    min_prompt_tokens = min(prompt_token_lengths) if prompt_token_lengths else 0
+    return (
+        f"[rollout-only] turn {turn_idx + 1} "
+        f"active={active_count}/{batch_size} "
+        f"prompt_tokens(avg={avg_prompt_tokens}, min={min_prompt_tokens}, max={max_prompt_tokens}) "
+        f"elapsed={elapsed_s:.2f}s"
+    )
+
+
+model_path = os.environ["MODEL_PATH"]
+train_data = os.environ["TRAIN_DATA"]
+scenario_files = os.environ["SCENARIO_FILES"].split()
+cost_model_path = os.environ["COST_MODEL"]
+num_samples = int(os.environ["NUM_SAMPLES"])
+num_gen = int(os.environ["NUM_GEN"])
+max_turns = int(os.environ["MAX_TURNS"])
+vllm_host = os.environ["VLLM_SERVER_HOST"]
+vllm_port = int(os.environ["VLLM_SERVER_PORT"])
+vllm_model_name = os.environ["VLLM_MODEL_NAME"]
+vllm_timeout = int(os.environ["VLLM_TIMEOUT"])
+vllm_max_tokens = int(os.environ["VLLM_MAX_TOKENS"])
+rollout_log_interval = int(os.environ["ROLLOUT_LOG_INTERVAL"])
+
+base_url = vllm_host.strip()
+if "://" not in base_url:
+    base_url = f"http://{base_url}"
+base_url = f"{base_url.rstrip('/')}:{vllm_port}/v1" if base_url.count(":") == 1 and base_url.startswith("http") else base_url
+if not base_url.endswith("/v1"):
+    base_url = f"{base_url.rstrip('/')}/v1"
+
+logger.info("加载 tokenizer: %s", model_path)
+tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+
+logger.info("连接 vLLM server: %s (model=%s)", base_url, vllm_model_name)
+client = OpenAI(
+    api_key="EMPTY",
+    base_url=base_url,
+    timeout=vllm_timeout,
+    max_retries=0,
+    default_headers={"User-Agent": "Mozilla/5.0"},
+)
+
+logger.info("加载 Cost Model: %s", cost_model_path)
+from cost_model.model import CostModel
+cost_model = CostModel.load(cost_model_path)
+
+logger.info("加载场景")
+all_scenarios = DBToolEnv._load_scenarios(scenario_files)
+
+def env_factory():
+    env = DBToolEnv(
+        mode="train",
+        cost_model=cost_model,
+        max_turns=max_turns,
+        knob_space_path="configs/knob_space.yaml",
+    )
+    env.scenarios = all_scenarios
+    return env
+
+selected = []
 seen = set()
-written = 0
-
-with open(src_path, "r", encoding="utf-8") as src, open(dst_path, "w", encoding="utf-8") as dst:
-    for line in src:
+with open(train_data, "r", encoding="utf-8") as f:
+    for line in f:
         line = line.strip()
         if not line:
             continue
         row = json.loads(line)
         question = row.get("question", "")
+        env_sample_idx = row.get("env_sample_idx")
         if not question or question in seen:
             continue
         seen.add(question)
-        dst.write(json.dumps(row, ensure_ascii=False) + "\n")
-        written += 1
-        if written >= limit:
+        selected.append((question, env_sample_idx))
+        if len(selected) >= num_samples:
             break
 
-if written < limit:
-    raise SystemExit(f"only found {written} unique questions, expected at least {limit}")
+if len(selected) < num_samples:
+    raise SystemExit(f"only found {len(selected)} unique questions, expected at least {num_samples}")
+
+logger.info("抽样完成: %s 条 prompt", len(selected))
+
+expanded = []
+for question, env_sample_idx in selected:
+    for _ in range(num_gen):
+        expanded.append((question, env_sample_idx))
+
+logger.info("展开后 rollout 轨迹数: %s", len(expanded))
+
+envs = []
+messages_list = []
+improvements = [0.0] * len(expanded)
+active = list(range(len(expanded)))
+
+for question, env_sample_idx in expanded:
+    env = env_factory()
+    env.reset(sample_idx=env_sample_idx) if env_sample_idx is not None else env.reset()
+    envs.append(env)
+
+    tools_desc = env.tools_format_func()
+    full_system = f"{SYSTEM_PROMPT}\n\n{tools_desc}"
+    messages_list.append([
+        {"role": "system", "content": full_system},
+        {"role": "user", "content": question},
+    ])
+
+total_start = time.perf_counter()
+total_generated_turns = 0
+
+for turn in range(max_turns):
+    if not active:
+        break
+
+    turn_start = time.perf_counter()
+    batch_texts = []
+    for idx in active:
+        text = tokenizer.apply_chat_template(
+            messages_list[idx], tokenize=False, add_generation_prompt=True
+        )
+        batch_texts.append(text)
+
+    prompt_token_lengths = [
+        len(tokenizer.encode(text, add_special_tokens=False))
+        for text in batch_texts
+    ]
+
+    try:
+        response = client.completions.create(
+            model=vllm_model_name,
+            prompt=batch_texts,
+            temperature=1.0,
+            top_p=1.0,
+            max_tokens=vllm_max_tokens,
+            stop=["</tool_call>"],
+        )
+        outputs = [""] * len(batch_texts)
+        for choice in response.choices:
+            outputs[int(choice.index)] = choice.text or ""
+    except Exception as exc:
+        logger.warning("批量请求失败，降级逐条请求: %s", exc)
+        outputs = []
+        for text in batch_texts:
+            response = client.completions.create(
+                model=vllm_model_name,
+                prompt=text,
+                temperature=1.0,
+                top_p=1.0,
+                max_tokens=vllm_max_tokens,
+                stop=["</tool_call>"],
+            )
+            outputs.append(response.choices[0].text or "")
+
+    still_active = []
+    for pos, idx in enumerate(active):
+        gen_text = outputs[pos] or ""
+        if "<tool_call>" in gen_text and "</tool_call>" not in gen_text:
+            gen_text += "</tool_call>"
+
+        messages_list[idx].append({"role": "assistant", "content": gen_text})
+
+        if "</tool_call>" in gen_text:
+            obs, _, done, _ = envs[idx].step(gen_text)
+            messages_list[idx].append({
+                "role": "user",
+                "content": f"<tool_response>\n{obs}\n</tool_response>"
+            })
+            if not done:
+                still_active.append(idx)
+
+    total_generated_turns += len(active)
+    active = still_active
+
+    if rollout_log_interval > 0 and (
+        turn == 0 or
+        (turn + 1) % rollout_log_interval == 0 or
+        not active
+    ):
+        logger.info(
+            format_rollout_turn_log(
+                turn_idx=turn,
+                active_count=len(active),
+                batch_size=len(expanded),
+                prompt_token_lengths=prompt_token_lengths,
+                elapsed_s=time.perf_counter() - turn_start,
+            )
+        )
+
+for i, env in enumerate(envs):
+    imp = getattr(env, "improvement_pct", 0.0)
+    if imp == 0.0:
+        try:
+            obs, _, _, _ = env.step(
+                '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>'
+            )
+            imp = float(json.loads(obs).get("improvement_pct", 0.0))
+        except Exception:
+            pass
+    improvements[i] = imp
+
+elapsed = time.perf_counter() - total_start
+avg_turns = total_generated_turns / max(len(expanded), 1)
+avg_improvement = sum(improvements) / max(len(improvements), 1)
+
+logger.info("============================================")
+logger.info("纯 rollout 基准完成")
+logger.info("prompt 数: %s", num_samples)
+logger.info("rollout 轨迹数: %s", len(expanded))
+logger.info("总生成轮次: %s", total_generated_turns)
+logger.info("平均每轨迹轮次: %.2f", avg_turns)
+logger.info("平均 improvement: %.4f", avg_improvement)
+logger.info("总耗时: %.2fs", elapsed)
+logger.info("约合: %dm %ds", int(elapsed // 60), int(elapsed % 60))
+logger.info("============================================")
 PY
-
-echo "============================================"
-echo "  GRPO 16 样本基准 (trl, LoRA)"
-echo "============================================"
-echo "模型:         $MODEL_PATH"
-echo "原始数据:     $TRAIN_DATA"
-echo "基准数据:     $TMP_TRAIN_DATA"
-echo "样本数:       $NUM_SAMPLES"
-echo "Batch:        ${BATCH_SIZE} x ${NUM_GEN} x ${GRAD_ACCUM}"
-echo "Turns:        $MAX_TURNS"
-echo "Lengths:      prompt=${MAX_PROMPT_LENGTH}, completion=${MAX_COMPLETION_LENGTH}, vllm=${VLLM_MAX_TOKENS}"
-echo "Attention:    ${ATTN_IMPL}"
-echo "vLLM 服务:    http://${VLLM_SERVER_HOST}:${VLLM_SERVER_PORT}/v1"
-echo "============================================"
-
-START_TS="$(date +%s)"
-
-PYTHONPATH=. python -m training.trl.grpo \
-    --model_path "$MODEL_PATH" \
-    --train_data "$TMP_TRAIN_DATA" \
-    --scenario_files $SCENARIO_FILES \
-    --cost_model "$COST_MODEL" \
-    --output_dir "$OUTPUT_DIR" \
-    --num_epochs $EPOCHS \
-    --max_steps $MAX_STEPS \
-    --lr $LR \
-    --batch_size $BATCH_SIZE \
-    --grad_accum $GRAD_ACCUM \
-    --num_generations $NUM_GEN \
-    --lora_rank $LORA_RANK \
-    --max_turns $MAX_TURNS \
-    --max_completion_length $MAX_COMPLETION_LENGTH \
-    --max_prompt_length $MAX_PROMPT_LENGTH \
-    --use_lora \
-    --attn_impl $ATTN_IMPL \
-    --vllm_server_host $VLLM_SERVER_HOST \
-    --vllm_server_port $VLLM_SERVER_PORT \
-    --vllm_model_name $VLLM_MODEL_NAME \
-    --vllm_timeout $VLLM_TIMEOUT \
-    --vllm_max_tokens $VLLM_MAX_TOKENS \
-    --rollout_log_interval $ROLLOUT_LOG_INTERVAL \
-    --bf16
-
-END_TS="$(date +%s)"
-ELAPSED="$((END_TS - START_TS))"
-
-echo "============================================"
-echo "  基准完成"
-echo "============================================"
-echo "总耗时: ${ELAPSED}s"
-echo "约合:   $((ELAPSED / 60))m $((ELAPSED % 60))s"
-echo "============================================"
