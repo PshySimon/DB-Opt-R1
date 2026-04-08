@@ -7,6 +7,8 @@ from types import SimpleNamespace
 trl_module = types.ModuleType("trl")
 trl_module.GRPOConfig = type("GRPOConfig", (), {})
 trl_module.GRPOTrainer = type("GRPOTrainer", (), {})
+trl_module.SFTConfig = type("SFTConfig", (), {})
+trl_module.SFTTrainer = type("SFTTrainer", (), {})
 sys.modules.setdefault("trl", trl_module)
 
 trl_trainer_module = types.ModuleType("trl.trainer")
@@ -56,6 +58,7 @@ class GRPOServerModeTests(unittest.TestCase):
         self.assertEqual(args.vllm_server_port, 8000)
         self.assertEqual(args.vllm_model_name, "qwen3-4b-sft")
         self.assertEqual(args.attn_impl, "sdpa")
+        self.assertEqual(args.rollout_log_interval, 1)
 
     def test_server_backend_returns_batch_texts_in_index_order(self):
         response = SimpleNamespace(
@@ -79,6 +82,23 @@ class GRPOServerModeTests(unittest.TestCase):
         )
 
         self.assertEqual(outputs, ["first", "second"])
+
+    def test_format_rollout_turn_log_includes_lengths_and_elapsed(self):
+        line = grpo.format_rollout_turn_log(
+            rollout_id=3,
+            turn_idx=2,
+            active_count=4,
+            batch_size=4,
+            prompt_token_lengths=[128, 256, 512, 1024],
+            elapsed_s=3.14159,
+        )
+
+        self.assertIn("rollout#3", line)
+        self.assertIn("turn 3", line)
+        self.assertIn("active=4/4", line)
+        self.assertIn("prompt_tokens(avg=480", line)
+        self.assertIn("max=1024", line)
+        self.assertIn("elapsed=3.14s", line)
 
 
 if __name__ == "__main__":

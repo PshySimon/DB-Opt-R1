@@ -22,6 +22,7 @@ import json
 import math
 import argparse
 import logging
+import time
 from urllib.parse import urlparse, urlunparse
 
 import torch
@@ -63,6 +64,18 @@ def build_vllm_base_url(host: str, port: int) -> str:
         path = f"{path}/v1" if path else "/v1"
 
     return urlunparse((parsed.scheme or "http", netloc, path, "", "", ""))
+
+
+def format_rollout_turn_log(rollout_id, turn_idx, active_count, batch_size, prompt_token_lengths, elapsed_s):
+    avg_prompt_tokens = int(sum(prompt_token_lengths) / max(len(prompt_token_lengths), 1))
+    max_prompt_tokens = max(prompt_token_lengths) if prompt_token_lengths else 0
+    min_prompt_tokens = min(prompt_token_lengths) if prompt_token_lengths else 0
+    return (
+        f"[rollout#{rollout_id}] turn {turn_idx + 1} "
+        f"active={active_count}/{batch_size} "
+        f"prompt_tokens(avg={avg_prompt_tokens}, min={min_prompt_tokens}, max={max_prompt_tokens}) "
+        f"elapsed={elapsed_s:.2f}s"
+    )
 
 
 class VLLMServerBackend:
@@ -129,7 +142,8 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
 
     def __init__(self, *args, env_factory=None, prompt_env_map=None,
                  max_turns=10, generation_backend=None,
-                 rollout_tokenizer=None, generation_max_tokens=1024, **kwargs):
+                 rollout_tokenizer=None, generation_max_tokens=1024,
+                 rollout_log_interval=1, **kwargs):
         super().__init__(*args, **kwargs)
         self.env_factory = env_factory
         self.prompt_env_map = prompt_env_map or {}
@@ -137,6 +151,8 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         self.generation_backend = generation_backend
         self.rollout_tokenizer = rollout_tokenizer
         self.generation_max_tokens = generation_max_tokens
+        self.rollout_log_interval = rollout_log_interval
+        self._rollout_call_idx = 0
 
     def _do_rollouts_batched(self, prompts):
         """
@@ -144,6 +160,10 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         比逐条串行快 N 倍（N = num_generations）。
         """
         n = len(prompts)
+        self._rollout_call_idx += 1
+        rollout_id = self._rollout_call_idx
+        rollout_start = time.perf_counter()
+
         # 每条 rollout 的状态
         envs = []
         prompt_msgs_list = []  # 用于 tokenize 的 prompt
@@ -175,6 +195,7 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
             if not active:
                 break
 
+            turn_start = time.perf_counter()
             # 把活跃 rollout 的 messages 格式化成 prompt 文本
             batch_texts = []
             for i in active:
@@ -183,6 +204,10 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
                 )
                 batch_texts.append(text)
 
+            prompt_token_lengths = [
+                len(self.rollout_tokenizer.encode(text, add_special_tokens=False))
+                for text in batch_texts
+            ]
             outputs = self.generation_backend.generate_texts(
                 batch_texts,
                 temperature=1.0,
@@ -214,6 +239,21 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
                 # else: 没有 tool_call，结束
 
             active = still_active
+            if self.rollout_log_interval > 0 and (
+                turn == 0 or
+                (turn + 1) % self.rollout_log_interval == 0 or
+                not active
+            ):
+                logger.info(
+                    format_rollout_turn_log(
+                        rollout_id=rollout_id,
+                        turn_idx=turn,
+                        active_count=len(active) if active else len(still_active),
+                        batch_size=n,
+                        prompt_token_lengths=prompt_token_lengths,
+                        elapsed_s=time.perf_counter() - turn_start,
+                    )
+                )
 
         # 获取 improvement
         for i in range(n):
@@ -227,6 +267,14 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
                 except Exception:
                     pass
             improvements[i] = imp
+
+        logger.info(
+            "[rollout#%s] completed batch=%s total_elapsed=%.2fs avg_improvement=%.4f",
+            rollout_id,
+            n,
+            time.perf_counter() - rollout_start,
+            sum(improvements) / max(len(improvements), 1),
+        )
 
         return prompt_msgs_list, messages_list, improvements
 
@@ -394,6 +442,7 @@ def build_parser():
     parser.add_argument("--vllm_api_key", default="EMPTY")
     parser.add_argument("--vllm_timeout", type=int, default=300)
     parser.add_argument("--vllm_max_tokens", type=int, default=1024)
+    parser.add_argument("--rollout_log_interval", type=int, default=1)
     parser.set_defaults(use_lora=True, full_finetune=False)
     return parser
 
@@ -401,6 +450,10 @@ def build_parser():
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] %(message)s",
+    )
 
     # Cost Model
     cost_model = None
@@ -509,6 +562,7 @@ def main():
         generation_backend=generation_backend,
         rollout_tokenizer=rollout_tokenizer,
         generation_max_tokens=args.vllm_max_tokens,
+        rollout_log_interval=args.rollout_log_interval,
     )
 
     if torch.cuda.is_available():
