@@ -7,11 +7,13 @@ PORT="${PORT:-8000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-16384}"
 GPU_UTIL="${GPU_UTIL:-0.90}"
 TP="${TP:-1}"
+SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-qwen3-4b-sft}"
 
 echo "============================================"
 echo "  vLLM 部署 Qwen3-4B"
 echo "============================================"
 echo "模型:         $MODEL_PATH"
+echo "服务模型名:   $SERVED_MODEL_NAME"
 echo "端口:         $PORT"
 echo "上下文长度:   $MAX_MODEL_LEN"
 echo "GPU 利用率:   $GPU_UTIL"
@@ -20,7 +22,7 @@ echo "============================================"
 
 python -m vllm.entrypoints.openai.api_server \
     --model "$MODEL_PATH" \
-    --served-model-name qwen3-4b-sft \
+    --served-model-name "$SERVED_MODEL_NAME" \
     --port $PORT \
     --max-model-len $MAX_MODEL_LEN \
     --gpu-memory-utilization $GPU_UTIL \

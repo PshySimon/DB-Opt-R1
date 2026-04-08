@@ -1,10 +1,10 @@
 """
-trl GRPO 多轮工具调用训练（vLLM 进程内加速）
+trl GRPO 多轮工具调用训练（外置 vLLM server）
 
 架构：
-- 生成：vllm.LLM 进程内批量生成（快，无需启动 server）
+- 生成：调用外置 vLLM OpenAI-compatible server
 - 训练：HF 模型 forward + backward（LoRA）
-- 两个模型共享 GPU 显存（vLLM 占 30%，训练占 70%）
+- 推理和训练分别占用不同 GPU，避免显存争用
 
 Usage:
     PYTHONPATH=. python -m training.trl.grpo \\
@@ -12,16 +12,17 @@ Usage:
         --train_data data_pipeline/data/train/sft_trajectories.jsonl \\
         --scenario_files ... \\
         --cost_model cost_model/checkpoints/v9_lgbm \\
+        --vllm_server_host 127.0.0.1 \\
+        --vllm_server_port 8000 \\
+        --vllm_model_name qwen3-4b-sft \\
         --output_dir model_save/grpo/
 """
 
 import json
 import math
-import time
 import argparse
 import logging
-from collections import defaultdict
-from typing import Any, Union
+from urllib.parse import urlparse, urlunparse
 
 import torch
 from datasets import Dataset
@@ -38,29 +39,110 @@ from training.reward_score import compute_score_format
 logger = logging.getLogger(__name__)
 
 
+class _SetTrainMode(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        use_lora = self.const == "lora"
+        setattr(namespace, "use_lora", use_lora)
+        setattr(namespace, "full_finetune", not use_lora)
+
+
+def build_vllm_base_url(host: str, port: int) -> str:
+    """把 host/port 规范化成 OpenAI client 需要的 /v1 base_url。"""
+    raw = host.strip()
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    parsed = urlparse(raw)
+
+    hostname = parsed.hostname or "127.0.0.1"
+    netloc = parsed.netloc or hostname
+    if parsed.port is None:
+        netloc = f"{hostname}:{port}"
+
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/v1"):
+        path = f"{path}/v1" if path else "/v1"
+
+    return urlunparse((parsed.scheme or "http", netloc, path, "", "", ""))
+
+
+class VLLMServerBackend:
+    """通过 OpenAI-compatible API 访问外置 vLLM server。"""
+
+    def __init__(self, model_name, base_url, api_key="EMPTY", timeout=300, client=None):
+        self.model_name = model_name
+        self.base_url = base_url
+        self.timeout = timeout
+        self.client = client or self._create_client(api_key=api_key)
+
+    def _create_client(self, api_key):
+        from openai import OpenAI
+
+        return OpenAI(
+            api_key=api_key,
+            base_url=self.base_url,
+            max_retries=0,
+            timeout=self.timeout,
+            default_headers={"User-Agent": "Mozilla/5.0"},
+        )
+
+    def _extract_batch_texts(self, response, batch_size):
+        outputs = [""] * batch_size
+        for choice in response.choices:
+            outputs[int(choice.index)] = choice.text or ""
+        return outputs
+
+    def _generate_one(self, prompt, temperature, top_p, max_tokens, stop):
+        response = self.client.completions.create(
+            model=self.model_name,
+            prompt=prompt,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stop=stop,
+        )
+        return response.choices[0].text or ""
+
+    def generate_texts(self, prompts, temperature, top_p, max_tokens, stop):
+        if not prompts:
+            return []
+
+        try:
+            response = self.client.completions.create(
+                model=self.model_name,
+                prompt=prompts,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stop=stop,
+            )
+            return self._extract_batch_texts(response, batch_size=len(prompts))
+        except Exception as exc:
+            logger.warning("批量请求 vLLM 失败，降级为逐条请求: %s", exc)
+            return [
+                self._generate_one(prompt, temperature, top_p, max_tokens, stop)
+                for prompt in prompts
+            ]
+
+
 class MultiTurnGRPOTrainer(GRPOTrainer):
-    """vLLM 进程内加速的多轮工具交互 GRPO Trainer"""
+    """基于外置 vLLM server 的多轮工具交互 GRPO Trainer"""
 
     def __init__(self, *args, env_factory=None, prompt_env_map=None,
-                 max_turns=10, vllm_llm=None, vllm_tokenizer=None, **kwargs):
+                 max_turns=10, generation_backend=None,
+                 rollout_tokenizer=None, generation_max_tokens=1024, **kwargs):
         super().__init__(*args, **kwargs)
         self.env_factory = env_factory
         self.prompt_env_map = prompt_env_map or {}
         self.max_turns = max_turns
-        self.vllm_llm = vllm_llm
-        self.vllm_tokenizer = vllm_tokenizer
+        self.generation_backend = generation_backend
+        self.rollout_tokenizer = rollout_tokenizer
+        self.generation_max_tokens = generation_max_tokens
 
     def _do_rollouts_batched(self, prompts):
         """
-        批量多轮 rollout：每轮把所有活跃 rollout 一起交给 vLLM 批量生成。
+        批量多轮 rollout：每轮把所有活跃 rollout 一起交给 vLLM server 批量生成。
         比逐条串行快 N 倍（N = num_generations）。
         """
-        from vllm import SamplingParams
-        sampling_params = SamplingParams(
-            temperature=1.0, top_p=1.0, max_tokens=1024,
-            stop=["</tool_call>"], include_stop_str_in_output=True,
-        )
-
         n = len(prompts)
         # 每条 rollout 的状态
         envs = []
@@ -96,18 +178,23 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
             # 把活跃 rollout 的 messages 格式化成 prompt 文本
             batch_texts = []
             for i in active:
-                text = self.vllm_tokenizer.apply_chat_template(
+                text = self.rollout_tokenizer.apply_chat_template(
                     messages_list[i], tokenize=False, add_generation_prompt=True
                 )
                 batch_texts.append(text)
 
-            # vLLM 批量生成
-            outputs = self.vllm_llm.generate(batch_texts, sampling_params)
+            outputs = self.generation_backend.generate_texts(
+                batch_texts,
+                temperature=1.0,
+                top_p=1.0,
+                max_tokens=self.generation_max_tokens,
+                stop=["</tool_call>"],
+            )
 
             # 处理每条输出
             still_active = []
             for j, i in enumerate(active):
-                gen_text = outputs[j].outputs[0].text or ""
+                gen_text = outputs[j] or ""
 
                 # 补全 stop token（include_stop_str_in_output 有时不可靠）
                 if "<tool_call>" in gen_text and "</tool_call>" not in gen_text:
@@ -155,23 +242,23 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         all_completion_ids = []
 
         for i in range(len(prompts)):
-            prompt_text = self.vllm_tokenizer.apply_chat_template(
+            prompt_text = self.rollout_tokenizer.apply_chat_template(
                 prompt_msgs_list[i], tokenize=False, add_generation_prompt=True
             )
-            full_text = self.vllm_tokenizer.apply_chat_template(
+            full_text = self.rollout_tokenizer.apply_chat_template(
                 messages_list[i], tokenize=False, add_generation_prompt=False
             )
             all_prompt_texts.append(prompt_text)
 
             # 提取 completion token ids
-            prompt_len = len(self.vllm_tokenizer.encode(prompt_text, add_special_tokens=False))
-            full_ids = self.vllm_tokenizer.encode(full_text, add_special_tokens=False)
+            prompt_len = len(self.rollout_tokenizer.encode(prompt_text, add_special_tokens=False))
+            full_ids = self.rollout_tokenizer.encode(full_text, add_special_tokens=False)
             comp_ids = full_ids[prompt_len:]
 
             if len(comp_ids) > self.max_completion_length:
                 comp_ids = comp_ids[:self.max_completion_length]
             if len(comp_ids) == 0:
-                comp_ids = [self.vllm_tokenizer.eos_token_id]
+                comp_ids = [self.rollout_tokenizer.eos_token_id]
 
             all_completion_ids.append(torch.tensor(comp_ids, dtype=torch.long, device=device))
 
@@ -277,7 +364,7 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
 # Main
 # ============================================================
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", required=True)
     parser.add_argument("--output_dir", default="./model_save/grpo/")
@@ -296,9 +383,23 @@ def main():
     parser.add_argument("--max_turns", type=int, default=10)
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--knob_space", default="configs/knob_space.yaml")
-    parser.add_argument("--flash_attn", action="store_true", default=False)
-    parser.add_argument("--vllm_gpu_util", type=float, default=0.40,
-                        help="vLLM 显存占比（剩余给训练）")
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--use_lora", nargs=0, action=_SetTrainMode, const="lora")
+    mode_group.add_argument("--full_finetune", nargs=0, action=_SetTrainMode, const="full")
+    parser.add_argument("--attn_impl", default="sdpa",
+                        choices=["eager", "sdpa", "flash_attention_2"])
+    parser.add_argument("--vllm_server_host", default="127.0.0.1")
+    parser.add_argument("--vllm_server_port", type=int, default=8000)
+    parser.add_argument("--vllm_model_name", default="qwen3-4b-sft")
+    parser.add_argument("--vllm_api_key", default="EMPTY")
+    parser.add_argument("--vllm_timeout", type=int, default=300)
+    parser.add_argument("--vllm_max_tokens", type=int, default=1024)
+    parser.set_defaults(use_lora=True, full_finetune=False)
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     # Cost Model
@@ -311,18 +412,20 @@ def main():
         except Exception as e:
             print(f"[WARNING] Cost Model 加载失败: {e}")
 
-    # ---- 先启动 vLLM（在 HF 模型之前，优先分配显存）----
-    print(f"🔄 启动 vLLM（gpu_util={args.vllm_gpu_util}）: {args.model_path}")
-    from vllm import LLM
-    vllm_llm = LLM(
-        model=args.model_path,
-        dtype="bfloat16",
-        gpu_memory_utilization=args.vllm_gpu_util,
-        trust_remote_code=True,
-        max_model_len=16384,
+    # ---- 连接外置 vLLM server ----
+    vllm_base_url = build_vllm_base_url(args.vllm_server_host, args.vllm_server_port)
+    print(
+        f"🔄 连接 vLLM server: {vllm_base_url} "
+        f"(model={args.vllm_model_name})"
     )
-    vllm_tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
-    print("✅ vLLM 就绪")
+    generation_backend = VLLMServerBackend(
+        model_name=args.vllm_model_name,
+        base_url=vllm_base_url,
+        api_key=args.vllm_api_key,
+        timeout=args.vllm_timeout,
+    )
+    rollout_tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
+    print("✅ vLLM server 就绪")
 
     # 从 SFT 轨迹提取 prompt
     prompt_records, prompt_env_map, seen = [], {}, set()
@@ -352,18 +455,20 @@ def main():
         args.model_path,
         torch_dtype=torch.bfloat16 if args.bf16 else torch.float16,
         trust_remote_code=True,
-        attn_implementation="flash_attention_2" if args.flash_attn else "eager",
+        attn_implementation=args.attn_impl,
     )
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
-    peft_config = LoraConfig(
-        r=args.lora_rank, lora_alpha=args.lora_rank // 2, lora_dropout=0.05,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-        task_type="CAUSAL_LM",
-    )
+    peft_config = None
+    if args.use_lora:
+        peft_config = LoraConfig(
+            r=args.lora_rank, lora_alpha=args.lora_rank // 2, lora_dropout=0.05,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+            task_type="CAUSAL_LM",
+        )
 
     effective_batch = args.batch_size * args.num_generations
     training_config = GRPOConfig(
@@ -401,7 +506,9 @@ def main():
         processing_class=tokenizer, train_dataset=dataset, peft_config=peft_config,
         env_factory=env_factory, prompt_env_map=prompt_env_map,
         max_turns=args.max_turns,
-        vllm_llm=vllm_llm, vllm_tokenizer=vllm_tokenizer,
+        generation_backend=generation_backend,
+        rollout_tokenizer=rollout_tokenizer,
+        generation_max_tokens=args.vllm_max_tokens,
     )
 
     if torch.cuda.is_available():
@@ -409,7 +516,8 @@ def main():
         trp = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
         print(f"\n  总参数: {tp/1e6:.1f}M | 可训练: {trp/1e6:.1f}M ({trp/tp:.2%})")
 
-    print("\n🚀 开始 GRPO 训练（vLLM 进程内加速）...")
+    mode_name = "LoRA" if args.use_lora else "全量"
+    print(f"\n🚀 开始 GRPO 训练（外置 vLLM server，模式: {mode_name}）...")
     trainer.train()
 
     if torch.cuda.is_available():

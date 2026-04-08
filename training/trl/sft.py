@@ -20,7 +20,14 @@ from peft import LoraConfig
 from training.data_utils import load_sft_data
 
 
-def main():
+class _SetTrainMode(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        use_lora = self.const == "lora"
+        setattr(namespace, "use_lora", use_lora)
+        setattr(namespace, "full_finetune", not use_lora)
+
+
+def build_parser():
     parser = argparse.ArgumentParser(description="trl SFT 训练")
     parser.add_argument("--model_path", default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--data_files", nargs="+", required=True)
@@ -28,7 +35,7 @@ def main():
     parser.add_argument("--num_epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--batch_size", type=int, default=2)
-    parser.add_argument("--grad_accum", type=int, default=4)  # 改这里或通过命令行传入
+    parser.add_argument("--grad_accum", type=int, default=4)
     parser.add_argument("--max_length", type=int, default=8192)
     parser.add_argument("--lora_rank", type=int, default=64)
     parser.add_argument("--max_steps", type=int, default=-1)
@@ -36,6 +43,16 @@ def main():
     parser.add_argument("--gradient_checkpointing", action="store_true", default=True)
     parser.add_argument("--no_gradient_checkpointing", dest="gradient_checkpointing", action="store_false")
     parser.add_argument("--flash_attn", action="store_true", default=False)
+
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument("--use_lora", nargs=0, action=_SetTrainMode, const="lora")
+    mode_group.add_argument("--full_finetune", nargs=0, action=_SetTrainMode, const="full")
+    parser.set_defaults(use_lora=True, full_finetune=False)
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     # 先加载 tokenizer（用于筛选超长轨迹）
@@ -76,17 +93,18 @@ def main():
     )
 
 
-    # LoRA
-    peft_config = LoraConfig(
-        r=args.lora_rank,
-        lora_alpha=args.lora_rank // 2,
-        lora_dropout=0.05,
-        target_modules=[
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
-        ],
-        task_type="CAUSAL_LM",
-    )
+    peft_config = None
+    if args.use_lora:
+        peft_config = LoraConfig(
+            r=args.lora_rank,
+            lora_alpha=args.lora_rank // 2,
+            lora_dropout=0.05,
+            target_modules=[
+                "q_proj", "k_proj", "v_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj",
+            ],
+            task_type="CAUSAL_LM",
+        )
 
     # 训练配置
     training_args = SFTConfig(
@@ -169,7 +187,8 @@ def main():
         print_param_stats(trainer.model)
         print_memory_stats("训练前")
 
-    print("\n开始 SFT 训练...")
+    mode_name = "LoRA" if args.use_lora else "全量"
+    print(f"\n开始 SFT 训练... 模式: {mode_name}")
     trainer.train()
 
     if torch.cuda.is_available():
