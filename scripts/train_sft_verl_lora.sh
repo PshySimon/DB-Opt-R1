@@ -49,8 +49,8 @@ torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
     data.val_files=$DATA_DIR/validation.parquet \
     data.train_batch_size=$BATCH_SIZE \
     data.micro_batch_size_per_gpu=$MICRO_BATCH_SIZE \
-    data.prompt_key=extra_info \
-    data.response_key=extra_info \
+    +data.prompt_key=extra_info \
+    +data.response_key=extra_info \
     +data.prompt_dict_keys='[question]' \
     +data.response_dict_keys='[answer]' \
     data.max_length=$MAX_LENGTH \
