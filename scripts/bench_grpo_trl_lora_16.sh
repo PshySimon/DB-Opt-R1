@@ -10,6 +10,7 @@ COST_MODEL="${COST_MODEL:-./cost_model/checkpoints/v9_lgbm}"
 NUM_SAMPLES="${NUM_SAMPLES:-16}"
 NUM_GEN="${NUM_GEN:-4}"
 MAX_TURNS="${MAX_TURNS:-10}"
+ROLLOUT_BATCH_SIZE="${ROLLOUT_BATCH_SIZE:-}"
 VLLM_SERVER_HOST="${VLLM_SERVER_HOST:-127.0.0.1}"
 VLLM_SERVER_PORT="${VLLM_SERVER_PORT:-8000}"
 VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-qwen3-4b-sft}"
@@ -25,6 +26,7 @@ echo "训练数据:           $TRAIN_DATA"
 echo "样本数:             $NUM_SAMPLES"
 echo "每样本轨迹数:       $NUM_GEN"
 echo "最大轮数:           $MAX_TURNS"
+echo "Rollout 并发:       ${ROLLOUT_BATCH_SIZE:-全部活跃轨迹}"
 echo "vLLM tokens:        $VLLM_MAX_TOKENS"
 echo "vLLM 服务:          http://${VLLM_SERVER_HOST}:${VLLM_SERVER_PORT}/v1"
 echo "============================================"
@@ -37,6 +39,7 @@ PYTHONPATH=. python - \
   "$NUM_SAMPLES" \
   "$NUM_GEN" \
   "$MAX_TURNS" \
+  "$ROLLOUT_BATCH_SIZE" \
   "$VLLM_SERVER_HOST" \
   "$VLLM_SERVER_PORT" \
   "$VLLM_MODEL_NAME" \
@@ -79,18 +82,20 @@ def format_rollout_turn_log(turn_idx, active_count, batch_size, prompt_token_len
     num_samples,
     num_gen,
     max_turns,
+    rollout_batch_size,
     vllm_host,
     vllm_port,
     vllm_model_name,
     vllm_timeout,
     vllm_max_tokens,
     rollout_log_interval,
-) = sys.argv[1:14]
+) = sys.argv[1:15]
 
 scenario_files = scenario_files_raw.split()
 num_samples = int(num_samples)
 num_gen = int(num_gen)
 max_turns = int(max_turns)
+rollout_batch_size = int(rollout_batch_size) if rollout_batch_size else None
 vllm_port = int(vllm_port)
 vllm_timeout = int(vllm_timeout)
 vllm_max_tokens = int(vllm_max_tokens)
@@ -180,66 +185,73 @@ for question, env_sample_idx in expanded:
 
 total_start = time.perf_counter()
 total_generated_turns = 0
+total_vllm_calls = 0
 
 for turn in range(max_turns):
     if not active:
         break
 
     turn_start = time.perf_counter()
-    batch_texts = []
-    for idx in active:
-        text = tokenizer.apply_chat_template(
-            messages_list[idx], tokenize=False, add_generation_prompt=True
-        )
-        batch_texts.append(text)
+    prompt_token_lengths = []
+    still_active = []
+    chunk_size = rollout_batch_size or len(active)
 
-    prompt_token_lengths = [
-        len(tokenizer.encode(text, add_special_tokens=False))
-        for text in batch_texts
-    ]
+    for offset in range(0, len(active), chunk_size):
+        chunk_indices = active[offset:offset + chunk_size]
+        batch_texts = []
+        for idx in chunk_indices:
+            text = tokenizer.apply_chat_template(
+                messages_list[idx], tokenize=False, add_generation_prompt=True
+            )
+            batch_texts.append(text)
 
-    try:
-        response = client.completions.create(
-            model=vllm_model_name,
-            prompt=batch_texts,
-            temperature=1.0,
-            top_p=1.0,
-            max_tokens=vllm_max_tokens,
-            stop=["</tool_call>"],
+        prompt_token_lengths.extend(
+            len(tokenizer.encode(text, add_special_tokens=False))
+            for text in batch_texts
         )
-        outputs = [""] * len(batch_texts)
-        for choice in response.choices:
-            outputs[int(choice.index)] = choice.text or ""
-    except Exception as exc:
-        logger.warning("批量请求失败，降级逐条请求: %s", exc)
-        outputs = []
-        for text in batch_texts:
+
+        try:
             response = client.completions.create(
                 model=vllm_model_name,
-                prompt=text,
+                prompt=batch_texts,
                 temperature=1.0,
                 top_p=1.0,
                 max_tokens=vllm_max_tokens,
                 stop=["</tool_call>"],
             )
-            outputs.append(response.choices[0].text or "")
+            outputs = [""] * len(batch_texts)
+            for choice in response.choices:
+                outputs[int(choice.index)] = choice.text or ""
+        except Exception as exc:
+            logger.warning("批量请求失败，降级逐条请求: %s", exc)
+            outputs = []
+            for text in batch_texts:
+                response = client.completions.create(
+                    model=vllm_model_name,
+                    prompt=text,
+                    temperature=1.0,
+                    top_p=1.0,
+                    max_tokens=vllm_max_tokens,
+                    stop=["</tool_call>"],
+                )
+                outputs.append(response.choices[0].text or "")
 
-    still_active = []
-    for pos, idx in enumerate(active):
-        gen_text = outputs[pos] or ""
-        if "<tool_call>" in gen_text and "</tool_call>" not in gen_text:
-            gen_text += "</tool_call>"
+        total_vllm_calls += 1
+        for pos, idx in enumerate(chunk_indices):
+            gen_text = outputs[pos] or ""
+            if "<tool_call>" in gen_text and "</tool_call>" not in gen_text:
+                gen_text += "</tool_call>"
 
-        messages_list[idx].append({"role": "assistant", "content": gen_text})
+            messages_list[idx].append({"role": "assistant", "content": gen_text})
 
-        if "</tool_call>" in gen_text:
-            obs, _, done, _ = envs[idx].step(gen_text)
-            messages_list[idx].append({
-                "role": "user",
-                "content": f"<tool_response>\n{obs}\n</tool_response>"
-            })
-            if not done:
-                still_active.append(idx)
+            if "</tool_call>" in gen_text:
+                obs, _, done, _ = envs[idx].step(gen_text)
+                messages_list[idx].append({
+                    "role": "user",
+                    "content": f"<tool_response>\n{obs}\n</tool_response>"
+                })
+                if not done:
+                    still_active.append(idx)
 
     total_generated_turns += len(active)
     active = still_active
@@ -280,6 +292,7 @@ logger.info("纯 rollout 基准完成")
 logger.info("prompt 数: %s", num_samples)
 logger.info("rollout 轨迹数: %s", len(expanded))
 logger.info("总生成轮次: %s", total_generated_turns)
+logger.info("vLLM 请求次数: %s", total_vllm_calls)
 logger.info("平均每轨迹轮次: %.2f", avg_turns)
 logger.info("平均 improvement: %.4f", avg_improvement)
 logger.info("总耗时: %.2fs", elapsed)

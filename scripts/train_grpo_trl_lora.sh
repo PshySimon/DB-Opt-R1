@@ -20,6 +20,7 @@ VLLM_SERVER_PORT="${VLLM_SERVER_PORT:-8000}"
 VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-qwen3-4b-sft}"
 VLLM_TIMEOUT="${VLLM_TIMEOUT:-300}"
 VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-1024}"
+ROLLOUT_BATCH_SIZE="${ROLLOUT_BATCH_SIZE:-}"
 
 echo "============================================"
 echo "  GRPO 训练 (trl, LoRA)"
@@ -32,6 +33,7 @@ echo "Attention:    ${ATTN_IMPL}"
 echo "vLLM 服务:    http://${VLLM_SERVER_HOST}:${VLLM_SERVER_PORT}/v1"
 echo "vLLM 模型:    ${VLLM_MODEL_NAME}"
 echo "LoRA r:       ${LORA_RANK}"
+echo "Rollout 并发: ${ROLLOUT_BATCH_SIZE:-TRL默认}"
 echo "============================================"
 
 PYTHONPATH=. python -m training.trl.grpo \
@@ -56,4 +58,5 @@ PYTHONPATH=. python -m training.trl.grpo \
     --vllm_model_name $VLLM_MODEL_NAME \
     --vllm_timeout $VLLM_TIMEOUT \
     --vllm_max_tokens $VLLM_MAX_TOKENS \
+    $( [ -n "$ROLLOUT_BATCH_SIZE" ] && echo "--rollout_batch_size $ROLLOUT_BATCH_SIZE" ) \
     --bf16

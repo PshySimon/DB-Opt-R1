@@ -59,6 +59,7 @@ class GRPOServerModeTests(unittest.TestCase):
         self.assertEqual(args.vllm_model_name, "qwen3-4b-sft")
         self.assertEqual(args.attn_impl, "sdpa")
         self.assertEqual(args.rollout_log_interval, 1)
+        self.assertIsNone(args.rollout_batch_size)
 
     def test_server_backend_returns_batch_texts_in_index_order(self):
         response = SimpleNamespace(
@@ -99,6 +100,36 @@ class GRPOServerModeTests(unittest.TestCase):
         self.assertIn("prompt_tokens(avg=480", line)
         self.assertIn("max=1024", line)
         self.assertIn("elapsed=3.14s", line)
+
+    def test_build_grpo_config_kwargs_keep_train_batch_size_separate(self):
+        parser = grpo.build_parser()
+        args = parser.parse_args([
+            "--model_path", "model",
+            "--train_data", "train.jsonl",
+            "--scenario_files", "a.json",
+            "--batch_size", "3",
+            "--num_generations", "4",
+            "--grad_accum", "5",
+            "--rollout_batch_size", "24",
+        ])
+
+        kwargs = grpo.build_grpo_config_kwargs(args)
+
+        self.assertEqual(kwargs["per_device_train_batch_size"], 3)
+        self.assertEqual(kwargs["num_generations"], 4)
+        self.assertEqual(kwargs["gradient_accumulation_steps"], 5)
+        self.assertEqual(kwargs["generation_batch_size"], 24)
+
+    def test_expand_prompts_for_generations_repeats_unique_prompts(self):
+        prompts = [{"prompt": "a"}, {"prompt": "b"}]
+
+        expanded = grpo.expand_inputs_for_generations(prompts, prompt_batch_size=2, num_generations=3)
+
+        self.assertEqual(
+            expanded,
+            [{"prompt": "a"}, {"prompt": "a"}, {"prompt": "a"},
+             {"prompt": "b"}, {"prompt": "b"}, {"prompt": "b"}]
+        )
 
 
 if __name__ == "__main__":

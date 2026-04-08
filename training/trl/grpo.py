@@ -21,6 +21,7 @@ Usage:
 import json
 import math
 import argparse
+import inspect
 import logging
 import time
 from urllib.parse import urlparse, urlunparse
@@ -76,6 +77,16 @@ def format_rollout_turn_log(rollout_id, turn_idx, active_count, batch_size, prom
         f"prompt_tokens(avg={avg_prompt_tokens}, min={min_prompt_tokens}, max={max_prompt_tokens}) "
         f"elapsed={elapsed_s:.2f}s"
     )
+
+
+def expand_inputs_for_generations(inputs, prompt_batch_size, num_generations):
+    if num_generations <= 1 or len(inputs) != prompt_batch_size:
+        return inputs
+
+    expanded = []
+    for item in inputs:
+        expanded.extend([item] * num_generations)
+    return expanded
 
 
 class VLLMServerBackend:
@@ -143,7 +154,7 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
     def __init__(self, *args, env_factory=None, prompt_env_map=None,
                  max_turns=10, generation_backend=None,
                  rollout_tokenizer=None, generation_max_tokens=1024,
-                 rollout_log_interval=1, **kwargs):
+                 rollout_log_interval=1, prompt_batch_size=1, **kwargs):
         super().__init__(*args, **kwargs)
         self.env_factory = env_factory
         self.prompt_env_map = prompt_env_map or {}
@@ -152,6 +163,7 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
         self.rollout_tokenizer = rollout_tokenizer
         self.generation_max_tokens = generation_max_tokens
         self.rollout_log_interval = rollout_log_interval
+        self.prompt_batch_size = prompt_batch_size
         self._rollout_call_idx = 0
 
     def _do_rollouts_batched(self, prompts):
@@ -280,7 +292,12 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
 
     def _generate_and_score_completions(self, inputs):
         device = self.accelerator.device
-        prompts = [x["prompt"] for x in inputs]
+        expanded_inputs = expand_inputs_for_generations(
+            inputs=inputs,
+            prompt_batch_size=self.prompt_batch_size,
+            num_generations=self.num_generations,
+        )
+        prompts = [x["prompt"] for x in expanded_inputs]
 
         # ==================== 批量多轮 rollout ====================
         prompt_msgs_list, messages_list, improvements = self._do_rollouts_batched(prompts)
@@ -443,8 +460,52 @@ def build_parser():
     parser.add_argument("--vllm_timeout", type=int, default=300)
     parser.add_argument("--vllm_max_tokens", type=int, default=1024)
     parser.add_argument("--rollout_log_interval", type=int, default=1)
+    parser.add_argument("--rollout_batch_size", type=int, default=None,
+                        help="单独控制 rollout/generation batch；不填则使用 TRL 默认调度")
     parser.set_defaults(use_lora=True, full_finetune=False)
     return parser
+
+
+def build_grpo_config_kwargs(args):
+    kwargs = dict(
+        output_dir=args.output_dir,
+        num_train_epochs=args.num_epochs,
+        per_device_train_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.grad_accum,
+        learning_rate=args.lr,
+        warmup_ratio=0.1,
+        num_generations=args.num_generations,
+        max_completion_length=args.max_completion_length,
+        max_prompt_length=args.max_prompt_length,
+        bf16=args.bf16,
+        fp16=not args.bf16,
+        gradient_checkpointing=True,
+        logging_steps=1,
+        save_steps=50,
+        save_total_limit=3,
+        report_to="none",
+        max_steps=args.max_steps,
+        seed=42,
+        beta=0.0,
+        scale_rewards=True,
+    )
+    if args.rollout_batch_size is not None:
+        kwargs["generation_batch_size"] = args.rollout_batch_size
+    return kwargs
+
+
+def make_grpo_config(args):
+    kwargs = build_grpo_config_kwargs(args)
+    try:
+        signature = inspect.signature(GRPOConfig.__init__)
+        supported = set(signature.parameters.keys())
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in supported}
+        dropped = sorted(set(kwargs.keys()) - set(filtered_kwargs.keys()))
+        if dropped:
+            logger.warning("当前 TRL 版本不支持这些 GRPOConfig 参数，已忽略: %s", ", ".join(dropped))
+        return GRPOConfig(**filtered_kwargs)
+    except (TypeError, ValueError):
+        return GRPOConfig(**kwargs)
 
 
 def main():
@@ -523,22 +584,7 @@ def main():
             task_type="CAUSAL_LM",
         )
 
-    effective_batch = args.batch_size * args.num_generations
-    training_config = GRPOConfig(
-        output_dir=args.output_dir,
-        num_train_epochs=args.num_epochs,
-        per_device_train_batch_size=effective_batch,
-        gradient_accumulation_steps=args.grad_accum,
-        learning_rate=args.lr, warmup_ratio=0.1,
-        num_generations=args.num_generations,
-        max_completion_length=args.max_completion_length,
-        max_prompt_length=args.max_prompt_length,
-        bf16=args.bf16, fp16=not args.bf16,
-        gradient_checkpointing=True,
-        logging_steps=1, save_steps=50, save_total_limit=3,
-        report_to="none", max_steps=args.max_steps, seed=42,
-        beta=0.0, scale_rewards=True,
-    )
+    training_config = make_grpo_config(args)
 
     # 环境工厂
     from environment.tools import DBToolEnv
@@ -563,6 +609,7 @@ def main():
         rollout_tokenizer=rollout_tokenizer,
         generation_max_tokens=args.vllm_max_tokens,
         rollout_log_interval=args.rollout_log_interval,
+        prompt_batch_size=args.batch_size,
     )
 
     if torch.cuda.is_available():
