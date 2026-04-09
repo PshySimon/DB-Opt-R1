@@ -125,6 +125,7 @@ def run_grpo(config) -> None:
                 'TOKENIZERS_PARALLELISM': 'true',
                 'NCCL_DEBUG': 'WARN',
                 'VLLM_LOGGING_LEVEL': 'WARN',
+                'VLLM_USE_V1': '1',
             }
         })
 
@@ -235,4 +236,3 @@ def main_task(config):
 
 if __name__ == '__main__':
     main()
-

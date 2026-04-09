@@ -64,6 +64,10 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", full_content)
         self.assertNotIn("actor_rollout_ref.model.torch_dtype", full_content)
 
+    def test_verl_grpo_main_sets_vllm_v1_runtime_env(self):
+        content = (ROOT / "training" / "verl" / "main_grpo.py").read_text()
+        self.assertIn("'VLLM_USE_V1': '1'", content)
+
     def test_grpo_trainer_config_has_verl_071_targets(self):
         content = (ROOT / "configs" / "grpo_trainer.yaml").read_text()
         self.assertIn("_target_: verl.workers.config.HFModelConfig", content)
