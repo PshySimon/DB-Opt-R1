@@ -63,7 +63,6 @@ python3 -m training.verl.main_grpo \
   \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.n=$N_REPEAT \
-  actor_rollout_ref.rollout.n_repeat=$N_REPEAT \
   actor_rollout_ref.rollout.temperature=1.0 \
   actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \

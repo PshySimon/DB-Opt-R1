@@ -1,5 +1,7 @@
 from pathlib import Path
 import unittest
+from hydra.utils import instantiate
+from omegaconf import OmegaConf
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +57,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("++actor_rollout_ref.model.lora_alpha=$LORA_ALPHA", lora_content)
         self.assertIn("++actor_rollout_ref.model.target_modules=$TARGET_MODULES", lora_content)
         self.assertIn("actor_rollout_ref.rollout.n=$N_REPEAT", lora_content)
+        self.assertNotIn("actor_rollout_ref.rollout.n_repeat", lora_content)
 
         full_content = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', full_content)
@@ -76,6 +79,12 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("forward_only: True", content)
         self.assertIn("entropy_from_logits_with_chunking: False", content)
         self.assertIn("entropy_checkpointing: False", content)
+        self.assertNotIn("use_fire_sampling", content)
+
+    def test_grpo_rollout_config_instantiates_with_verl_071_schema(self):
+        cfg = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
+        rollout = instantiate(cfg.actor_rollout_ref.rollout, _convert_="partial")
+        self.assertEqual(rollout.name, "vllm")
 
 
 if __name__ == "__main__":
