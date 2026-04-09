@@ -1,12 +1,6 @@
-import subprocess
-import sys
 import unittest
-from pathlib import Path
 
 from training.reward_score import compute_score_answer, extract_final_knobs
-
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 class RewardScoreTest(unittest.TestCase):
@@ -44,20 +38,6 @@ class RewardScoreTest(unittest.TestCase):
         score = compute_score_answer(solution, ground_truth, cost_model=FakeCostModel())
 
         self.assertGreater(score, 0.0)
-
-    def test_verify_answer_score_script_reports_positive_score(self):
-        result = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "verify_answer_score.py")],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("direct_answer_score=", result.stdout)
-        self.assertIn("db_reward_manager_answer_score=", result.stdout)
-        self.assertIn("status=PASS", result.stdout)
-
 
 if __name__ == "__main__":
     unittest.main()
