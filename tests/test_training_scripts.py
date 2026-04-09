@@ -43,6 +43,8 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("torch==2.6.0+cu124", content)
         self.assertIn("vllm==0.8.5.post1", content)
         self.assertIn("flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE", content)
+        self.assertIn("https://flashinfer.ai/whl/cu124/torch2.6/", content)
+        self.assertIn("flashinfer-python==0.2.5", content)
 
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         for name in ["train_grpo_verl_lora.sh", "train_grpo_verl_full.sh"]:
