@@ -6,6 +6,7 @@ from pathlib import Path
 from data_pipeline.preprocess_grpo_from_sft import (
     build_grpo_records,
     load_aligned_scenarios,
+    sample_records_per_scene,
     split_records,
 )
 
@@ -97,6 +98,48 @@ class PreprocessGrpoFromSFTTest(unittest.TestCase):
         train_records, val_records = split_records(records, val_ratio=0.2, seed=123)
         self.assertEqual(len(train_records), 8)
         self.assertEqual(len(val_records), 2)
+
+    def test_sample_records_per_scene_keeps_one_record_per_scene_by_default(self):
+        records = [
+            {
+                "prompt": [{"role": "system", "content": "sys"}, {"role": "user", "content": "q0"}],
+                "reward_model": {"ground_truth": {"scenario_idx": 0, "hardware": {}}},
+                "data_source": "db_tuning",
+            },
+            {
+                "prompt": [{"role": "system", "content": "sys"}, {"role": "user", "content": "q1"}],
+                "reward_model": {"ground_truth": {"scenario_idx": 0, "hardware": {}}},
+                "data_source": "db_tuning",
+            },
+            {
+                "prompt": [{"role": "system", "content": "sys"}, {"role": "user", "content": "q2"}],
+                "reward_model": {"ground_truth": {"scenario_idx": 1, "hardware": {}}},
+                "data_source": "db_tuning",
+            },
+            {
+                "prompt": [{"role": "system", "content": "sys"}, {"role": "user", "content": "q3"}],
+                "reward_model": {"ground_truth": {"scenario_idx": 1, "hardware": {}}},
+                "data_source": "db_tuning",
+            },
+        ]
+
+        sampled = sample_records_per_scene(records, questions_per_scene=1, seed=7)
+
+        self.assertEqual(len(sampled), 2)
+        kept_scenarios = [r["reward_model"]["ground_truth"]["scenario_idx"] for r in sampled]
+        self.assertEqual(sorted(kept_scenarios), [0, 1])
+
+    def test_sample_records_per_scene_can_keep_multiple_records(self):
+        records = [
+            {
+                "prompt": [{"role": "system", "content": "sys"}, {"role": "user", "content": f"q{i}"}],
+                "reward_model": {"ground_truth": {"scenario_idx": 0, "hardware": {}}},
+                "data_source": "db_tuning",
+            }
+            for i in range(3)
+        ]
+        sampled = sample_records_per_scene(records, questions_per_scene=2, seed=1)
+        self.assertEqual(len(sampled), 2)
 
 
 if __name__ == "__main__":

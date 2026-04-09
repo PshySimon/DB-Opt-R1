@@ -12,6 +12,7 @@ GRPO 数据预处理：从 SFT 轨迹构造 verl 所需的 prompt parquet。
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import glob
 import json
 import logging
@@ -119,6 +120,28 @@ def build_grpo_records(records: list[dict], scenarios: list) -> list[dict]:
     return grpo_records
 
 
+def sample_records_per_scene(
+    records: list[dict],
+    questions_per_scene: int,
+    seed: int,
+) -> list[dict]:
+    if questions_per_scene <= 0:
+        raise ValueError("questions_per_scene 必须 >= 1")
+
+    grouped: dict[int, list[dict]] = defaultdict(list)
+    for record in records:
+        scenario_idx = record["reward_model"]["ground_truth"]["scenario_idx"]
+        grouped[scenario_idx].append(record)
+
+    rng = random.Random(seed)
+    sampled: list[dict] = []
+    for scenario_idx in sorted(grouped):
+        candidates = list(grouped[scenario_idx])
+        rng.shuffle(candidates)
+        sampled.extend(candidates[:questions_per_scene])
+    return sampled
+
+
 def split_records(records: list[dict], val_ratio: float, seed: int) -> tuple[list[dict], list[dict]]:
     shuffled = list(records)
     random.Random(seed).shuffle(shuffled)
@@ -157,6 +180,12 @@ def main() -> None:
         default=42,
         help="随机种子",
     )
+    parser.add_argument(
+        "--questions-per-scene",
+        type=int,
+        default=1,
+        help="每个场景最多保留多少条 question，默认 1",
+    )
     add_filter_args(parser)
     args = parser.parse_args()
 
@@ -168,6 +197,11 @@ def main() -> None:
         tps_max=args.tps_max,
     )
     grpo_records = build_grpo_records(records, scenarios)
+    grpo_records = sample_records_per_scene(
+        grpo_records,
+        questions_per_scene=args.questions_per_scene,
+        seed=args.seed,
+    )
 
     logger.info("转换得到 %d 条 GRPO prompt", len(grpo_records))
     if not grpo_records:
