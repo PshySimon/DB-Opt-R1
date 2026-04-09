@@ -40,12 +40,12 @@ class ToolGenerationManager:
     def __init__(
         self,
         tokenizer,
-        actor_rollout_wg,
+        sequence_generator,
         config: ToolGenerationConfig,
         is_validation: bool = False,
     ):
         self.tokenizer = tokenizer
-        self.actor_rollout_wg = actor_rollout_wg
+        self.sequence_generator = sequence_generator
         self.config = config
         self.is_validation = is_validation
         
@@ -224,20 +224,20 @@ class ToolGenerationManager:
 
     def _generate_with_gpu_padding(self, active_batch: DataProto) -> DataProto:
         """
-            Wrapper for generation that handles multi-GPU padding requirements.
-            if num_gpus <= 1, return self.actor_rollout_wg.generate_sequences(active_batch)
+            Wrapper for generation that handles batch divisibility requirements.
+            if num_gpus <= 1, return self.sequence_generator.generate_sequences(active_batch)
             if active_batch size is not divisible by num_gpus, pad with first sequence
             then remove padding from output
         """
         num_gpus = self.config.num_gpus
         if num_gpus <= 1:
-            return self.actor_rollout_wg.generate_sequences(active_batch)
+            return self.sequence_generator.generate_sequences(active_batch)
             
         batch_size = active_batch.batch['input_ids'].shape[0]
         remainder = batch_size % num_gpus
         
         if remainder == 0:
-            return self.actor_rollout_wg.generate_sequences(active_batch)
+            return self.sequence_generator.generate_sequences(active_batch)
             
         # Add padding sequences
         padding_size = num_gpus - remainder
@@ -251,7 +251,7 @@ class ToolGenerationManager:
         padded_active_batch = DataProto.from_dict(padded_batch)
         
         # Generate with padded batch
-        padded_output = self.actor_rollout_wg.generate_sequences(padded_active_batch)
+        padded_output = self.sequence_generator.generate_sequences(padded_active_batch)
         
         # Remove padding from output
         trimmed_batch = {k: v[:-padding_size] for k, v in padded_output.batch.items()}

@@ -18,6 +18,7 @@ import numpy as np
 from codetiming import Timer
 from omegaconf import OmegaConf, open_dict
 from verl import DataProto
+from verl.checkpoint_engine import CheckpointEngineManager
 from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
 from verl.single_controller.base import Worker
 from verl.single_controller.ray import RayResourcePool, RayWorkerGroup, RayClassWithInitArgs
@@ -26,6 +27,8 @@ from verl.trainer.ppo import core_algos
 from .metric_utils import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
+from verl.utils.config import omega_conf_to_dataclass
+from verl.utils.import_utils import load_class_from_fqn
 from .agent_rl_dataset import ToolRLDataset, collate_fn
 from verl.utils.tracking import ValidationGenerationsLogger
 from torch.utils.data import RandomSampler, SequentialSampler
@@ -507,7 +510,7 @@ class RayAgentTrainer(object):
             max_prompt_length=self.config.data.max_prompt_length,
             max_response_length=self.config.data.max_response_length,
             max_tool_response_length=self.config.data.max_tool_response_length,
-            num_gpus=self.config.trainer.n_gpus_per_node,
+            num_gpus=len(self.async_rollout_manager.agent_loop_workers),
             use_batch_tool_calls=self.config.tool.use_batch_tool_calls,
             tool_call_start=self.config.tool.tool_call_start,
             tool_call_end=self.config.tool.tool_call_end,
@@ -518,7 +521,7 @@ class RayAgentTrainer(object):
 
         generation_manager = ToolGenerationManager(
             tokenizer=self.tokenizer,
-            actor_rollout_wg=self.actor_rollout_wg,
+            sequence_generator=self.async_rollout_manager,
             config=gen_config,
             is_validation = True,
         )
@@ -562,7 +565,9 @@ class RayAgentTrainer(object):
             print(f'test_gen_batch meta info: {test_gen_batch.meta_info}')
 
             # pad to be divisible by dp_size
-            test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
+            test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(
+                test_gen_batch, len(self.async_rollout_manager.agent_loop_workers)
+            )
 
             first_input_ids = test_gen_batch_padded.batch['input_ids'][:, -gen_config.max_start_length:].clone()
             test_output_gen_batch_padded = generation_manager.run_llm_loop(
@@ -570,6 +575,7 @@ class RayAgentTrainer(object):
                 envs=envs,
                 initial_input_ids=first_input_ids,
             )
+            self.checkpoint_manager.sleep_replicas()
 
             # unpad
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
@@ -690,11 +696,11 @@ class RayAgentTrainer(object):
 
         # create actor and rollout
         if self.hybrid_engine:
-            resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRollout)
+            actor_rollout_resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRollout)
             actor_rollout_cls = RayClassWithInitArgs(cls=self.role_worker_mapping[Role.ActorRollout],
                                                      config=self.config.actor_rollout_ref,
                                                      role='actor_rollout')
-            self.resource_pool_to_cls[resource_pool]['actor_rollout'] = actor_rollout_cls
+            self.resource_pool_to_cls[actor_rollout_resource_pool]['actor_rollout'] = actor_rollout_cls
         else:
             raise NotImplementedError
 
@@ -748,6 +754,26 @@ class RayAgentTrainer(object):
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         self.actor_rollout_wg = all_wg['actor_rollout']
         self.actor_rollout_wg.init_model()
+
+        manager_class_fqn = self.config.actor_rollout_ref.rollout.get("agent", {}).get("agent_loop_manager_class")
+        if manager_class_fqn:
+            AgentLoopManager = load_class_from_fqn(manager_class_fqn, "AgentLoopManager")
+        else:
+            from verl.experimental.agent_loop import AgentLoopManager
+
+        self.async_rollout_manager = AgentLoopManager.create(
+            config=self.config,
+            worker_group=self.actor_rollout_wg,
+            rollout_resource_pool=actor_rollout_resource_pool,
+            reward_loop_worker_handles=None,
+        )
+        rollout_cfg = omega_conf_to_dataclass(self.config.actor_rollout_ref.rollout)
+        self.checkpoint_manager = CheckpointEngineManager(
+            config=rollout_cfg.checkpoint_engine,
+            trainer=self.actor_rollout_wg,
+            replicas=self.async_rollout_manager.rollout_replicas,
+        )
+        self.checkpoint_manager.sleep_replicas()
 
     def _save_checkpoint(self):
         # path: given_path + `/global_step_{global_steps}` + `/actor`
@@ -942,6 +968,7 @@ class RayAgentTrainer(object):
 
         # load checkpoint before doing anything
         self._load_checkpoint()
+        self.checkpoint_manager.update_weights(self.global_steps)
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
@@ -963,7 +990,7 @@ class RayAgentTrainer(object):
             max_prompt_length=self.config.data.max_prompt_length,
             max_response_length=self.config.data.max_response_length,
             max_tool_response_length=self.config.data.max_tool_response_length,
-            num_gpus=self.config.trainer.n_gpus_per_node,
+            num_gpus=len(self.async_rollout_manager.agent_loop_workers),
             use_batch_tool_calls=self.config.tool.use_batch_tool_calls,
             tool_call_start=self.config.tool.tool_call_start,
             tool_call_end=self.config.tool.tool_call_end,
@@ -974,7 +1001,7 @@ class RayAgentTrainer(object):
 
         generation_manager = ToolGenerationManager(
             tokenizer=self.tokenizer,
-            actor_rollout_wg=self.actor_rollout_wg,
+            sequence_generator=self.async_rollout_manager,
             config=gen_config,
         )
 
@@ -986,7 +1013,7 @@ class RayAgentTrainer(object):
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
                 batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
                                                         dtype=object)
-                batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n_repeat, interleave=True)
+                batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
 
                 envs = [self.env.copy() for _ in range(len(batch))]
                 
@@ -1014,6 +1041,7 @@ class RayAgentTrainer(object):
                             envs=envs,  # Already expanded to match environment count
                             initial_input_ids=first_input_ids,
                         )
+                        self.checkpoint_manager.sleep_replicas()
 
                     for key in final_gen_batch_output.batch.keys():
                         final_gen_batch_output.batch[key] = final_gen_batch_output.batch[key].long()
@@ -1022,7 +1050,8 @@ class RayAgentTrainer(object):
                         with _timer('gen_max', timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
                             gen_baseline_batch.meta_info['do_sample'] = False
-                            gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
+                            gen_baseline_output = self.async_rollout_manager.generate_sequences(gen_baseline_batch)
+                            self.checkpoint_manager.sleep_replicas()
 
                             batch = batch.union(gen_baseline_output)
                             reward_baseline_tensor = self.reward_fn(batch)
@@ -1135,6 +1164,8 @@ class RayAgentTrainer(object):
                             self.global_steps % self.config.trainer.save_freq == 0):
                         with _timer('save_checkpoint', timing_raw):
                             self._save_checkpoint()
+
+                    self.checkpoint_manager.update_weights(self.global_steps)
 
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
