@@ -3,6 +3,7 @@ Tool generation manager for LLM agents
 """
 
 import torch
+import numpy as np
 import re
 import json
 import os
@@ -200,11 +201,14 @@ class ToolGenerationManager:
         effective_len = new_attention_mask.sum(dim=1).max()
         max_len = min(self.config.max_prompt_length, effective_len)
         
-        return DataProto.from_dict({
-            'input_ids': new_input_ids[:, -max_len:],
-            'position_ids': new_position_ids[:, -max_len:],
-            'attention_mask': new_attention_mask[:, -max_len:]
-        })
+        return DataProto.from_dict(
+            tensors={
+                'input_ids': new_input_ids[:, -max_len:],
+                'position_ids': new_position_ids[:, -max_len:],
+                'attention_mask': new_attention_mask[:, -max_len:],
+            },
+            non_tensors=dict(rollings.non_tensor_batch),
+        )
 
     def _update_right_side(self, right_side: Dict, 
                           cur_responses: torch.Tensor,
@@ -247,8 +251,12 @@ class ToolGenerationManager:
             # Use first sequence as padding template
             pad_sequence = v[0:1].repeat(padding_size, *[1] * (len(v.shape) - 1))
             padded_batch[k] = torch.cat([v, pad_sequence], dim=0)
-            
-        padded_active_batch = DataProto.from_dict(padded_batch)
+
+        padded_non_tensors = {}
+        for k, v in active_batch.non_tensor_batch.items():
+            padded_non_tensors[k] = np.concatenate([v, np.repeat(v[:1], padding_size, axis=0)], axis=0)
+
+        padded_active_batch = DataProto.from_dict(tensors=padded_batch, non_tensors=padded_non_tensors)
         
         # Generate with padded batch
         padded_output = self.sequence_generator.generate_sequences(padded_active_batch)
@@ -267,6 +275,9 @@ class ToolGenerationManager:
             padded_output.meta_info = trimmed_meta
             
         padded_output.batch = trimmed_batch
+        padded_output.non_tensor_batch = {
+            k: v[:-padding_size] for k, v in padded_output.non_tensor_batch.items()
+        }
         return padded_output
     
     def run_llm_loop(self, gen_batch, envs: List[Any] = None,
@@ -293,9 +304,10 @@ class ToolGenerationManager:
             )
             
             # gen_output = self.actor_rollout_wg.generate_sequences(rollings)
-            rollings_active = DataProto.from_dict({
-                k: v[active_mask] for k, v in rollings.batch.items()
-            })
+            rollings_active = DataProto.from_dict(
+                tensors={k: v[active_mask] for k, v in rollings.batch.items()},
+                non_tensors={k: v[active_mask.cpu().numpy()] for k, v in rollings.non_tensor_batch.items()},
+            )
             gen_output = self._generate_with_gpu_padding(rollings_active)
 
             meta_info = gen_output.meta_info            
