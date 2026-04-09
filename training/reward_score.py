@@ -185,6 +185,19 @@ def extract_final_knobs(solution_str: str) -> Optional[Dict[str, str]]:
             data = json.loads(tc.strip())
             if data.get("name") == "set_knob":
                 args = data.get("arguments", {})
+                knob_blob = args.get("knobs")
+                if knob_blob:
+                    if isinstance(knob_blob, str):
+                        parsed_knobs = json.loads(knob_blob)
+                    elif isinstance(knob_blob, dict):
+                        parsed_knobs = knob_blob
+                    else:
+                        parsed_knobs = {}
+                    for knob_name, value in parsed_knobs.items():
+                        if knob_name and value is not None:
+                            knobs[knob_name] = str(value)
+                    continue
+
                 knob_name = args.get("knob_name")
                 value = args.get("value")
                 if knob_name and value is not None:
