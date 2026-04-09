@@ -276,6 +276,10 @@ class RayAgentTrainer(object):
         self.use_rm = Role.RewardModel in role_worker_mapping
         self.ray_worker_group_cls = ray_worker_group_cls
         self.validation_generations_logger = ValidationGenerationsLogger()
+        lora_rank = config.actor_rollout_ref.model.get("lora", {}).get("rank", 0)
+        if lora_rank <= 0:
+            lora_rank = config.actor_rollout_ref.model.get("lora_rank", 0)
+        self.ref_in_actor = lora_rank > 0 or config.actor_rollout_ref.model.get("lora_adapter_path") is not None
 
         # define KL control
         if self.use_reference_policy:
@@ -703,7 +707,7 @@ class RayAgentTrainer(object):
             self.resource_pool_to_cls[resource_pool]['critic'] = critic_cls
 
         # create reference policy if needed
-        if self.use_reference_policy:
+        if self.use_reference_policy and not self.ref_in_actor:
             resource_pool = self.resource_pool_manager.get_resource_pool(Role.RefPolicy)
             ref_policy_cls = RayClassWithInitArgs(self.role_worker_mapping[Role.RefPolicy],
                                                   config=self.config.actor_rollout_ref,
@@ -735,7 +739,7 @@ class RayAgentTrainer(object):
             self.critic_wg = all_wg['critic']
             self.critic_wg.init_model()
 
-        if self.use_reference_policy:
+        if self.use_reference_policy and not self.ref_in_actor:
             self.ref_policy_wg = all_wg['ref']
             self.ref_policy_wg.init_model()
 
@@ -746,6 +750,9 @@ class RayAgentTrainer(object):
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         self.actor_rollout_wg = all_wg['actor_rollout']
         self.actor_rollout_wg.init_model()
+
+        if self.ref_in_actor:
+            self.ref_policy_wg = self.actor_rollout_wg
 
         manager_class_fqn = self.config.actor_rollout_ref.rollout.get("agent", {}).get("agent_loop_manager_class")
         if manager_class_fqn:

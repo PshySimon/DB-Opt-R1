@@ -143,6 +143,63 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         response_mask = mocked.call_args.kwargs["response_mask"]
         self.assertTrue(torch.equal(response_mask, explicit_response_mask))
 
+    def test_init_workers_uses_actor_as_ref_for_lora(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        trainer = trainer_module.RayAgentTrainer.__new__(trainer_module.RayAgentTrainer)
+        trainer.hybrid_engine = True
+        trainer.role_worker_mapping = {
+            trainer_module.Role.ActorRollout: "actor_cls",
+            trainer_module.Role.RefPolicy: "ref_cls",
+        }
+        trainer.config = OmegaConf.create(
+            {
+                "actor_rollout_ref": {
+                    "hybrid_engine": True,
+                    "model": {"lora_rank": 16},
+                    "rollout": {"agent": {}, "checkpoint_engine": {}},
+                },
+                "trainer": {},
+            }
+        )
+        trainer.use_reference_policy = True
+        trainer.ref_in_actor = True
+        trainer.use_critic = False
+        trainer.use_rm = False
+        trainer.resource_pool_manager = mock.Mock()
+        trainer.resource_pool_manager.resource_pool_dict = {"global_pool": "pool"}
+        trainer.resource_pool_manager.get_resource_pool.return_value = "pool"
+        trainer.ray_worker_group_cls = mock.Mock()
+        trainer.wg_dicts = []
+
+        fake_actor_wg = mock.Mock()
+        fake_actor_wg.init_model = mock.Mock()
+        fake_actor_wg.compute_ref_log_prob = mock.Mock()
+        fake_spawned = {"actor_rollout": fake_actor_wg}
+
+        fake_wg_dict = mock.Mock()
+        fake_wg_dict.spawn.return_value = fake_spawned
+        trainer.ray_worker_group_cls.return_value = fake_wg_dict
+
+        fake_async_rollout_manager = mock.Mock()
+        fake_async_rollout_manager.rollout_replicas = []
+        fake_checkpoint_manager = mock.Mock()
+
+        with mock.patch.object(trainer_module, "RayClassWithInitArgs", side_effect=lambda *args, **kwargs: {"args": args, "kwargs": kwargs}), mock.patch.object(
+            trainer_module, "create_colocated_worker_cls", return_value="worker_dict_cls"
+        ), mock.patch.object(
+            trainer_module, "omega_conf_to_dataclass", return_value=mock.Mock(checkpoint_engine={})
+        ), mock.patch.dict(
+            "sys.modules",
+            {"verl.experimental.agent_loop": mock.Mock(AgentLoopManager=mock.Mock(create=mock.Mock(return_value=fake_async_rollout_manager)))},
+        ), mock.patch.object(
+            trainer_module, "CheckpointEngineManager", return_value=fake_checkpoint_manager
+        ):
+            trainer.init_workers()
+
+        self.assertNotIn("ref", trainer.resource_pool_to_cls["pool"])
+        self.assertIs(trainer.ref_policy_wg, fake_actor_wg)
+
 
 if __name__ == "__main__":
     unittest.main()
