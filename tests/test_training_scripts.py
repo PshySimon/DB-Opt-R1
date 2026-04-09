@@ -11,6 +11,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
     def test_verl_sft_lora_uses_multiturn_dataset_fields(self):
         content = (ROOT / "scripts" / "train_sft_verl_lora.sh").read_text()
         self.assertIn('DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"', content)
+        self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', content)
         self.assertIn("model.path=$BASE_MODEL", content)
         self.assertNotIn("model.override_config.attn_implementation", content)
@@ -28,6 +29,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
     def test_verl_sft_full_uses_multiturn_dataset_fields(self):
         content = (ROOT / "scripts" / "train_sft_verl_full.sh").read_text()
         self.assertIn('DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"', content)
+        self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', content)
         self.assertIn("model.path=$BASE_MODEL", content)
         self.assertNotIn("model.override_config.attn_implementation", content)
@@ -50,6 +52,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
 
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
+        self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', lora_content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', lora_content)
         self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", lora_content)
         self.assertNotIn("actor_rollout_ref.model.torch_dtype", lora_content)
@@ -60,6 +63,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertNotIn("actor_rollout_ref.rollout.n_repeat", lora_content)
 
         full_content = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
+        self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', full_content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', full_content)
         self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", full_content)
         self.assertNotIn("actor_rollout_ref.model.torch_dtype", full_content)

@@ -2,7 +2,7 @@
 # GRPO 训练启动脚本（verl, 全量）
 set -euo pipefail
 
-export VLLM_ATTENTION_BACKEND=XFORMERS
+export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"
 export HYDRA_FULL_ERROR=1
 
 SFT_CHECKPOINT="${SFT_CHECKPOINT:-./model_save/sft/global_step_latest/actor}"
