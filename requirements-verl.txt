@@ -9,6 +9,8 @@ torchvision==0.23.0+cu128 ; platform_system == "Linux"
 torchaudio==2.8.0+cu128 ; platform_system == "Linux"
 vllm==0.11.0
 transformers>=4.55.2,<5
+tokenizers>=0.21.1
+pyarrow
 xformers==0.0.32.post1 ; platform_system == "Linux" and platform_machine == "x86_64"
 # Official prebuilt wheel for Python 3.10 / Linux x86_64 / cxx11abiFALSE.
 flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE-cp310-cp310-linux_x86_64.whl

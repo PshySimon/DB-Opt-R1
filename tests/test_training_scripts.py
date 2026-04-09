@@ -47,6 +47,8 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("torch==2.8.0+cu128", content)
         self.assertIn("vllm==0.11.0", content)
         self.assertIn("transformers>=4.55.2,<5", content)
+        self.assertIn("tokenizers>=0.21.1", content)
+        self.assertIn("pyarrow", content)
         self.assertIn("xformers==0.0.32.post1", content)
         self.assertIn("flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE", content)
         self.assertNotIn("flashinfer-python", content)
