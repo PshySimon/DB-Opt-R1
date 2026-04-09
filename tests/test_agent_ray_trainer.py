@@ -113,6 +113,36 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         self.assertEqual(response_mask.shape, (2, 3))
         self.assertNotIn("eos_mask", mocked.call_args.kwargs)
 
+    def test_compute_advantage_prefers_explicit_response_mask(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        explicit_response_mask = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.long)
+        data = trainer_module.DataProto.from_dict(
+            tensors={
+                "token_level_rewards": torch.ones((2, 3), dtype=torch.float32),
+                "responses": torch.ones((2, 3), dtype=torch.long),
+                "response_mask": explicit_response_mask,
+                "attention_mask": torch.ones((2, 6), dtype=torch.long),
+            },
+            non_tensors={"uid": np.array(["a", "a"], dtype=object)},
+        )
+
+        with mock.patch.object(
+            trainer_module.core_algos,
+            "compute_grpo_outcome_advantage",
+            return_value=(
+                torch.ones((2, 3), dtype=torch.float32),
+                torch.ones((2, 3), dtype=torch.float32),
+            ),
+        ) as mocked:
+            trainer_module.compute_advantage(
+                data,
+                trainer_module.AdvantageEstimator.GRPO,
+            )
+
+        response_mask = mocked.call_args.kwargs["response_mask"]
+        self.assertTrue(torch.equal(response_mask, explicit_response_mask))
+
 
 if __name__ == "__main__":
     unittest.main()

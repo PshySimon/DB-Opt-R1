@@ -126,6 +126,58 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(sequence_generator.last_non_tensor_batch)
         self.assertIn("raw_prompt", sequence_generator.last_non_tensor_batch)
 
+    def test_tool_generation_manager_returns_response_mask_for_agent_loop(self):
+        tokenizer = _FakeTokenizer()
+        sequence_generator = _FakeSequenceGenerator()
+        manager = ToolGenerationManager(
+            tokenizer=tokenizer,
+            sequence_generator=sequence_generator,
+            config=ToolGenerationConfig(
+                max_turns=1,
+                max_start_length=8,
+                max_prompt_length=8,
+                max_response_length=8,
+                max_tool_response_length=8,
+                num_gpus=1,
+            ),
+        )
+        batch = DataProto.from_dict(
+            tensors={
+                "input_ids": torch.ones((2, 4), dtype=torch.long),
+                "attention_mask": torch.ones((2, 4), dtype=torch.long),
+                "position_ids": torch.arange(4).repeat(2, 1),
+            },
+        )
+
+        with unittest.mock.patch.object(
+            manager,
+            "_postprocess_responses",
+            return_value=(
+                torch.tensor([[11, 12], [21, 22]], dtype=torch.long),
+                ["call-a", "call-b"],
+                torch.tensor([False, False]),
+            ),
+        ), unittest.mock.patch.object(
+            manager,
+            "_execute_tool_calls",
+            return_value=["tool-a", "tool-b"],
+        ), unittest.mock.patch.object(
+            manager,
+            "_process_tool_responses",
+            return_value=torch.tensor([[31, 32, 33], [41, 42, 43]], dtype=torch.long),
+        ):
+            output = manager.run_llm_loop(
+                gen_batch=batch,
+                envs=[_FakeEnv(), _FakeEnv()],
+                initial_input_ids=batch.batch["input_ids"],
+            )
+
+        self.assertIn("response_mask", output.batch.keys())
+        self.assertEqual(
+            output.batch["response_mask"].tolist(),
+            [[1, 1, 0, 0, 0], [1, 1, 0, 0, 0]],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -127,13 +127,20 @@ import torch
 from verl.utils.torch_functional import masked_mean
 
 
-def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty='kl'):
+def _get_response_mask(data: DataProto) -> torch.Tensor:
+    if 'response_mask' in data.batch.keys():
+        return data.batch['response_mask']
+
     responses = data.batch['responses']
     response_length = responses.size(1)
+    attention_mask = data.batch['attention_mask']
+    return attention_mask[:, -response_length:]
+
+
+def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty='kl'):
     token_level_scores = data.batch['token_level_scores']
     batch_size = data.batch.batch_size[0]
-    attention_mask = data.batch['attention_mask']
-    response_mask = attention_mask[:, -response_length:]
+    response_mask = _get_response_mask(data)
 
     # compute kl between ref_policy and current policy
     if 'ref_log_prob' in data.batch.keys():
@@ -164,10 +171,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
     # TODO: add other ways to estimate advantages
     if adv_estimator == AdvantageEstimator.GAE:
         values = data.batch['values']
-        responses = data.batch['responses']
-        response_length = responses.size(-1)
-        attention_mask = data.batch['attention_mask']
-        response_mask = attention_mask[:, -response_length:]
+        response_mask = _get_response_mask(data)
         token_level_rewards = data.batch['token_level_rewards']
         advantages, returns = core_algos.compute_gae_advantage_return(token_level_rewards=token_level_rewards,
                                                                       values=values,
@@ -179,10 +183,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
     elif adv_estimator == AdvantageEstimator.GRPO:
         token_level_rewards = data.batch['token_level_rewards']
         index = data.non_tensor_batch['uid']
-        responses = data.batch['responses']
-        response_length = responses.size(-1)
-        attention_mask = data.batch['attention_mask']
-        response_mask = attention_mask[:, -response_length:]
+        response_mask = _get_response_mask(data)
         advantages, returns = core_algos.compute_grpo_outcome_advantage(token_level_rewards=token_level_rewards,
                                                                         response_mask=response_mask,
                                                                         index=index)
@@ -190,10 +191,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
         data.batch['returns'] = returns
     elif adv_estimator == AdvantageEstimator.REINFORCE_PLUS_PLUS:
         token_level_rewards = data.batch['token_level_rewards']
-        responses = data.batch['responses']
-        response_length = responses.size(-1)
-        attention_mask = data.batch['attention_mask']
-        response_mask = attention_mask[:, -response_length:]
+        response_mask = _get_response_mask(data)
         advantages, returns = core_algos.compute_reinforce_plus_plus_outcome_advantage(
             token_level_rewards=token_level_rewards, eos_mask=response_mask, gamma=gamma)
         data.batch['advantages'] = advantages
@@ -201,10 +199,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
     elif adv_estimator == AdvantageEstimator.REMAX:
         token_level_rewards = data.batch['token_level_rewards']
         index = data.non_tensor_batch['uid']
-        responses = data.batch['responses']
-        response_length = responses.size(-1)
-        attention_mask = data.batch['attention_mask']
-        response_mask = attention_mask[:, -response_length:]
+        response_mask = _get_response_mask(data)
 
         reward_baselines = data.batch['reward_baselines']
 
@@ -217,10 +212,7 @@ def compute_advantage(data: DataProto, adv_estimator, gamma=1.0, lam=1.0, num_re
     elif adv_estimator == AdvantageEstimator.RLOO:
         token_level_rewards = data.batch['token_level_rewards']
         index = data.non_tensor_batch['uid']
-        responses = data.batch['responses']
-        response_length = responses.size(-1)
-        attention_mask = data.batch['attention_mask']
-        response_mask = attention_mask[:, -response_length:]
+        response_mask = _get_response_mask(data)
         advantages, returns = core_algos.compute_rloo_outcome_advantage(token_level_rewards=token_level_rewards,
                                                                         eos_mask=response_mask,
                                                                         index=index)
@@ -1191,11 +1183,10 @@ class RayAgentTrainer(object):
         and masks them (sets loss_mask to 0) to exclude them from policy gradient updates.
         The mask is applied to both the tags themselves and all tokens in between.
         """
-        response_length = batch.batch['responses'].shape[-1]
-        response_mask = batch.batch['attention_mask'][:, -response_length:]
+        response_mask = _get_response_mask(batch)
         
         # Initialize loss mask with ones
-        loss_mask = torch.ones_like(response_mask)
+        loss_mask = response_mask.clone()
         responses = [self.tokenizer.decode(resp, skip_special_tokens=False) for resp in batch.batch['responses']]
         
         # Get token IDs for the tool response tags

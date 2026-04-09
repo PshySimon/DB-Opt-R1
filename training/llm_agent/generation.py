@@ -219,11 +219,32 @@ class ToolGenerationManager:
             cur_responses,
             tool_responses_ids
         ], pad_to_left=False)
+
+        old_lengths = self.tensor_fn.create_attention_mask(right_side['responses']).sum(dim=1)
+        cur_lengths = self.tensor_fn.create_attention_mask(cur_responses).sum(dim=1)
+        tool_lengths = self.tensor_fn.create_attention_mask(tool_responses_ids).sum(dim=1)
+        response_mask = torch.zeros_like(responses)
+
+        for i in range(responses.shape[0]):
+            old_length = int(old_lengths[i].item())
+            cur_length = int(cur_lengths[i].item())
+            tool_length = int(tool_lengths[i].item())
+            pieces = [right_side['response_mask'][i, :old_length]]
+            if cur_length:
+                pieces.append(torch.ones(cur_length, dtype=responses.dtype, device=responses.device))
+            if tool_length:
+                pieces.append(torch.zeros(tool_length, dtype=responses.dtype, device=responses.device))
+            if pieces:
+                merged_mask = torch.cat(pieces, dim=0)
+                response_mask[i, :merged_mask.shape[0]] = merged_mask
         
         effective_len = self.tensor_fn.create_attention_mask(responses).sum(dim=1).max()
         max_len = min(self.config.max_prompt_length, effective_len)
         
-        return {'responses': responses[:, :max_len]}
+        return {
+            'responses': responses[:, :max_len],
+            'response_mask': response_mask[:, :max_len],
+        }
 
 
     def _generate_with_gpu_padding(self, active_batch: DataProto) -> DataProto:
@@ -285,7 +306,10 @@ class ToolGenerationManager:
         """Run main LLM generation loop."""
         
         original_left_side = {'input_ids': initial_input_ids[:, -self.config.max_start_length:]}
-        original_right_side = {'responses': initial_input_ids[:, []]}
+        original_right_side = {
+            'responses': initial_input_ids[:, []],
+            'response_mask': initial_input_ids[:, []],
+        }
         
         batch_size = gen_batch.batch['input_ids'].shape[0]
         
@@ -360,6 +384,7 @@ class ToolGenerationManager:
             left_side['input_ids'],
             right_side['responses']
         ], dim=1)
+        final_output['response_mask'] = right_side['response_mask']
         
         # Create attention mask and position ids
         final_output['attention_mask'] = torch.cat([
