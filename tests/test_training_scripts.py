@@ -54,6 +54,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("++actor_rollout_ref.model.lora_rank=$LORA_RANK", lora_content)
         self.assertIn("++actor_rollout_ref.model.lora_alpha=$LORA_ALPHA", lora_content)
         self.assertIn("++actor_rollout_ref.model.target_modules=$TARGET_MODULES", lora_content)
+        self.assertIn("actor_rollout_ref.rollout.n=$N_REPEAT", lora_content)
 
         full_content = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', full_content)
@@ -68,6 +69,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("_target_: verl.workers.config.FSDPCriticModelCfg", content)
         self.assertIn("_target_: verl.workers.config.FSDPEngineConfig", content)
         self.assertIn("_target_: verl.workers.config.FSDPOptimizerConfig", content)
+        self.assertIn("rollout_n: ${oc.select:actor_rollout_ref.rollout.n,1}", content)
         self.assertIn("weight_decay: 0.01", content)
         self.assertIn("optimizer: AdamW", content)
         self.assertIn("forward_only: True", content)

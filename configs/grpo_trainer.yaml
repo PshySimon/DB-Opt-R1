@@ -48,6 +48,7 @@ actor_rollout_ref:
       mtp_loss_scaling_factor: 0.1
   actor:
     _target_: verl.workers.config.FSDPActorConfig
+    rollout_n: ${oc.select:actor_rollout_ref.rollout.n,1}
     strategy: fsdp  # This is for backward-compatibility
     ppo_mini_batch_size: 256
     ppo_micro_batch_size: null # will be deprecated, use ppo_micro_batch_size_per_gpu
