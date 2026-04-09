@@ -62,6 +62,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
 
     def test_grpo_trainer_config_has_verl_071_targets(self):
         content = (ROOT / "configs" / "grpo_trainer.yaml").read_text()
+        self.assertIn("_target_: verl.workers.config.HFModelConfig", content)
         self.assertIn("_target_: verl.workers.config.FSDPActorConfig", content)
         self.assertIn("_target_: verl.workers.config.FSDPCriticConfig", content)
         self.assertIn("_target_: verl.workers.config.FSDPCriticModelCfg", content)

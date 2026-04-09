@@ -20,11 +20,32 @@ data:
 actor_rollout_ref:
   hybrid_engine: True
   model:
+    _target_: verl.workers.config.HFModelConfig
     path: ~/models/deepseek-llm-7b-chat
     external_lib: null
     override_config: { }
     enable_gradient_checkpointing: True
+    enable_activation_offload: False
     use_remove_padding: False
+    lora_rank: 0
+    lora_alpha: 16
+    target_modules: all-linear
+    exclude_modules: null
+    lora_adapter_path: null
+    use_liger: False
+    use_fused_kernels: False
+    fused_kernel_options:
+      impl_backend: torch
+    tiled_mlp:
+      enabled: False
+      num_shards: 4
+    mtp:
+      _target_: verl.workers.config.MtpConfig
+      enable: False
+      enable_train: False
+      enable_rollout: False
+      detach_encoder: False
+      mtp_loss_scaling_factor: 0.1
   actor:
     _target_: verl.workers.config.FSDPActorConfig
     strategy: fsdp  # This is for backward-compatibility
