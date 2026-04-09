@@ -547,12 +547,12 @@ class RayAgentTrainer(object):
             if 'multi_modal_inputs' in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
                     batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                    non_tensor_batch_keys=['raw_prompt_ids', 'multi_modal_data', 'multi_modal_inputs'],
+                    non_tensor_batch_keys=['raw_prompt_ids', 'raw_prompt', 'multi_modal_data', 'multi_modal_inputs'],
                 )
             else:
                 test_gen_batch = test_batch.pop(
                     batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                    non_tensor_batch_keys=['raw_prompt_ids'],
+                    non_tensor_batch_keys=['raw_prompt_ids', 'raw_prompt'],
                 )
 
             test_gen_batch.meta_info = {
@@ -1021,12 +1021,12 @@ class RayAgentTrainer(object):
                 if 'multi_modal_inputs' in batch.non_tensor_batch.keys():
                     gen_batch = batch.pop(
                         batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                        non_tensor_batch_keys=['raw_prompt_ids', 'multi_modal_data', 'multi_modal_inputs'],
+                        non_tensor_batch_keys=['raw_prompt_ids', 'raw_prompt', 'multi_modal_data', 'multi_modal_inputs'],
                     )
                 else:
                     gen_batch = batch.pop(
                         batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                        non_tensor_batch_keys=['raw_prompt_ids'],
+                        non_tensor_batch_keys=['raw_prompt_ids', 'raw_prompt'],
                     )
 
                 is_last_step = self.global_steps >= self.total_training_steps

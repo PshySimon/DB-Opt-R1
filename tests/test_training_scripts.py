@@ -75,6 +75,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
 
     def test_grpo_trainer_config_has_verl_071_targets(self):
         content = (ROOT / "configs" / "grpo_trainer.yaml").read_text()
+        self.assertIn("return_raw_chat: True", content)
         self.assertIn("_target_: verl.workers.config.HFModelConfig", content)
         self.assertIn("_target_: verl.workers.config.FSDPActorConfig", content)
         self.assertIn("_target_: verl.workers.config.FSDPCriticConfig", content)
@@ -109,6 +110,11 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
     def test_verl_grpo_lora_script_accepts_extra_hydra_overrides(self):
         content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
         self.assertIn('"$@"', content)
+
+    def test_agent_ray_trainer_forwards_raw_prompt_to_async_rollout(self):
+        content = (ROOT / "training" / "verl" / "agent_ray_trainer.py").read_text()
+        self.assertIn("non_tensor_batch_keys=['raw_prompt_ids', 'raw_prompt', 'multi_modal_data', 'multi_modal_inputs']", content)
+        self.assertIn("non_tensor_batch_keys=['raw_prompt_ids', 'raw_prompt']", content)
 
     def test_grpo_rollout_config_instantiates_with_verl_071_schema(self):
         cfg = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
