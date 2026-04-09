@@ -132,6 +132,24 @@ def run_grpo(config) -> None:
     ray.get(main_task.remote(config))
 
 
+def _build_worker_components(config):
+    if config.actor_rollout_ref.actor.strategy == 'fsdp':
+        assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
+        from verl.workers.fsdp_workers import AsyncActorRolloutRefWorker, CriticWorker
+        from verl.single_controller.ray import RayWorkerGroup
+
+        role_worker_mapping = {
+            Role.ActorRollout: ray.remote(AsyncActorRolloutRefWorker),
+            Role.Critic: ray.remote(CriticWorker),
+            Role.RefPolicy: ray.remote(AsyncActorRolloutRefWorker),
+        }
+        return role_worker_mapping, RayWorkerGroup
+
+    raise NotImplementedError(
+        f"Strategy {config.actor_rollout_ref.actor.strategy} not supported"
+    )
+
+
 @ray.remote(num_cpus=1)
 def main_task(config):
     from verl.utils.fs import copy_to_local
@@ -149,22 +167,7 @@ def main_task(config):
     tokenizer = hf_tokenizer(local_path)
     processor = hf_processor(local_path, use_fast=True)
 
-    # Worker 类
-    if config.actor_rollout_ref.actor.strategy == 'fsdp':
-        assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
-        from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
-        from verl.single_controller.ray import RayWorkerGroup
-        ray_worker_group_cls = RayWorkerGroup
-    else:
-        raise NotImplementedError(
-            f"Strategy {config.actor_rollout_ref.actor.strategy} not supported"
-        )
-
-    role_worker_mapping = {
-        Role.ActorRollout: ray.remote(ActorRolloutRefWorker),
-        Role.Critic: ray.remote(CriticWorker),
-        Role.RefPolicy: ray.remote(ActorRolloutRefWorker),
-    }
+    role_worker_mapping, ray_worker_group_cls = _build_worker_components(config)
 
     global_pool_id = 'global_pool'
     resource_pool_spec = {

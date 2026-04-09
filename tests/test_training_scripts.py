@@ -44,11 +44,12 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
     def test_requirements_verl_includes_flash_attn(self):
         content = (ROOT / "requirements-verl.txt").read_text()
         self.assertIn("verl==0.7.1", content)
-        self.assertIn("torch==2.6.0+cu124", content)
-        self.assertIn("vllm==0.8.5.post1", content)
-        self.assertIn("flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE", content)
-        self.assertIn("https://flashinfer.ai/whl/cu124/torch2.6/", content)
-        self.assertIn("flashinfer-python==0.2.5", content)
+        self.assertIn("torch==2.8.0+cu128", content)
+        self.assertIn("vllm==0.11.0", content)
+        self.assertIn("transformers>=4.55.2,<5", content)
+        self.assertIn("xformers==0.0.32.post1", content)
+        self.assertIn("flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE", content)
+        self.assertNotIn("flashinfer-python", content)
 
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
