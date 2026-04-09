@@ -46,6 +46,11 @@ class DBToolEnv(ToolEnv):
             knob_space_path: knob_space.yaml 路径
         """
         self.mode = mode
+        self.config = config
+        self.dataset_path = dataset_path
+        self.scenario_dir = scenario_dir
+        self.cost_model = cost_model
+        self.knob_space_path = knob_space_path
         self.env_state = {}
         self.dataset = None
         self.scenarios = []  # ScenarioState 列表
@@ -90,6 +95,20 @@ class DBToolEnv(ToolEnv):
         super().__init__(tools=tools, max_turns=max_turns)
         # training.verl.agent_rl_dataset expects the training ToolEnv interface.
         self.tool_desc = [tool.get_description() for tool in self.tools]
+
+    def copy(self):
+        env = DBToolEnv(
+            mode=self.mode,
+            config=self.config,
+            dataset_path=None,
+            scenario_dir=None,
+            cost_model=self.cost_model,
+            max_turns=self.max_turns,
+            knob_space_path=self.knob_space_path,
+        )
+        env.scenarios = self.scenarios
+        env.dataset = self.dataset
+        return env
 
     @staticmethod
     def _load_scenarios(source) -> list:

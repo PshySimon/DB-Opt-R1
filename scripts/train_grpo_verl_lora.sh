@@ -9,6 +9,8 @@ SFT_CHECKPOINT="${SFT_CHECKPOINT:-./model_save/sft/global_step_latest/actor}"
 TRAIN_DATA="${TRAIN_DATA:-./datasets/grpo/train.parquet}"
 VAL_DATA="${VAL_DATA:-./datasets/grpo/validation.parquet}"
 COST_MODEL_PATH="${COST_MODEL_PATH:-./cost_model/checkpoints/v1}"
+SCENARIO_FILES="${SCENARIO_FILES:-./data_pipeline/data/scenarios/collected/collected_server1.json,./data_pipeline/data/scenarios/collected/collected_server2.json,./data_pipeline/data/scenarios/collected/collected_server3.json}"
+SCENARIO_SOURCE_FILTER="${SCENARIO_SOURCE_FILTER:-llm_generated}"
 N_GPUS="${N_GPUS:-2}"
 CUDA_DEVICES="${CUDA_DEVICES:-0,1}"
 LR="${LR:-1e-6}"
@@ -93,5 +95,7 @@ python3 -m training.verl.main_grpo \
   "trainer.logger=[console]" \
   \
   tool.max_turns=$MAX_TURNS \
+  +scenario_dir=[$SCENARIO_FILES] \
+  +scenario_source_filter=$SCENARIO_SOURCE_FILTER \
   +cost_model_path=$COST_MODEL_PATH \
   "$@"

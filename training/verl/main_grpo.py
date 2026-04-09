@@ -220,6 +220,7 @@ def main_task(config):
             print(f"[WARNING] Cost Model 加载失败: {e}，answer_score 将为 0")
 
     scenario_dir = getattr(config, 'scenario_dir', None)
+    scenario_source_filter = getattr(config, 'scenario_source_filter', None)
     knob_space_path = getattr(config, 'knob_space_path', 'configs/knob_space.yaml')
     reward_debug_num_examine = int(config.get('reward_debug_num_examine', 0))
     val_reward_debug_num_examine = int(config.get('val_reward_debug_num_examine', 1))
@@ -231,6 +232,9 @@ def main_task(config):
         max_turns=config.tool.max_turns,
         knob_space_path=knob_space_path,
     )
+    if getattr(env, 'scenarios', None) and scenario_source_filter:
+        from core.db.scenario_filter import filter_scenarios
+        env.scenarios = filter_scenarios(env.scenarios, source_filter=scenario_source_filter)
 
     # 创建 Trainer
     trainer = RayAgentTrainer(

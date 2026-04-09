@@ -10,6 +10,17 @@ class DBToolEnvCompatibilityTest(unittest.TestCase):
         self.assertIsInstance(env.tool_desc, list)
         self.assertGreater(len(env.tool_desc), 0)
 
+    def test_db_tool_env_copy_preserves_type_and_scenarios(self):
+        env = DBToolEnv(mode="train", cost_model=None, max_turns=2)
+        env.scenarios = [object(), object()]
+
+        copied = env.copy()
+
+        self.assertIsInstance(copied, DBToolEnv)
+        self.assertIsNot(copied, env)
+        self.assertEqual(copied.scenarios, env.scenarios)
+        self.assertEqual(copied.max_turns, env.max_turns)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -464,6 +464,24 @@ class RayAgentTrainer(object):
             self.config.actor_rollout_ref.actor.optim.total_training_steps = total_training_steps
             self.config.critic.optim.total_training_steps = total_training_steps
 
+    def _build_envs_for_batch(self, batch: DataProto, base_env: ToolEnv):
+        envs = [base_env.copy() for _ in range(len(batch))]
+        reward_models = batch.non_tensor_batch.get("reward_model")
+        if reward_models is None:
+            return envs
+
+        for env, reward_model in zip(envs, reward_models):
+            if not isinstance(reward_model, dict):
+                continue
+            ground_truth = reward_model.get("ground_truth", {})
+            if not isinstance(ground_truth, dict):
+                continue
+            scenario_idx = ground_truth.get("scenario_idx")
+            if scenario_idx is None or not hasattr(env, "reset"):
+                continue
+            env.reset(sample_idx=int(scenario_idx))
+        return envs
+
     def _maybe_log_val_generations(self, inputs, outputs, scores):
         """Log a table of validation samples to the configured logger (wandb or swanlab)"""
 
@@ -529,7 +547,7 @@ class RayAgentTrainer(object):
             test_batch = test_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.val_kwargs.n,
                                            interleave=True)
 
-            envs = [self.val_env.copy() for _ in range(len(test_batch))]
+            envs = self._build_envs_for_batch(test_batch, self.val_env)
 
             # we only do validation on rule-based rm
             if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
@@ -1022,7 +1040,7 @@ class RayAgentTrainer(object):
                                                         dtype=object)
                 batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
 
-                envs = [self.env.copy() for _ in range(len(batch))]
+                envs = self._build_envs_for_batch(batch, self.env)
                 
                 # pop those keys for generation
                 if 'multi_modal_inputs' in batch.non_tensor_batch.keys():

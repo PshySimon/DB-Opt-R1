@@ -231,6 +231,34 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         self.assertEqual(critic_call.kwargs["max_ckpt_to_keep"], 1)
         self.assertNotIn("remove_previous_ckpt", actor_call.kwargs)
 
+    def test_build_envs_for_batch_resets_each_env_by_scenario_idx(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        trainer = trainer_module.RayAgentTrainer.__new__(trainer_module.RayAgentTrainer)
+        base_env = mock.Mock()
+        env_a = mock.Mock()
+        env_b = mock.Mock()
+        base_env.copy.side_effect = [env_a, env_b]
+
+        batch = trainer_module.DataProto.from_dict(
+            tensors={"input_ids": torch.ones((2, 1), dtype=torch.long)},
+            non_tensors={
+                "reward_model": np.array(
+                    [
+                        {"ground_truth": {"scenario_idx": 3}},
+                        {"ground_truth": {"scenario_idx": 7}},
+                    ],
+                    dtype=object,
+                )
+            },
+        )
+
+        envs = trainer._build_envs_for_batch(batch, base_env)
+
+        self.assertEqual(envs, [env_a, env_b])
+        env_a.reset.assert_called_once_with(sample_idx=3)
+        env_b.reset.assert_called_once_with(sample_idx=7)
+
 
 if __name__ == "__main__":
     unittest.main()
