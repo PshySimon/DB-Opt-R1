@@ -72,27 +72,29 @@ def process_image(image: dict, max_pixels: int = 2048 * 2048, min_pixels: int = 
 
 class ToolRLDataset(RLHFDataset):
     """
-    Dataset for tool use in RLHF
+    Dataset for tool use in RLHF.
     """
-    def __init__(self,
-                 parquet_files: Union[str, List[str]],
-                 tokenizer: PreTrainedTokenizer,
-                 processor: Optional[ProcessorMixin] = None,
-                 prompt_key='prompt',
-                 image_key='images',
-                 max_prompt_length=1024,
-                 filter_prompts=True,
-                 cache_dir='~/.cache/verl/rlhf',
-                 chat_template_func=None,
-                 return_raw_chat=False,
-                 truncation='error',
-                 filter_overlong_prompts=False,
-                 tool_env: ToolEnv = None,
-                 use_custom_tool_format_func=False):
+
+    def __init__(
+        self,
+        data_files: Union[str, List[str]],
+        tokenizer: PreTrainedTokenizer,
+        config,
+        processor: Optional[ProcessorMixin] = None,
+        max_samples: int = -1,
+        tool_env: ToolEnv = None,
+        use_custom_tool_format_func: bool = False,
+    ):
         self.tool_env = tool_env
         self.tools = tool_env.tool_desc
         self.use_custom_tool_format_func = use_custom_tool_format_func
-        super().__init__(parquet_files, tokenizer, processor, prompt_key, image_key, max_prompt_length, filter_prompts, cache_dir, chat_template_func, return_raw_chat, truncation, filter_overlong_prompts)
+        super().__init__(
+            data_files=data_files,
+            tokenizer=tokenizer,
+            config=config,
+            processor=processor,
+            max_samples=max_samples,
+        )
 
     def __getitem__(self, item):
         """
@@ -175,7 +177,7 @@ class ToolRLDataset(RLHFDataset):
     
     def _read_files_and_tokenize(self):
         dataframes = []
-        for parquet_file in self.parquet_files:
+        for parquet_file in self.data_files:
             # read parquet files and cache
             dataframe = pd.read_parquet(parquet_file)
             dataframes.append(dataframe)
@@ -184,10 +186,19 @@ class ToolRLDataset(RLHFDataset):
         print(f'original dataset len: {len(self.dataframe)}')
 
         # filter out too long prompts
-        tokenizer = self.tokenizer
-        prompt_key = self.prompt_key
-        self.dataframe = self.dataframe[self.dataframe.apply(lambda doc: len(
-            tokenizer.apply_chat_template(doc[prompt_key], tools=self.tools, add_generation_prompt=True)) <= self.max_prompt_length,
-                                                             axis=1)]
+        if self.filter_prompts:
+            tokenizer = self.tokenizer
+            prompt_key = self.prompt_key
+            self.dataframe = self.dataframe[
+                self.dataframe.apply(
+                    lambda doc: len(
+                        tokenizer.apply_chat_template(
+                            doc[prompt_key], tools=self.tools, add_generation_prompt=True
+                        )
+                    )
+                    <= self.max_prompt_length,
+                    axis=1,
+                )
+            ]
 
         print(f'filter dataset len: {len(self.dataframe)}')

@@ -403,18 +403,14 @@ class RayAgentTrainer(object):
 
     def _create_dataloader(self):
         # TODO: we have to make sure the batch size is divisible by the dp size
-        self.train_dataset = ToolRLDataset(parquet_files=self.config.data.train_files,
-                                         tokenizer=self.tokenizer,
-                                         processor=self.processor,
-                                         prompt_key=self.config.data.prompt_key,
-                                         image_key=self.config.data.get('image_key', 'images'),
-                                         max_prompt_length=self.config.data.max_prompt_length,
-                                         filter_prompts=True,
-                                         return_raw_chat=self.config.data.get('return_raw_chat', False),
-                                         truncation='error',
-                                         filter_overlong_prompts=self.config.data.filter_overlong_prompts,
-                                         tool_env=self.env,
-                                         use_custom_tool_format_func=self.config.data.get('use_custom_tool_format_func', False))
+        self.train_dataset = ToolRLDataset(
+            data_files=self.config.data.train_files,
+            tokenizer=self.tokenizer,
+            config=self.config.data,
+            processor=self.processor,
+            tool_env=self.env,
+            use_custom_tool_format_func=self.config.data.get('use_custom_tool_format_func', False),
+        )
         # use sampler for better ckpt resume
         if self.config.data.shuffle:
             train_dataloader_generator = torch.Generator()
@@ -430,18 +426,14 @@ class RayAgentTrainer(object):
                                                    collate_fn=collate_fn,
                                                    sampler=sampler)
 
-        self.val_dataset = ToolRLDataset(parquet_files=self.config.data.val_files,
-                                       tokenizer=self.tokenizer,
-                                       processor=self.processor,
-                                       prompt_key=self.config.data.prompt_key,
-                                       image_key=self.config.data.get('image_key', 'images'),
-                                       max_prompt_length=self.config.data.max_prompt_length,
-                                       filter_prompts=True,
-                                       return_raw_chat=self.config.data.get('return_raw_chat', False),
-                                       truncation='error',
-                                       filter_overlong_prompts=self.config.data.filter_overlong_prompts,
-                                       tool_env=self.val_env,
-                                       use_custom_tool_format_func=self.config.data.get('use_custom_tool_format_func', False))
+        self.val_dataset = ToolRLDataset(
+            data_files=self.config.data.val_files,
+            tokenizer=self.tokenizer,
+            config=self.config.data,
+            processor=self.processor,
+            tool_env=self.val_env,
+            use_custom_tool_format_func=self.config.data.get('use_custom_tool_format_func', False),
+        )
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
             # Validation datasets are sent to inference engines as a whole batch,
