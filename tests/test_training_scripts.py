@@ -39,7 +39,10 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
 
     def test_requirements_verl_includes_flash_attn(self):
         content = (ROOT / "requirements-verl.txt").read_text()
-        self.assertIn("flash-attn", content)
+        self.assertIn("verl==0.7.1", content)
+        self.assertIn("torch==2.6.0+cu124", content)
+        self.assertIn("vllm==0.8.5.post1", content)
+        self.assertIn("flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE", content)
 
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         for name in ["train_grpo_verl_lora.sh", "train_grpo_verl_full.sh"]:

@@ -1,7 +1,12 @@
 -r requirements.txt
-verl>=0.5.0,<0.8.0
+verl==0.7.1
 ray>=2.0
-vllm
 hydra-core
 omegaconf
-flash-attn
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.6.0+cu124 ; platform_system == "Linux"
+torchvision==0.21.0+cu124 ; platform_system == "Linux"
+torchaudio==2.6.0+cu124 ; platform_system == "Linux"
+vllm==0.8.5.post1
+# Official prebuilt wheel for Python 3.10 / Linux x86_64 / cxx11abiFALSE.
+flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
