@@ -1,4 +1,9 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
+
+from omegaconf import OmegaConf
 
 from environment.tools import DBToolEnv
 
@@ -20,6 +25,28 @@ class DBToolEnvCompatibilityTest(unittest.TestCase):
         self.assertIsNot(copied, env)
         self.assertEqual(copied.scenarios, env.scenarios)
         self.assertEqual(copied.max_turns, env.max_turns)
+
+    def test_load_scenarios_accepts_hydra_listconfig(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            path_a = root / "collected_a.json"
+            path_b = root / "collected_b.json"
+            payload = [
+                {
+                    "name": "demo",
+                    "source": "llm_generated",
+                    "hardware": {"cpu_count": 8},
+                    "knobs": {},
+                    "workload": {},
+                }
+            ]
+            path_a.write_text(json.dumps(payload), encoding="utf-8")
+            path_b.write_text(json.dumps(payload), encoding="utf-8")
+
+            scenario_list = OmegaConf.create([str(path_a), str(path_b)])
+            scenarios = DBToolEnv._load_scenarios(scenario_list)
+
+            self.assertEqual(len(scenarios), 2)
 
 
 if __name__ == "__main__":

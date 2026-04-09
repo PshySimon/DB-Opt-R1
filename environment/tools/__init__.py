@@ -6,6 +6,7 @@ import os
 import json
 import random
 import logging
+from collections.abc import Sequence
 
 import pandas as pd
 
@@ -118,7 +119,7 @@ class DBToolEnv(ToolEnv):
         from data_pipeline.synthesis.scenarios.loader import dedup_scenarios
 
         # 多路径列表：逐个加载后合并
-        if isinstance(source, list):
+        if isinstance(source, Sequence) and not isinstance(source, (str, bytes, os.PathLike)):
             all_scenarios = []
             for s in source:
                 all_scenarios.extend(DBToolEnv._load_scenarios(s))
