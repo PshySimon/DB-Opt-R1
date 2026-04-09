@@ -54,7 +54,8 @@ class RewardScoreTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("answer_score=", result.stdout)
+        self.assertIn("direct_answer_score=", result.stdout)
+        self.assertIn("db_reward_manager_answer_score=", result.stdout)
         self.assertIn("status=PASS", result.stdout)
 
 
