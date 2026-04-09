@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 import unittest
 from unittest import mock
+import numpy as np
+import torch
 from omegaconf import OmegaConf
 
 
@@ -79,6 +81,37 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         self.assertTrue(calls[0]["use_custom_tool_format_func"])
         self.assertEqual("./datasets/grpo/validation.parquet", calls[1]["data_files"])
         self.assertIs(trainer.val_env, calls[1]["tool_env"])
+
+    def test_compute_advantage_uses_verl_071_grpo_signature(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        data = trainer_module.DataProto.from_dict(
+            tensors={
+                "token_level_rewards": torch.ones((2, 3), dtype=torch.float32),
+                "responses": torch.ones((2, 3), dtype=torch.long),
+                "attention_mask": torch.ones((2, 6), dtype=torch.long),
+            },
+            non_tensors={"uid": np.array(["a", "a"], dtype=object)},
+        )
+
+        with mock.patch.object(
+            trainer_module.core_algos,
+            "compute_grpo_outcome_advantage",
+            return_value=(
+                torch.ones((2, 3), dtype=torch.float32),
+                torch.ones((2, 3), dtype=torch.float32),
+            ),
+        ) as mocked:
+            trainer_module.compute_advantage(
+                data,
+                trainer_module.AdvantageEstimator.GRPO,
+            )
+
+        response_mask = mocked.call_args.kwargs.get("response_mask")
+        if response_mask is None:
+            response_mask = mocked.call_args.args[1]
+        self.assertEqual(response_mask.shape, (2, 3))
+        self.assertNotIn("eos_mask", mocked.call_args.kwargs)
 
 
 if __name__ == "__main__":
