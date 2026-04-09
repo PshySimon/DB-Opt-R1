@@ -12,6 +12,7 @@ Usage:
 import ray
 import hydra
 import torch
+import re
 
 from verl import DataProto
 
@@ -73,6 +74,12 @@ class DBRewardManager:
             sequences_str = sequences_str.split(
                 self.tokenizer.decode([pad_token_id])
             )[0]
+            response_str = self.tokenizer.decode(
+                valid_response_ids, skip_special_tokens=False
+            )
+            response_str = response_str.split(
+                self.tokenizer.decode([pad_token_id])
+            )[0]
 
             ground_truth = data_item.non_tensor_batch['reward_model'][
                 'ground_truth'
@@ -106,6 +113,8 @@ class DBRewardManager:
                 print("[extracted_knobs]", extract_final_knobs(sequences_str))
                 print("[answer_score]", answer_score)
                 print("[format_score]", format_score)
+                print("[tool_calls]", re.findall(r'<tool_call>(.*?)</tool_call>', response_str, re.DOTALL))
+                print("[response_only]", response_str[:1000])
                 print("[prompt+response]", sequences_str[:500])
                 print("[ground_truth]", ground_truth)
                 print("[score]", score)

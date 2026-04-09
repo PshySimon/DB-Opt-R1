@@ -139,6 +139,8 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
         self.assertIn("shared_buffers", output)
         self.assertIn("[answer_score]", output)
         self.assertIn("[format_score]", output)
+        self.assertIn("[response_only]", output)
+        self.assertIn("[tool_calls]", output)
 
     def test_verify_grpo_reward_path_module_finds_positive_candidate(self):
         spec = importlib.util.spec_from_file_location(
