@@ -243,7 +243,7 @@ actor_rollout_ref:
     expert_parallel_size: 1
     pipeline_model_parallel_size: 1
     max_num_batched_tokens: 32768
-    logprobs_mode: processed_logprobs
+    logprobs_mode: null
     scheduling_policy: fcfs
     max_model_len: null
     max_num_seqs: 1024

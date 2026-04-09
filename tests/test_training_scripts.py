@@ -87,6 +87,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("data_parallel_size: 1", content)
         self.assertIn("expert_parallel_size: 1", content)
         self.assertIn("pipeline_model_parallel_size: 1", content)
+        self.assertIn("logprobs_mode: null", content)
 
     def test_grpo_rollout_config_instantiates_with_verl_071_schema(self):
         cfg = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
