@@ -9,6 +9,19 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
+
+def _is_non_retryable_request_error(err_str: str) -> bool:
+    """请求本身非法时直接失败，不进入节点退避。"""
+    non_retryable_keywords = [
+        "maximum context length",
+        "context length",
+        "please reduce the length of the messages",
+        "too many tokens",
+        "badrequesterror",
+        "error code: 400",
+    ]
+    return any(k in err_str for k in non_retryable_keywords)
+
 class ClientStats:
     """包装单个 OpenAI client，维护其并发状态与封禁/冷却状态"""
     def __init__(self, idx: int, api_base: str, client, max_concurrent: int, model_name: str, api_key_str: str):
@@ -283,6 +296,10 @@ class MultiProviderLLMClient:
                 selected.release(success=False)
                 last_error = e
                 err_str = str(e).lower()
+
+                if _is_non_retryable_request_error(err_str):
+                    logger.error(f"❌ 请求非法，直接失败，不重试: [{e}]")
+                    raise
                 
                 # 致命错误关键词（欠费、不存、封禁）
                 fatal_keywords = ["model_not_found", "unsupported", "does not exist", 
