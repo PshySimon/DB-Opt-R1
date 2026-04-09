@@ -59,6 +59,7 @@ python3 -m training.verl.main_grpo \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.actor.use_kl_loss=True \
   actor_rollout_ref.actor.kl_loss_coef=0.001 \
+  actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
   \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.n_repeat=$N_REPEAT \
@@ -67,6 +68,7 @@ python3 -m training.verl.main_grpo \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
   actor_rollout_ref.rollout.dtype=bfloat16 \
   actor_rollout_ref.rollout.load_format=safetensors \
+  actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=2 \
   \
   algorithm.kl_ctrl.kl_coef=0.001 \
   \
