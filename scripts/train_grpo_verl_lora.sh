@@ -81,4 +81,5 @@ python3 -m training.verl.main_grpo \
   "trainer.logger=[console]" \
   \
   tool.max_turns=$MAX_TURNS \
-  +cost_model_path=$COST_MODEL_PATH
+  +cost_model_path=$COST_MODEL_PATH \
+  "$@"

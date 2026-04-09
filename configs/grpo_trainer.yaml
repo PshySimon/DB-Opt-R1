@@ -257,6 +257,11 @@ actor_rollout_ref:
       vllm: {}
       sglang: {}
       trtllm: {}
+    prometheus:
+      _target_: verl.workers.config.PrometheusConfig
+      enable: False
+      port: 9090
+      file: /tmp/ray/session_latest/metrics/prometheus/prometheus.yml
     enable_chunked_prefill: True # may get higher throughput when set to True. When activated, Please increase max_num_batched_tokens or decrease max_model_len.
     enable_prefix_caching: True
     # for hf rollout

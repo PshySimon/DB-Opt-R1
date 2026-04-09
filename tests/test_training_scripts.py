@@ -96,6 +96,11 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("expert_parallel_size: 1", content)
         self.assertIn("pipeline_model_parallel_size: 1", content)
         self.assertIn("logprobs_mode: null", content)
+        self.assertIn("_target_: verl.workers.config.PrometheusConfig", content)
+
+    def test_verl_grpo_lora_script_accepts_extra_hydra_overrides(self):
+        content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
+        self.assertIn('"$@"', content)
 
     def test_grpo_rollout_config_instantiates_with_verl_071_schema(self):
         cfg = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
