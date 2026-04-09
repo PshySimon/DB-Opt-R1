@@ -44,6 +44,22 @@ class TrainingToolEnvParityTest(unittest.TestCase):
 
         self.assertEqual(core_result, batch_result)
 
+    def test_malformed_tool_name_dict_is_treated_as_invalid_not_crash(self):
+        action = '<tool_call>{"name":{"tool":"echo"},"arguments":{"value":"ok"}}</tool_call>'
+
+        result = core_step(self.core_env, action)
+
+        self.assertEqual(result[1], CoreToolEnv.PENALTY_FOR_INVALID)
+        self.assertFalse(result[3]["action_is_valid"])
+
+    def test_training_batch_handles_malformed_tool_name_dict(self):
+        action = '<tool_call>{"name":{"tool":"echo"},"arguments":{"value":"ok"}}</tool_call>'
+
+        result = training_step_batch([self.training_env], [action])[0]
+
+        self.assertEqual(result[1], CoreToolEnv.PENALTY_FOR_INVALID)
+        self.assertFalse(result[3]["action_is_valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

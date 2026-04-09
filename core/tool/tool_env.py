@@ -110,9 +110,15 @@ For each function call, return a json object with function name and arguments wi
                 data = json.loads(raw)
             except json.JSONDecodeError:
                 data, _ = json.JSONDecoder().raw_decode(raw)
-            if "name" not in data:
+            if not isinstance(data, dict):
                 return self.INVALID_ACTION
-            return {"tool": data["name"], "args": data.get("arguments", {})}
+            tool_name = data.get("name")
+            tool_args = data.get("arguments", {})
+            if not isinstance(tool_name, str):
+                return self.INVALID_ACTION
+            if not isinstance(tool_args, dict):
+                return self.INVALID_ACTION
+            return {"tool": tool_name, "args": tool_args}
         except (json.JSONDecodeError, Exception):
             return self.INVALID_ACTION
 
