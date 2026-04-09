@@ -97,6 +97,13 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("pipeline_model_parallel_size: 1", content)
         self.assertIn("logprobs_mode: null", content)
         self.assertIn("_target_: verl.workers.config.PrometheusConfig", content)
+        self.assertIn("_target_: verl.workers.config.AgentLoopConfig", content)
+        self.assertIn("_target_: verl.workers.config.CustomAsyncServerConfig", content)
+        self.assertIn("_target_: verl.workers.config.TraceConfig", content)
+        self.assertIn("_target_: verl.workers.config.MultiTurnConfig", content)
+        self.assertIn("_target_: verl.workers.config.ServerConfig", content)
+        self.assertIn("_target_: verl.workers.config.CheckpointEngineConfig", content)
+        self.assertIn("calculate_log_probs: True", content)
 
     def test_verl_grpo_lora_script_accepts_extra_hydra_overrides(self):
         content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
@@ -107,6 +114,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         rollout = instantiate(cfg.actor_rollout_ref.rollout, _convert_="partial")
         self.assertEqual(rollout.name, "vllm")
         self.assertEqual(rollout.data_parallel_size, 1)
+        self.assertTrue(rollout.calculate_log_probs)
         self.assertEqual(cfg.actor_rollout_ref.actor.checkpoint._target_, "verl.trainer.config.CheckpointConfig")
         self.assertEqual(cfg.actor_rollout_ref.ref.profiler._target_, "verl.utils.profiler.ProfilerConfig")
 
