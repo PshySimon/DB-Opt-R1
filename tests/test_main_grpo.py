@@ -2,6 +2,8 @@ import sys
 import types
 import unittest
 from unittest import mock
+import subprocess
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -9,6 +11,8 @@ from verl import DataProto
 from omegaconf import OmegaConf
 
 from training.verl import main_grpo
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class MainGrpoWorkerSelectionTest(unittest.TestCase):
@@ -87,6 +91,18 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
         self.assertGreater(answer_scores[0], 0.0)
         self.assertGreater(format_scores[0], 0.0)
         self.assertGreater(reward_tensor[0, -1].item(), format_scores[0])
+
+    def test_verify_grpo_reward_path_script_reports_positive_answer_score(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "verify_grpo_reward_path.py")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("db_reward_manager_answer_score=", result.stdout)
+        self.assertIn("status=PASS", result.stdout)
 
 
 if __name__ == "__main__":
