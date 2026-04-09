@@ -55,15 +55,39 @@ actor_rollout_ref:
     ppo_micro_batch_size_per_gpu: null
     use_dynamic_bsz: False
     ppo_max_token_len_per_gpu: 16384 # n * ${data.max_prompt_length} + ${data.max_response_length}
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+    tau_pos: 1.0
+    tau_neg: 1.05
+    policy_loss:
+      _target_: verl.workers.config.PolicyLossConfig
+      loss_mode: vanilla
+      clip_cov_ratio: 0.0002
+      clip_cov_lb: 1.0
+      clip_cov_ub: 5.0
+      kl_cov_ratio: 0.0002
+      ppo_kl_coef: 0.1
+    clip_ratio_c: 3.0
+    loss_agg_mode: token-mean
+    loss_scale_factor: null
     grad_clip: 1.0
     clip_ratio: 0.2
     entropy_coeff: 0.001
+    calculate_entropy: False
     use_kl_loss: False # True for GRPO
+    use_prefix_grouper: False
     use_torch_compile: True # False to disable torch compile
     kl_loss_coef: 0.001 # for grpo
     kl_loss_type: low_var_kl # for grpo
     ppo_epochs: 1
     shuffle: False
+    data_loader_seed: 42
+    checkpoint:
+      _target_: verl.trainer.config.CheckpointConfig
+      save_contents: [model, optimizer, extra]
+      load_contents: ${.save_contents}
+      async_save: False
+      mbridge_config: {}
     ulysses_sequence_parallel_size: 1 # sp size
     optim:
       _target_: verl.workers.config.FSDPOptimizerConfig
@@ -81,6 +105,36 @@ actor_rollout_ref:
       zero_indexed_step: true
       override_optimizer_config: null
       total_training_steps: -1  # must be override by program
+    profiler:
+      _target_: verl.utils.profiler.ProfilerConfig
+      tool: ${oc.select:global_profiler.tool,null}
+      enable: False
+      all_ranks: False
+      ranks: []
+      save_path: ${oc.select:global_profiler.save_path,null}
+      tool_config:
+        nsys:
+          _target_: verl.utils.profiler.config.NsightToolConfig
+          discrete: ${oc.select:global_profiler.global_tool_config.nsys.discrete,false}
+        npu:
+          _target_: verl.utils.profiler.config.NPUToolConfig
+          contents: []
+          level: level0
+          analysis: True
+          discrete: False
+        torch:
+          _target_: verl.utils.profiler.config.TorchProfilerToolConfig
+          contents: []
+          discrete: False
+        torch_memory:
+          _target_: verl.utils.profiler.config.TorchMemoryToolConfig
+          trace_alloc_max_entries: ${oc.select:global_profiler.global_tool_config.torch_memory.trace_alloc_max_entries,100000}
+          stack_depth: ${oc.select:global_profiler.global_tool_config.torch_memory.stack_depth,32}
+    router_replay:
+      _target_: verl.workers.config.RouterReplayConfig
+      mode: disabled
+      record_file: null
+      replay_file: null
     fsdp_config:
       _target_: verl.workers.config.FSDPEngineConfig
       wrap_policy:
@@ -88,20 +142,81 @@ actor_rollout_ref:
         min_num_params: 0
       param_offload: False
       optimizer_offload: False
+      offload_policy: False
+      reshard_after_forward: True
       fsdp_size: -1
+      forward_prefetch: False
+      model_dtype: fp32
+      use_orig_params: False
+      seed: 42
+      full_determinism: False
+      ulysses_sequence_parallel_size: 1
+      entropy_from_logits_with_chunking: False
+      use_torch_compile: True
+      entropy_checkpointing: False
+      strategy: fsdp
+      dtype: bfloat16
   ref:
     _target_: verl.workers.config.FSDPActorConfig
+    rollout_n: ${oc.select:actor_rollout_ref.rollout.n,1}
+    strategy: ${actor_rollout_ref.actor.strategy}
+    use_torch_compile: ${oc.select:actor_rollout_ref.actor.use_torch_compile,true}
     fsdp_config:
       _target_: verl.workers.config.FSDPEngineConfig
       forward_only: True
       param_offload: False
+      optimizer_offload: False
       wrap_policy:
         # transformer_layer_cls_to_wrap: None
         min_num_params: 0
+      offload_policy: False
+      reshard_after_forward: True
+      fsdp_size: -1
+      forward_prefetch: False
+      model_dtype: fp32
+      use_orig_params: False
+      seed: 42
+      full_determinism: False
+      ulysses_sequence_parallel_size: 1
+      entropy_from_logits_with_chunking: False
+      use_torch_compile: True
+      entropy_checkpointing: False
+      strategy: fsdp
+      dtype: bfloat16
     log_prob_micro_batch_size: null # will be deprecated, use log_prob_micro_batch_size_per_gpu
     log_prob_micro_batch_size_per_gpu: null
     log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
     log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
+    profiler:
+      _target_: verl.utils.profiler.ProfilerConfig
+      tool: ${oc.select:global_profiler.tool,null}
+      enable: False
+      all_ranks: False
+      ranks: []
+      save_path: ${oc.select:global_profiler.save_path,null}
+      tool_config:
+        nsys:
+          _target_: verl.utils.profiler.config.NsightToolConfig
+          discrete: ${oc.select:global_profiler.global_tool_config.nsys.discrete,false}
+        npu:
+          _target_: verl.utils.profiler.config.NPUToolConfig
+          contents: []
+          level: level0
+          analysis: True
+          discrete: False
+        torch:
+          _target_: verl.utils.profiler.config.TorchProfilerToolConfig
+          contents: []
+          discrete: False
+        torch_memory:
+          _target_: verl.utils.profiler.config.TorchMemoryToolConfig
+          trace_alloc_max_entries: ${oc.select:global_profiler.global_tool_config.torch_memory.trace_alloc_max_entries,100000}
+          stack_depth: ${oc.select:global_profiler.global_tool_config.torch_memory.stack_depth,32}
+    router_replay:
+      _target_: verl.workers.config.RouterReplayConfig
+      mode: disabled
+      record_file: null
+      replay_file: null
     ulysses_sequence_parallel_size: ${actor_rollout_ref.actor.ulysses_sequence_parallel_size} # sp size
     entropy_from_logits_with_chunking: False
     entropy_checkpointing: False

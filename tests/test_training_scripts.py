@@ -80,6 +80,10 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("entropy_from_logits_with_chunking: False", content)
         self.assertIn("entropy_checkpointing: False", content)
         self.assertNotIn("use_fire_sampling", content)
+        self.assertIn("checkpoint:", content)
+        self.assertIn("_target_: verl.trainer.config.CheckpointConfig", content)
+        self.assertIn("_target_: verl.utils.profiler.ProfilerConfig", content)
+        self.assertIn("_target_: verl.workers.config.RouterReplayConfig", content)
         self.assertIn("data_parallel_size: 1", content)
         self.assertIn("expert_parallel_size: 1", content)
         self.assertIn("pipeline_model_parallel_size: 1", content)
@@ -89,6 +93,8 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         rollout = instantiate(cfg.actor_rollout_ref.rollout, _convert_="partial")
         self.assertEqual(rollout.name, "vllm")
         self.assertEqual(rollout.data_parallel_size, 1)
+        self.assertEqual(cfg.actor_rollout_ref.actor.checkpoint._target_, "verl.trainer.config.CheckpointConfig")
+        self.assertEqual(cfg.actor_rollout_ref.ref.profiler._target_, "verl.utils.profiler.ProfilerConfig")
 
 
 if __name__ == "__main__":
