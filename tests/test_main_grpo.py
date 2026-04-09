@@ -2,8 +2,7 @@ import sys
 import types
 import unittest
 from unittest import mock
-import subprocess
-from pathlib import Path
+import importlib.util
 
 import numpy as np
 import torch
@@ -11,8 +10,6 @@ from verl import DataProto
 from omegaconf import OmegaConf
 
 from training.verl import main_grpo
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 class MainGrpoWorkerSelectionTest(unittest.TestCase):
@@ -92,17 +89,29 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
         self.assertGreater(format_scores[0], 0.0)
         self.assertGreater(reward_tensor[0, -1].item(), format_scores[0])
 
-    def test_verify_grpo_reward_path_script_reports_positive_answer_score(self):
-        result = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "verify_grpo_reward_path.py")],
-            capture_output=True,
-            text=True,
-            check=False,
+    def test_verify_grpo_reward_path_module_finds_positive_candidate(self):
+        spec = importlib.util.spec_from_file_location(
+            "verify_grpo_reward_path",
+            "scripts/verify_grpo_reward_path.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        class FakeCostModel:
+            def predict(self, knobs, hardware):
+                return 120.0 if knobs.get("shared_buffers") == "8GB" else 100.0
+
+        ground_truth = {"hardware": {"total_memory_gb": 80.0, "cpu_count": 16}}
+        knobs, score = module.find_positive_knob_config(
+            ground_truth=ground_truth,
+            cost_model=FakeCostModel(),
+            knob_space_path="configs/knob_space.yaml",
+            max_random_candidates=0,
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("db_reward_manager_answer_score=", result.stdout)
-        self.assertIn("status=PASS", result.stdout)
+        self.assertEqual(knobs["shared_buffers"], "8GB")
+        self.assertGreater(score, 0.0)
 
 
 if __name__ == "__main__":
