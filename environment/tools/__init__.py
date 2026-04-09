@@ -88,6 +88,8 @@ class DBToolEnv(ToolEnv):
             tools.append(RunBenchmarkTool(**common))
 
         super().__init__(tools=tools, max_turns=max_turns)
+        # training.verl.agent_rl_dataset expects the training ToolEnv interface.
+        self.tool_desc = [tool.get_description() for tool in self.tools]
 
     @staticmethod
     def _load_scenarios(source) -> list:
