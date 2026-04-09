@@ -3,6 +3,8 @@ import types
 import unittest
 from unittest import mock
 import importlib.util
+import io
+from contextlib import redirect_stdout
 
 import numpy as np
 import torch
@@ -88,6 +90,55 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
         self.assertGreater(answer_scores[0], 0.0)
         self.assertGreater(format_scores[0], 0.0)
         self.assertGreater(reward_tensor[0, -1].item(), format_scores[0])
+
+    def test_db_reward_manager_debug_output_includes_extracted_knobs_and_component_scores(self):
+        solution = (
+            "<|im_start|>assistant\n"
+            "<think>set knob</think>\n"
+            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\": \\"8GB\\"}"}}</tool_call>\n'
+            "<|im_end|>"
+        )
+
+        class FakeTokenizer:
+            pad_token_id = 0
+
+            def decode(self, ids, skip_special_tokens=False):
+                if isinstance(ids, list) and ids == [self.pad_token_id]:
+                    return "<pad>"
+                return solution
+
+        class FakeCostModel:
+            def predict(self, knobs, hardware):
+                return 120.0 if knobs.get("shared_buffers") == "8GB" else 100.0
+
+        batch = DataProto.from_dict(
+            tensors={
+                "prompts": torch.tensor([[1, 2]], dtype=torch.long),
+                "responses": torch.tensor([[3, 4, 5]], dtype=torch.long),
+                "attention_mask": torch.tensor([[1, 1, 1, 1, 1]], dtype=torch.long),
+            },
+            non_tensors={
+                "reward_model": np.array(
+                    [{"ground_truth": {"hardware": {"total_memory_gb": 80.0}}}],
+                    dtype=object,
+                ),
+                "data_source": np.array(["debug"], dtype=object),
+            },
+        )
+
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            main_grpo.DBRewardManager(
+                tokenizer=FakeTokenizer(),
+                num_examine=1,
+                cost_model=FakeCostModel(),
+            )(batch)
+
+        output = stdout.getvalue()
+        self.assertIn("[extracted_knobs]", output)
+        self.assertIn("shared_buffers", output)
+        self.assertIn("[answer_score]", output)
+        self.assertIn("[format_score]", output)
 
     def test_verify_grpo_reward_path_module_finds_positive_candidate(self):
         spec = importlib.util.spec_from_file_location(

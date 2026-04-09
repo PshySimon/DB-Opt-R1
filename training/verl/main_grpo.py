@@ -20,6 +20,7 @@ from training.reward_score import (
     compute_score_format,
     compute_score_answer,
     compute_score_format_answer,
+    extract_final_knobs,
 )
 
 
@@ -102,6 +103,9 @@ class DBRewardManager:
 
             if already_print_data_sources[data_source] < self.num_examine:
                 already_print_data_sources[data_source] += 1
+                print("[extracted_knobs]", extract_final_knobs(sequences_str))
+                print("[answer_score]", answer_score)
+                print("[format_score]", format_score)
                 print("[prompt+response]", sequences_str[:500])
                 print("[ground_truth]", ground_truth)
                 print("[score]", score)
@@ -208,6 +212,8 @@ def main_task(config):
 
     scenario_dir = getattr(config, 'scenario_dir', None)
     knob_space_path = getattr(config, 'knob_space_path', 'configs/knob_space.yaml')
+    reward_debug_num_examine = int(config.get('reward_debug_num_examine', 0))
+    val_reward_debug_num_examine = int(config.get('val_reward_debug_num_examine', 1))
 
     env = DBToolEnv(
         mode="train",
@@ -226,10 +232,14 @@ def main_task(config):
         resource_pool_manager=resource_pool_manager,
         ray_worker_group_cls=ray_worker_group_cls,
         reward_fn=DBRewardManager(
-            tokenizer=tokenizer, num_examine=0, cost_model=cost_model
+            tokenizer=tokenizer,
+            num_examine=reward_debug_num_examine,
+            cost_model=cost_model,
         ),
         val_reward_fn=DBRewardManager(
-            tokenizer=tokenizer, num_examine=1, cost_model=cost_model
+            tokenizer=tokenizer,
+            num_examine=val_reward_debug_num_examine,
+            cost_model=cost_model,
         ),
         env=env,
     )
