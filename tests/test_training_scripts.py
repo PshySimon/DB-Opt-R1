@@ -57,6 +57,8 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
         self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', lora_content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', lora_content)
+        self.assertIn('MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"', lora_content)
+        self.assertIn('GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"', lora_content)
         self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", lora_content)
         self.assertNotIn("actor_rollout_ref.model.torch_dtype", lora_content)
         self.assertIn("++actor_rollout_ref.model.lora_rank=$LORA_RANK", lora_content)
@@ -68,8 +70,14 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         full_content = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
         self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', full_content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', full_content)
+        self.assertIn('MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"', full_content)
+        self.assertIn('GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"', full_content)
         self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", full_content)
         self.assertNotIn("actor_rollout_ref.model.torch_dtype", full_content)
+        self.assertIn("actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$REF_LOG_PROB_MICRO_BATCH_SIZE", full_content)
+        self.assertIn("actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=$ROLLOUT_LOG_PROB_MICRO_BATCH_SIZE", full_content)
+        self.assertIn("actor_rollout_ref.rollout.n=$N_REPEAT", full_content)
+        self.assertNotIn("actor_rollout_ref.rollout.n_repeat", full_content)
 
     def test_verl_grpo_main_sets_vllm_v1_runtime_env(self):
         content = (ROOT / "training" / "verl" / "main_grpo.py").read_text()
@@ -111,6 +119,10 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
 
     def test_verl_grpo_lora_script_accepts_extra_hydra_overrides(self):
         content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
+        self.assertIn('"$@"', content)
+
+    def test_verl_grpo_full_script_accepts_extra_hydra_overrides(self):
+        content = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
         self.assertIn('"$@"', content)
 
     def test_agent_ray_trainer_forwards_raw_prompt_to_async_rollout(self):
