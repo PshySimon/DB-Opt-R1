@@ -80,11 +80,15 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("entropy_from_logits_with_chunking: False", content)
         self.assertIn("entropy_checkpointing: False", content)
         self.assertNotIn("use_fire_sampling", content)
+        self.assertIn("data_parallel_size: 1", content)
+        self.assertIn("expert_parallel_size: 1", content)
+        self.assertIn("pipeline_model_parallel_size: 1", content)
 
     def test_grpo_rollout_config_instantiates_with_verl_071_schema(self):
         cfg = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
         rollout = instantiate(cfg.actor_rollout_ref.rollout, _convert_="partial")
         self.assertEqual(rollout.name, "vllm")
+        self.assertEqual(rollout.data_parallel_size, 1)
 
 
 if __name__ == "__main__":

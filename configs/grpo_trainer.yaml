@@ -108,6 +108,9 @@ actor_rollout_ref:
   rollout:
     _target_: verl.workers.config.RolloutConfig
     name: vllm
+    mode: async
+    nnodes: 0
+    n_gpus_per_node: ${oc.select:trainer.n_gpus_per_node,8}
     temperature: 1.0
     top_k: -1 # 0 for hf rollout, -1 for vllm rollout
     top_p: 1
@@ -121,7 +124,12 @@ actor_rollout_ref:
     free_cache_engine: True
     load_format: dummy_dtensor
     tensor_model_parallel_size: 2
+    data_parallel_size: 1
+    expert_parallel_size: 1
+    pipeline_model_parallel_size: 1
     max_num_batched_tokens: 32768
+    logprobs_mode: processed_logprobs
+    scheduling_policy: fcfs
     max_model_len: null
     max_num_seqs: 1024
     log_prob_micro_batch_size: null # will be deprecated, use log_prob_micro_batch_size_per_gpu
@@ -129,12 +137,19 @@ actor_rollout_ref:
     log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
     log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
     disable_log_stats: True
+    multi_stage_wake_up: False
+    engine_kwargs:
+      vllm: {}
+      sglang: {}
+      trtllm: {}
     enable_chunked_prefill: True # may get higher throughput when set to True. When activated, Please increase max_num_batched_tokens or decrease max_model_len.
+    enable_prefix_caching: True
     # for hf rollout
     do_sample: True
     # number of responses (i.e. num sample times)
     n: 1
     val_kwargs:
+      _target_: verl.workers.config.SamplingConfig
       # sampling parameters for validation
       top_k: -1 # 0 for hf rollout, -1 for vllm rollout
       top_p: 1.0
