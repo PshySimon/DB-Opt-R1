@@ -782,10 +782,17 @@ class RayAgentTrainer(object):
 
         actor_remote_path = None if self.config.trainer.default_hdfs_dir is None else os.path.join(
             self.config.trainer.default_hdfs_dir, f'global_step_{self.global_steps}', 'actor')
+        remove_previous_ckpt_in_save = self.config.trainer.get('remove_previous_ckpt_in_save', False)
+        max_actor_ckpt_to_keep = self.config.trainer.get('max_actor_ckpt_to_keep', None)
+        max_critic_ckpt_to_keep = self.config.trainer.get('max_critic_ckpt_to_keep', None)
+        if remove_previous_ckpt_in_save:
+            max_actor_ckpt_to_keep = 1
+            max_critic_ckpt_to_keep = 1
+
         self.actor_rollout_wg.save_checkpoint(actor_local_path,
                                               actor_remote_path,
                                               self.global_steps,
-                                              remove_previous_ckpt=self.config.trainer.remove_previous_ckpt_in_save)
+                                              max_ckpt_to_keep=max_actor_ckpt_to_keep)
 
         if self.use_critic:
             critic_local_path = os.path.join(local_global_step_folder, 'critic')
@@ -794,9 +801,10 @@ class RayAgentTrainer(object):
             self.critic_wg.save_checkpoint(critic_local_path,
                                            critic_remote_path,
                                            self.global_steps,
-                                           remove_previous_ckpt=self.config.trainer.remove_previous_ckpt_in_save)
+                                           max_ckpt_to_keep=max_critic_ckpt_to_keep)
 
         # save dataloader
+        os.makedirs(local_global_step_folder, exist_ok=True)
         dataloader_local_path = os.path.join(local_global_step_folder, 'data.pt')
         dataloader_state_dict = self.train_dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_local_path)

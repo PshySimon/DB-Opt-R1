@@ -200,6 +200,37 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         self.assertNotIn("ref", trainer.resource_pool_to_cls["pool"])
         self.assertIs(trainer.ref_policy_wg, fake_actor_wg)
 
+    def test_save_checkpoint_uses_max_ckpt_to_keep_for_verl_071(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        trainer = trainer_module.RayAgentTrainer.__new__(trainer_module.RayAgentTrainer)
+        trainer.global_steps = 7
+        trainer.use_critic = True
+        trainer.actor_rollout_wg = mock.Mock()
+        trainer.critic_wg = mock.Mock()
+        trainer.train_dataloader = mock.Mock()
+        trainer.train_dataloader.state_dict.return_value = {"epoch": 1}
+        trainer.config = OmegaConf.create(
+            {
+                "trainer": {
+                    "default_local_dir": "/tmp/verl-tests",
+                    "default_hdfs_dir": None,
+                    "remove_previous_ckpt_in_save": True,
+                }
+            }
+        )
+
+        with mock.patch.object(trainer_module.torch, "save"), mock.patch.object(
+            trainer_module.os, "makedirs"
+        ), mock.patch("builtins.open", mock.mock_open()):
+            trainer._save_checkpoint()
+
+        actor_call = trainer.actor_rollout_wg.save_checkpoint.call_args
+        critic_call = trainer.critic_wg.save_checkpoint.call_args
+        self.assertEqual(actor_call.kwargs["max_ckpt_to_keep"], 1)
+        self.assertEqual(critic_call.kwargs["max_ckpt_to_keep"], 1)
+        self.assertNotIn("remove_previous_ckpt", actor_call.kwargs)
+
 
 if __name__ == "__main__":
     unittest.main()
