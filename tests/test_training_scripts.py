@@ -47,11 +47,18 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("flashinfer-python==0.2.5", content)
 
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
-        for name in ["train_grpo_verl_lora.sh", "train_grpo_verl_full.sh"]:
-            content = (ROOT / "scripts" / name).read_text()
-            self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', content)
-            self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", content)
-            self.assertNotIn("actor_rollout_ref.model.torch_dtype", content)
+        lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
+        self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', lora_content)
+        self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", lora_content)
+        self.assertNotIn("actor_rollout_ref.model.torch_dtype", lora_content)
+        self.assertIn("++actor_rollout_ref.model.lora_rank=$LORA_RANK", lora_content)
+        self.assertIn("++actor_rollout_ref.model.lora_alpha=$LORA_ALPHA", lora_content)
+        self.assertIn("++actor_rollout_ref.model.target_modules=$TARGET_MODULES", lora_content)
+
+        full_content = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
+        self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', full_content)
+        self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", full_content)
+        self.assertNotIn("actor_rollout_ref.model.torch_dtype", full_content)
 
 
 if __name__ == "__main__":
