@@ -60,6 +60,13 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertNotIn("actor_rollout_ref.model.override_config.attn_implementation", full_content)
         self.assertNotIn("actor_rollout_ref.model.torch_dtype", full_content)
 
+    def test_grpo_trainer_config_has_verl_071_targets(self):
+        content = (ROOT / "configs" / "grpo_trainer.yaml").read_text()
+        self.assertIn("_target_: verl.workers.config.FSDPActorConfig", content)
+        self.assertIn("_target_: verl.workers.config.FSDPCriticConfig", content)
+        self.assertIn("_target_: verl.workers.config.FSDPCriticModelCfg", content)
+        self.assertIn("_target_: verl.workers.config.FSDPEngineConfig", content)
+
 
 if __name__ == "__main__":
     unittest.main()
