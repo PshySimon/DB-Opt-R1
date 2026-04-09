@@ -147,17 +147,21 @@ def find_positive_knob_config(
     raise RuntimeError(f"no positive knob config found; best_score={best_score:.6f}, best_knobs={best_knobs}")
 
 
-def build_reward_batch(tokenizer, solution: str, ground_truth: dict) -> DataProto:
-    pad_token_id = tokenizer.pad_token_id
-    if pad_token_id is None:
-        pad_token_id = tokenizer.eos_token_id
-    prompt_ids = [pad_token_id]
+def build_reward_batch(tokenizer, prompt_messages, solution: str, ground_truth: dict) -> DataProto:
+    prompt_ids = tokenizer.apply_chat_template(
+        prompt_messages,
+        add_generation_prompt=True,
+        tokenize=True,
+    )
     response_ids = tokenizer.encode(solution, add_special_tokens=False)
     return DataProto.from_dict(
         tensors={
             "prompts": torch.tensor([prompt_ids], dtype=torch.long),
             "responses": torch.tensor([response_ids], dtype=torch.long),
-            "attention_mask": torch.tensor([[0] + [1] * len(response_ids)], dtype=torch.long),
+            "attention_mask": torch.tensor(
+                [[1] * len(prompt_ids) + [1] * len(response_ids)],
+                dtype=torch.long,
+            ),
         },
         non_tensors={
             "reward_model": np.array([{"ground_truth": ground_truth}], dtype=object),
@@ -179,6 +183,7 @@ def verify_reward_path(
     row = df.iloc[sample_index]
     reward_model = row["reward_model"]
     ground_truth = reward_model["ground_truth"]
+    prompt_messages = row["prompt"]
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     cost_model = CostModel.load(cost_model_path)
@@ -191,7 +196,7 @@ def verify_reward_path(
         seed=seed,
     )
     solution = build_solution(knobs)
-    batch = build_reward_batch(tokenizer, solution, ground_truth)
+    batch = build_reward_batch(tokenizer, prompt_messages, solution, ground_truth)
     reward_tensor, answer_scores, format_scores = DBRewardManager(
         tokenizer=tokenizer,
         cost_model=cost_model,

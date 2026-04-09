@@ -113,6 +113,34 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
         self.assertEqual(knobs["shared_buffers"], "8GB")
         self.assertGreater(score, 0.0)
 
+    def test_verify_grpo_reward_path_builds_batch_with_nonempty_prompt_mask(self):
+        spec = importlib.util.spec_from_file_location(
+            "verify_grpo_reward_path",
+            "scripts/verify_grpo_reward_path.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        class FakeTokenizer:
+            pad_token_id = 0
+
+            def apply_chat_template(self, prompt, add_generation_prompt=True, tokenize=True):
+                return [11, 12, 13]
+
+            def encode(self, text, add_special_tokens=False):
+                return [21, 22]
+
+        batch = module.build_reward_batch(
+            tokenizer=FakeTokenizer(),
+            prompt_messages=[{"role": "user", "content": "hello"}],
+            solution="<tool_call></tool_call>",
+            ground_truth={"hardware": {"total_memory_gb": 80.0}},
+        )
+
+        self.assertTrue(torch.equal(batch.batch["attention_mask"], torch.tensor([[1, 1, 1, 1, 1]])))
+        self.assertTrue(torch.equal(batch.batch["prompts"], torch.tensor([[11, 12, 13]])))
+
 
 if __name__ == "__main__":
     unittest.main()
