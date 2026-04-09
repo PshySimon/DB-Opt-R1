@@ -106,6 +106,7 @@ actor_rollout_ref:
     entropy_from_logits_with_chunking: False
     entropy_checkpointing: False
   rollout:
+    _target_: verl.workers.config.RolloutConfig
     name: vllm
     temperature: 1.0
     top_k: -1 # 0 for hf rollout, -1 for vllm rollout

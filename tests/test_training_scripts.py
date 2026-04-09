@@ -69,6 +69,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("_target_: verl.workers.config.FSDPCriticModelCfg", content)
         self.assertIn("_target_: verl.workers.config.FSDPEngineConfig", content)
         self.assertIn("_target_: verl.workers.config.FSDPOptimizerConfig", content)
+        self.assertIn("_target_: verl.workers.config.RolloutConfig", content)
         self.assertIn("rollout_n: ${oc.select:actor_rollout_ref.rollout.n,1}", content)
         self.assertIn("weight_decay: 0.01", content)
         self.assertIn("optimizer: AdamW", content)
