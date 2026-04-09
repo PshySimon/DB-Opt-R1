@@ -67,6 +67,9 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("_target_: verl.workers.config.FSDPCriticConfig", content)
         self.assertIn("_target_: verl.workers.config.FSDPCriticModelCfg", content)
         self.assertIn("_target_: verl.workers.config.FSDPEngineConfig", content)
+        self.assertIn("forward_only: True", content)
+        self.assertIn("entropy_from_logits_with_chunking: False", content)
+        self.assertIn("entropy_checkpointing: False", content)
 
 
 if __name__ == "__main__":

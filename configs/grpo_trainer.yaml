@@ -83,6 +83,7 @@ actor_rollout_ref:
     _target_: verl.workers.config.FSDPActorConfig
     fsdp_config:
       _target_: verl.workers.config.FSDPEngineConfig
+      forward_only: True
       param_offload: False
       wrap_policy:
         # transformer_layer_cls_to_wrap: None
@@ -92,6 +93,8 @@ actor_rollout_ref:
     log_prob_use_dynamic_bsz: ${actor_rollout_ref.actor.use_dynamic_bsz}
     log_prob_max_token_len_per_gpu: ${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}
     ulysses_sequence_parallel_size: ${actor_rollout_ref.actor.ulysses_sequence_parallel_size} # sp size
+    entropy_from_logits_with_chunking: False
+    entropy_checkpointing: False
   rollout:
     name: vllm
     temperature: 1.0
