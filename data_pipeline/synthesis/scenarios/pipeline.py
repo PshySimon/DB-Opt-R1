@@ -41,6 +41,42 @@ from .schema import ScenarioState
 logger = logging.getLogger(__name__)
 
 
+def _atomic_dump_json_list(path: str, items) -> None:
+    """Atomically write a JSON list and retain the previous version as .bak."""
+    tmp_path = f"{path}.tmp"
+    backup_path = f"{path}.bak"
+
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+
+    if os.path.exists(path):
+        os.replace(path, backup_path)
+    os.replace(tmp_path, path)
+
+
+def _safe_load_json_list(path: str):
+    """Load a JSON list, falling back to .bak if the main file is truncated."""
+    def _load(candidate: str):
+        with open(candidate, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            raise ValueError(f"{candidate} does not contain a JSON list")
+        return data
+
+    try:
+        return _load(path)
+    except (json.JSONDecodeError, ValueError) as exc:
+        backup_path = f"{path}.bak"
+        if not os.path.exists(backup_path):
+            raise
+        logger.warning(f"{path} 已损坏，回退到备份文件 {backup_path}: {exc}")
+        data = _load(backup_path)
+        _atomic_dump_json_list(path, data)
+        return data
+
+
 def generate_questions_for_state(state, n: int, llm_fn) -> list:
     """一次 LLM 调用为场景生成 n 条风格各异的 question。
 
@@ -668,8 +704,7 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
         hw_name = hw.get("name", "default")
         hw_file = f"{base}_{hw_name}{ext}"
         if os.path.exists(hw_file):
-            with open(hw_file, "r", encoding="utf-8") as f:
-                items = json.load(f)
+            items = _safe_load_json_list(hw_file)
             results_by_hw[hw_name] = items
             for e in items:
                 existing_keys.add((e["name"], e.get("variant", 0),
@@ -714,8 +749,7 @@ def synthesize_knobs(dimensions_path: str, knob_space_path: str,
     def _save():
         for hw_name, items in results_by_hw.items():
             hw_file = f"{base}_{hw_name}{ext}"
-            with open(hw_file, "w", encoding="utf-8") as f:
-                json.dump(items, f, ensure_ascii=False, indent=2)
+            _atomic_dump_json_list(hw_file, items)
 
     def _process_one(args):
         scenario, workload, severity, hw, dv, cl, v = args
@@ -1167,5 +1201,4 @@ if __name__ == "__main__":
 
     else:
         parser.print_help()
-
 
