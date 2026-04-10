@@ -4,6 +4,8 @@ import unittest
 from unittest import mock
 import importlib.util
 import io
+import json
+import tempfile
 from contextlib import redirect_stdout
 
 import numpy as np
@@ -141,6 +143,59 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
         self.assertIn("[format_score]", output)
         self.assertIn("[response_only]", output)
         self.assertIn("[tool_calls]", output)
+
+    def test_db_reward_manager_writes_debug_rollout_jsonl(self):
+        solution = (
+            "<|im_start|>assistant\n"
+            "<think>set knob</think>\n"
+            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\": \\"8GB\\"}"}}</tool_call>\n'
+            "<|im_end|>"
+        )
+
+        class FakeTokenizer:
+            pad_token_id = 0
+
+            def decode(self, ids, skip_special_tokens=False):
+                if isinstance(ids, list) and ids == [self.pad_token_id]:
+                    return "<pad>"
+                return solution
+
+        class FakeCostModel:
+            def predict(self, knobs, hardware):
+                return 120.0 if knobs.get("shared_buffers") == "8GB" else 100.0
+
+        batch = DataProto.from_dict(
+            tensors={
+                "prompts": torch.tensor([[1, 2]], dtype=torch.long),
+                "responses": torch.tensor([[3, 4, 5]], dtype=torch.long),
+                "attention_mask": torch.tensor([[1, 1, 1, 1, 1]], dtype=torch.long),
+            },
+            non_tensors={
+                "reward_model": np.array(
+                    [{"ground_truth": {"hardware": {"total_memory_gb": 80.0}}}],
+                    dtype=object,
+                ),
+                "data_source": np.array(["debug"], dtype=object),
+            },
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            main_grpo.DBRewardManager(
+                tokenizer=FakeTokenizer(),
+                num_examine=1,
+                cost_model=FakeCostModel(),
+                debug_rollout_dir=tmpdir,
+                rollout_split="train",
+                experiment_name="exp-a",
+            )(batch)
+
+            with open(f"{tmpdir}/exp-a/train.jsonl", "r", encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f if line.strip()]
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["split"], "train")
+        self.assertIn("shared_buffers", rows[0]["extracted_knobs"])
+        self.assertGreater(rows[0]["answer_score"], 0.0)
 
     def test_verify_grpo_reward_path_module_finds_positive_candidate(self):
         spec = importlib.util.spec_from_file_location(

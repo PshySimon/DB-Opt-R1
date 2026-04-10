@@ -259,6 +259,61 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         env_a.reset.assert_called_once_with(sample_idx=3)
         env_b.reset.assert_called_once_with(sample_idx=7)
 
+    def test_early_stopping_triggers_after_patience_exhausted(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        trainer = trainer_module.RayAgentTrainer.__new__(trainer_module.RayAgentTrainer)
+        trainer.config = OmegaConf.create(
+            {
+                "trainer": {
+                    "early_stopping": {
+                        "enabled": True,
+                        "metric": "val/test_score",
+                        "mode": "max",
+                        "patience": 2,
+                        "min_delta": 0.1,
+                    }
+                }
+            }
+        )
+        trainer.global_steps = 3
+        trainer._early_stopping_state = {
+            "best_metric": None,
+            "best_step": None,
+            "bad_validations": 0,
+        }
+
+        self.assertFalse(trainer._update_early_stopping({"val/test_score": 1.0}))
+        self.assertFalse(trainer._update_early_stopping({"val/test_score": 1.05}))
+        self.assertTrue(trainer._update_early_stopping({"val/test_score": 1.04}))
+
+    def test_early_stopping_ignores_missing_metric(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        trainer = trainer_module.RayAgentTrainer.__new__(trainer_module.RayAgentTrainer)
+        trainer.config = OmegaConf.create(
+            {
+                "trainer": {
+                    "early_stopping": {
+                        "enabled": True,
+                        "metric": "val/test_score",
+                        "mode": "max",
+                        "patience": 1,
+                        "min_delta": 0.0,
+                    }
+                }
+            }
+        )
+        trainer.global_steps = 1
+        trainer._early_stopping_state = {
+            "best_metric": None,
+            "best_step": None,
+            "bad_validations": 0,
+        }
+
+        self.assertFalse(trainer._update_early_stopping({"val/other_score": 1.0}))
+        self.assertEqual(trainer._early_stopping_state["bad_validations"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -426,6 +426,10 @@ algorithm:
     kl_coef: 0.001
   use_process_rewards: False
 
+debug_rollout_dir: debug/rollout
+reward_debug_num_examine: 0
+val_reward_debug_num_examine: 1
+
 trainer:
   balance_batch: True
   total_epochs: 30
@@ -447,6 +451,12 @@ trainer:
   del_local_ckpt_after_load: False
   default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
   val_before_train: True
+  early_stopping:
+    enabled: False
+    metric: val/compiler_autotuning/db_tuning/test_score
+    mode: max
+    patience: 5
+    min_delta: 0.0
 
 tool:
   max_turns: 10

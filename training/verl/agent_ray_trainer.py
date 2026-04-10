@@ -280,6 +280,11 @@ class RayAgentTrainer(object):
         if lora_rank <= 0:
             lora_rank = config.actor_rollout_ref.model.get("lora_rank", 0)
         self.ref_in_actor = lora_rank > 0 or config.actor_rollout_ref.model.get("lora_adapter_path") is not None
+        self._early_stopping_state = {
+            "best_metric": None,
+            "best_step": None,
+            "bad_validations": 0,
+        }
 
         # define KL control
         if self.use_reference_policy:
@@ -307,6 +312,45 @@ class RayAgentTrainer(object):
 
         self._validate_config()
         self._create_dataloader()
+
+    def _update_early_stopping(self, val_metrics: dict) -> bool:
+        cfg = self.config.trainer.get("early_stopping", None)
+        if not cfg or not cfg.get("enabled", False):
+            return False
+
+        metric_name = cfg.get("metric")
+        if not metric_name or metric_name not in val_metrics:
+            print(f"[WARNING] early stopping metric not found: {metric_name}")
+            return False
+
+        metric_value = float(val_metrics[metric_name])
+        mode = str(cfg.get("mode", "max")).lower()
+        patience = int(cfg.get("patience", 0))
+        min_delta = float(cfg.get("min_delta", 0.0))
+
+        if mode not in {"max", "min"}:
+            raise ValueError(f"Unsupported early stopping mode: {mode}")
+
+        best_metric = self._early_stopping_state["best_metric"]
+        improved = (
+            best_metric is None
+            or (metric_value > best_metric + min_delta if mode == "max" else metric_value < best_metric - min_delta)
+        )
+
+        if improved:
+            self._early_stopping_state["best_metric"] = metric_value
+            self._early_stopping_state["best_step"] = self.global_steps
+            self._early_stopping_state["bad_validations"] = 0
+            print(f"[early_stopping] new best {metric_name}={metric_value:.6f} at step {self.global_steps}")
+            return False
+
+        self._early_stopping_state["bad_validations"] += 1
+        bad_validations = self._early_stopping_state["bad_validations"]
+        print(
+            f"[early_stopping] no improvement on {metric_name}: current={metric_value:.6f}, "
+            f"best={best_metric:.6f}, bad_validations={bad_validations}/{patience}"
+        )
+        return bad_validations >= patience
 
     def _validate_config(self):
         config = self.config
@@ -1034,6 +1078,7 @@ class RayAgentTrainer(object):
             for batch_dict in self.train_dataloader:
                 metrics = {}
                 timing_raw = {}
+                early_stop_triggered = False
 
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
                 batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
@@ -1183,10 +1228,14 @@ class RayAgentTrainer(object):
                             val_metrics: dict = self._validate()
                             if is_last_step:
                                 last_val_metrics = val_metrics
+                            early_stop_triggered = self._update_early_stopping(val_metrics)
                         metrics.update(val_metrics)
 
                     if self.config.trainer.save_freq > 0 and ( is_last_step or \
                             self.global_steps % self.config.trainer.save_freq == 0):
+                        with _timer('save_checkpoint', timing_raw):
+                            self._save_checkpoint()
+                    elif early_stop_triggered:
                         with _timer('save_checkpoint', timing_raw):
                             self._save_checkpoint()
 
@@ -1202,8 +1251,14 @@ class RayAgentTrainer(object):
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
 
-                if is_last_step:
+                if is_last_step or early_stop_triggered:
                     pprint(f'Final validation metrics: {last_val_metrics}')
+                    if early_stop_triggered:
+                        print(
+                            f"[early_stopping] stop training at step {self.global_steps}, "
+                            f"best_step={self._early_stopping_state['best_step']}, "
+                            f"best_metric={self._early_stopping_state['best_metric']}"
+                        )
                     return
 
                 self.global_steps += 1

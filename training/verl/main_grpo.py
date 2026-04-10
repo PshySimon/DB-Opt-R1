@@ -13,6 +13,8 @@ import ray
 import hydra
 import torch
 import re
+import json
+import os
 
 from verl import DataProto
 
@@ -32,10 +34,55 @@ from training.reward_score import (
 class DBRewardManager:
     """DB 调优 Reward 管理器"""
 
-    def __init__(self, tokenizer, num_examine=0, cost_model=None):
+    def __init__(
+        self,
+        tokenizer,
+        num_examine=0,
+        cost_model=None,
+        debug_rollout_dir=None,
+        rollout_split="train",
+        experiment_name="default",
+    ):
         self.tokenizer = tokenizer
         self.num_examine = num_examine
         self.cost_model = cost_model
+        self.debug_rollout_dir = debug_rollout_dir
+        self.rollout_split = rollout_split
+        self.experiment_name = experiment_name
+
+    def _dump_debug_rollout(
+        self,
+        *,
+        data_source,
+        ground_truth,
+        sequences_str,
+        response_str,
+        extracted_knobs,
+        answer_score,
+        format_score,
+        score,
+        tool_calls,
+    ) -> None:
+        if not self.debug_rollout_dir:
+            return
+
+        output_dir = os.path.join(self.debug_rollout_dir, self.experiment_name)
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, f"{self.rollout_split}.jsonl")
+        row = {
+            "split": self.rollout_split,
+            "data_source": data_source,
+            "ground_truth": ground_truth,
+            "extracted_knobs": extracted_knobs,
+            "answer_score": answer_score,
+            "format_score": format_score,
+            "score": score,
+            "tool_calls": tool_calls,
+            "response_only": response_str,
+            "prompt_response": sequences_str,
+        }
+        with open(output_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def __call__(self, data: DataProto):
         if 'rm_scores' in data.batch.keys():
@@ -110,14 +157,27 @@ class DBRewardManager:
 
             if already_print_data_sources[data_source] < self.num_examine:
                 already_print_data_sources[data_source] += 1
-                print("[extracted_knobs]", extract_final_knobs(sequences_str))
+                extracted_knobs = extract_final_knobs(sequences_str)
+                tool_calls = re.findall(r'<tool_call>(.*?)</tool_call>', response_str, re.DOTALL)
+                print("[extracted_knobs]", extracted_knobs)
                 print("[answer_score]", answer_score)
                 print("[format_score]", format_score)
-                print("[tool_calls]", re.findall(r'<tool_call>(.*?)</tool_call>', response_str, re.DOTALL))
+                print("[tool_calls]", tool_calls)
                 print("[response_only]", response_str[:1000])
                 print("[prompt+response]", sequences_str[:500])
                 print("[ground_truth]", ground_truth)
                 print("[score]", score)
+                self._dump_debug_rollout(
+                    data_source=data_source,
+                    ground_truth=ground_truth,
+                    sequences_str=sequences_str,
+                    response_str=response_str,
+                    extracted_knobs=extracted_knobs,
+                    answer_score=answer_score,
+                    format_score=format_score,
+                    score=score,
+                    tool_calls=tool_calls,
+                )
 
         return reward_tensor, answer_lst, format_lst
 
@@ -222,6 +282,7 @@ def main_task(config):
     scenario_dir = getattr(config, 'scenario_dir', None)
     scenario_source_filter = getattr(config, 'scenario_source_filter', None)
     knob_space_path = getattr(config, 'knob_space_path', 'configs/knob_space.yaml')
+    debug_rollout_dir = getattr(config, 'debug_rollout_dir', None)
     reward_debug_num_examine = int(config.get('reward_debug_num_examine', 0))
     val_reward_debug_num_examine = int(config.get('val_reward_debug_num_examine', 1))
 
@@ -248,11 +309,17 @@ def main_task(config):
             tokenizer=tokenizer,
             num_examine=reward_debug_num_examine,
             cost_model=cost_model,
+            debug_rollout_dir=debug_rollout_dir,
+            rollout_split="train",
+            experiment_name=config.trainer.experiment_name,
         ),
         val_reward_fn=DBRewardManager(
             tokenizer=tokenizer,
             num_examine=val_reward_debug_num_examine,
             cost_model=cost_model,
+            debug_rollout_dir=debug_rollout_dir,
+            rollout_split="validation",
+            experiment_name=config.trainer.experiment_name,
         ),
         env=env,
     )

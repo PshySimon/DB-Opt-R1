@@ -31,6 +31,14 @@ ROLLOUT_LOG_PROB_MICRO_BATCH_SIZE="${ROLLOUT_LOG_PROB_MICRO_BATCH_SIZE:-2}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"
 FREE_CACHE_ENGINE="${FREE_CACHE_ENGINE:-True}"
 ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"
+DEBUG_ROLLOUT_DIR="${DEBUG_ROLLOUT_DIR:-debug/rollout}"
+REWARD_DEBUG_NUM_EXAMINE="${REWARD_DEBUG_NUM_EXAMINE:-0}"
+VAL_REWARD_DEBUG_NUM_EXAMINE="${VAL_REWARD_DEBUG_NUM_EXAMINE:-1}"
+EARLY_STOPPING_ENABLED="${EARLY_STOPPING_ENABLED:-False}"
+EARLY_STOPPING_METRIC="${EARLY_STOPPING_METRIC:-val/compiler_autotuning/db_tuning/test_score}"
+EARLY_STOPPING_MODE="${EARLY_STOPPING_MODE:-max}"
+EARLY_STOPPING_PATIENCE="${EARLY_STOPPING_PATIENCE:-5}"
+EARLY_STOPPING_MIN_DELTA="${EARLY_STOPPING_MIN_DELTA:-0.0}"
 
 export CUDA_VISIBLE_DEVICES=$CUDA_DEVICES
 
@@ -88,6 +96,14 @@ python3 -m training.verl.main_grpo \
   "trainer.logger=[console]" \
   \
   tool.max_turns=$MAX_TURNS \
+  +debug_rollout_dir=$DEBUG_ROLLOUT_DIR \
+  reward_debug_num_examine=$REWARD_DEBUG_NUM_EXAMINE \
+  val_reward_debug_num_examine=$VAL_REWARD_DEBUG_NUM_EXAMINE \
+  ++trainer.early_stopping.enabled=$EARLY_STOPPING_ENABLED \
+  ++trainer.early_stopping.metric=$EARLY_STOPPING_METRIC \
+  ++trainer.early_stopping.mode=$EARLY_STOPPING_MODE \
+  ++trainer.early_stopping.patience=$EARLY_STOPPING_PATIENCE \
+  ++trainer.early_stopping.min_delta=$EARLY_STOPPING_MIN_DELTA \
   +scenario_dir=[$SCENARIO_FILES] \
   +scenario_source_filter=$SCENARIO_SOURCE_FILTER \
   +cost_model_path=$COST_MODEL_PATH \
