@@ -56,6 +56,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
         self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', lora_content)
+        self.assertIn('COST_MODEL_PATH="${COST_MODEL_PATH:-./cost_model/checkpoints/v9_lgbm}"', lora_content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', lora_content)
         self.assertIn('MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"', lora_content)
         self.assertIn('GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"', lora_content)
@@ -66,6 +67,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("++actor_rollout_ref.model.lora_rank=$LORA_RANK", lora_content)
         self.assertIn("++actor_rollout_ref.model.lora_alpha=$LORA_ALPHA", lora_content)
         self.assertIn("++actor_rollout_ref.model.target_modules=$TARGET_MODULES", lora_content)
+        self.assertIn('echo "Cost Model:  $COST_MODEL_PATH"', lora_content)
         self.assertIn("actor_rollout_ref.rollout.n=$N_REPEAT", lora_content)
         self.assertIn("+scenario_dir=[$SCENARIO_FILES]", lora_content)
         self.assertIn("+scenario_source_filter=$SCENARIO_SOURCE_FILTER", lora_content)
@@ -73,6 +75,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
 
         full_content = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
         self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', full_content)
+        self.assertIn('COST_MODEL_PATH="${COST_MODEL_PATH:-./cost_model/checkpoints/v9_lgbm}"', full_content)
         self.assertIn('ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"', full_content)
         self.assertIn('MAX_PROMPT_LENGTH="${MAX_PROMPT_LENGTH:-4096}"', full_content)
         self.assertIn('GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.7}"', full_content)
@@ -82,6 +85,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertNotIn("actor_rollout_ref.model.torch_dtype", full_content)
         self.assertIn("actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$REF_LOG_PROB_MICRO_BATCH_SIZE", full_content)
         self.assertIn("actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=$ROLLOUT_LOG_PROB_MICRO_BATCH_SIZE", full_content)
+        self.assertIn('echo "Cost Model:  $COST_MODEL_PATH"', full_content)
         self.assertIn("actor_rollout_ref.rollout.n=$N_REPEAT", full_content)
         self.assertIn("+scenario_dir=[$SCENARIO_FILES]", full_content)
         self.assertIn("+scenario_source_filter=$SCENARIO_SOURCE_FILTER", full_content)
