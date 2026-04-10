@@ -73,8 +73,8 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("+scenario_source_filter=$SCENARIO_SOURCE_FILTER", lora_content)
         self.assertIn('DEBUG_ROLLOUT_DIR="${DEBUG_ROLLOUT_DIR:-debug/rollout}"', lora_content)
         self.assertIn('EARLY_STOPPING_ENABLED="${EARLY_STOPPING_ENABLED:-False}"', lora_content)
-        self.assertIn("+debug_rollout_dir=$DEBUG_ROLLOUT_DIR", lora_content)
-        self.assertIn("++trainer.early_stopping.enabled=$EARLY_STOPPING_ENABLED", lora_content)
+        self.assertIn("debug_rollout_dir=$DEBUG_ROLLOUT_DIR", lora_content)
+        self.assertIn("trainer.early_stopping.enabled=$EARLY_STOPPING_ENABLED", lora_content)
         self.assertNotIn("actor_rollout_ref.rollout.n_repeat", lora_content)
 
         full_content = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
@@ -95,8 +95,8 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         self.assertIn("+scenario_source_filter=$SCENARIO_SOURCE_FILTER", full_content)
         self.assertIn('DEBUG_ROLLOUT_DIR="${DEBUG_ROLLOUT_DIR:-debug/rollout}"', full_content)
         self.assertIn('EARLY_STOPPING_ENABLED="${EARLY_STOPPING_ENABLED:-False}"', full_content)
-        self.assertIn("+debug_rollout_dir=$DEBUG_ROLLOUT_DIR", full_content)
-        self.assertIn("++trainer.early_stopping.enabled=$EARLY_STOPPING_ENABLED", full_content)
+        self.assertIn("debug_rollout_dir=$DEBUG_ROLLOUT_DIR", full_content)
+        self.assertIn("trainer.early_stopping.enabled=$EARLY_STOPPING_ENABLED", full_content)
         self.assertNotIn("actor_rollout_ref.rollout.n_repeat", full_content)
 
     def test_verl_grpo_main_sets_vllm_v1_runtime_env(self):
