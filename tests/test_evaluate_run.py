@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from evaluate import run as evaluate_run
 
@@ -65,6 +66,45 @@ class EvaluateRunTest(unittest.TestCase):
         self.assertNotIn("avg_imp_vs_optimal_pct", summary)
         self.assertNotIn("avg_gap_closed_pct", summary)
         self.assertEqual(summary["total_episodes"], 1)
+
+    def test_compute_eval_metrics_logs_progress(self):
+        trajectories = [
+            {
+                "env_sample_idx": 0,
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": (
+                            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\":\\"8GB\\"}"}}'
+                            "</tool_call>"
+                        ),
+                    }
+                ],
+            }
+            for _ in range(3)
+        ]
+        scenarios = [
+            {
+                "name": "s0",
+                "hardware": {"cpu_count": 8},
+                "workload": {"type": "oltp"},
+                "knobs": {"shared_buffers": "4GB"},
+            }
+        ]
+
+        with patch.object(evaluate_run.logger, "info") as mock_info:
+            evaluate_run.compute_eval_metrics(
+                trajectories,
+                scenarios,
+                DummyCostModel(),
+                DummyKnobSpace(),
+                n_bo_trials=200,
+                skip_bo=True,
+                progress_interval=2,
+            )
+
+        joined = "\n".join(str(call.args[0]) for call in mock_info.call_args_list if call.args)
+        self.assertIn("评估进度", joined)
 
 
 if __name__ == "__main__":

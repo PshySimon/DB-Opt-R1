@@ -79,7 +79,7 @@ def bo_search_optimal(cost_model, hw_info: dict, workload: str,
 
 
 def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
-                         n_bo_trials=200, skip_bo=False) -> dict:
+                         n_bo_trials=200, skip_bo=False, progress_interval=50) -> dict:
     """三 baseline 体系评估。"""
     if not trajectories:
         return {"error": "无轨迹数据"}
@@ -92,7 +92,9 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
 
     per_episode = []
 
-    for t in trajectories:
+    total_trajectories = len(trajectories)
+
+    for idx, t in enumerate(trajectories, start=1):
         env_idx = t.get("env_sample_idx")
         if env_idx is None or env_idx >= len(scenarios):
             continue
@@ -183,6 +185,9 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
             row["imp_vs_optimal_pct"] = round(imp_vs_optimal, 2)
             row["gap_closed_pct"] = round(gap_closed, 2)
         per_episode.append(row)
+
+        if progress_interval and (idx % progress_interval == 0 or idx == total_trajectories):
+            logger.info("评估进度: %d/%d", idx, total_trajectories)
 
     # 聚合
     n = len(per_episode)
