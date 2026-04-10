@@ -13,7 +13,6 @@ import ray
 import hydra
 import torch
 import re
-import json
 import os
 
 from verl import DataProto
@@ -68,21 +67,32 @@ class DBRewardManager:
 
         output_dir = os.path.join(self.debug_rollout_dir, self.experiment_name)
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"{self.rollout_split}.jsonl")
-        row = {
-            "split": self.rollout_split,
-            "data_source": data_source,
-            "ground_truth": ground_truth,
-            "extracted_knobs": extracted_knobs,
-            "answer_score": answer_score,
-            "format_score": format_score,
-            "score": score,
-            "tool_calls": tool_calls,
-            "response_only": response_str,
-            "prompt_response": sequences_str,
-        }
+        output_path = os.path.join(output_dir, f"{self.rollout_split}.log")
+
+        scenario_idx = None
+        if isinstance(ground_truth, dict):
+            scenario_idx = ground_truth.get("scenario_idx")
+        scenario_label = "unknown" if scenario_idx is None else scenario_idx
+        block = (
+            "=" * 80 + "\n"
+            f"split: {self.rollout_split}\n"
+            f"experiment: {self.experiment_name}\n"
+            f"scenario_idx: {scenario_label}\n"
+            f"data_source: {data_source}\n"
+            f"answer_score: {answer_score:.6f}\n"
+            f"format_score: {format_score:.6f}\n"
+            f"final_score: {score:.6f}\n"
+            f"extracted_knobs: {extracted_knobs}\n\n"
+            "ground_truth:\n"
+            f"{ground_truth}\n\n"
+            "raw_trajectory:\n"
+            f"{sequences_str}\n"
+            + "=" * 80
+            + "\n"
+        )
+
         with open(output_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.write(block)
 
     def __call__(self, data: DataProto):
         if 'rm_scores' in data.batch.keys():

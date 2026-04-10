@@ -4,7 +4,6 @@ import unittest
 from unittest import mock
 import importlib.util
 import io
-import json
 import tempfile
 from contextlib import redirect_stdout
 
@@ -144,7 +143,7 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
         self.assertIn("[response_only]", output)
         self.assertIn("[tool_calls]", output)
 
-    def test_db_reward_manager_writes_debug_rollout_jsonl(self):
+    def test_db_reward_manager_writes_header_and_raw_trajectory_log(self):
         solution = (
             "<|im_start|>assistant\n"
             "<think>set knob</think>\n"
@@ -189,13 +188,16 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
                 experiment_name="exp-a",
             )(batch)
 
-            with open(f"{tmpdir}/exp-a/train.jsonl", "r", encoding="utf-8") as f:
-                rows = [json.loads(line) for line in f if line.strip()]
+            with open(f"{tmpdir}/exp-a/train.log", "r", encoding="utf-8") as f:
+                content = f.read()
 
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["split"], "train")
-        self.assertIn("shared_buffers", rows[0]["extracted_knobs"])
-        self.assertGreater(rows[0]["answer_score"], 0.0)
+        self.assertIn("split: train", content)
+        self.assertIn("answer_score:", content)
+        self.assertIn("format_score:", content)
+        self.assertIn("final_score:", content)
+        self.assertIn("extracted_knobs:", content)
+        self.assertIn("raw_trajectory:", content)
+        self.assertIn(solution, content)
 
     def test_verify_grpo_reward_path_module_finds_positive_candidate(self):
         spec = importlib.util.spec_from_file_location(
