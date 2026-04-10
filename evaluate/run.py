@@ -79,7 +79,7 @@ def bo_search_optimal(cost_model, hw_info: dict, workload: str,
 
 
 def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
-                         n_bo_trials=200) -> dict:
+                         n_bo_trials=200, skip_bo=False) -> dict:
     """三 baseline 体系评估。"""
     if not trajectories:
         return {"error": "无轨迹数据"}
@@ -118,14 +118,16 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
         except Exception:
             default_tps = 0.0
 
-        # BO 最优 TPS（按 hw+wl 缓存）
-        cache_key = json.dumps(hw, sort_keys=True) + "|" + wl_type
-        if cache_key not in bo_cache:
-            bo_cache[cache_key] = bo_search_optimal(
-                cost_model, hw, wl_type, knob_space, n_bo_trials)
-            logger.info(f"  BO ({len(bo_cache)}): wl={wl_type}, "
-                        f"optimal={bo_cache[cache_key]:.1f}")
-        optimal_tps = bo_cache[cache_key]
+        optimal_tps = None
+        if not skip_bo:
+            # BO 最优 TPS（按 hw+wl 缓存）
+            cache_key = json.dumps(hw, sort_keys=True) + "|" + wl_type
+            if cache_key not in bo_cache:
+                bo_cache[cache_key] = bo_search_optimal(
+                    cost_model, hw, wl_type, knob_space, n_bo_trials)
+                logger.info(f"  BO ({len(bo_cache)}): wl={wl_type}, "
+                            f"optimal={bo_cache[cache_key]:.1f}")
+            optimal_tps = bo_cache[cache_key]
 
         # 模型预测 TPS（以场景原始 knobs 为基底，叠加模型的修改）
         model_changes = extract_model_knobs(t)
@@ -148,14 +150,15 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
                           if default_tps > 0 else 0)
         imp_vs_default = min(IMPROVEMENT_CAP, max(0, raw_vs_default))
 
-        raw_vs_optimal = ((model_tps - optimal_tps) / optimal_tps * 100
-                          if optimal_tps > 0 else 0)
-        imp_vs_optimal = min(IMPROVEMENT_CAP, max(0, raw_vs_optimal))
+        if optimal_tps is not None:
+            raw_vs_optimal = ((model_tps - optimal_tps) / optimal_tps * 100
+                              if optimal_tps > 0 else 0)
+            imp_vs_optimal = min(IMPROVEMENT_CAP, max(0, raw_vs_optimal))
 
-        gap = optimal_tps - default_tps
-        gap_closed = ((model_tps - default_tps) / gap * 100
-                      if gap > 0 else 0)
-        gap_closed = min(IMPROVEMENT_CAP, max(0, gap_closed))
+            gap = optimal_tps - default_tps
+            gap_closed = ((model_tps - default_tps) / gap * 100
+                          if gap > 0 else 0)
+            gap_closed = min(IMPROVEMENT_CAP, max(0, gap_closed))
 
         # 行为
         msgs = t.get("messages", [])
@@ -163,21 +166,23 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
         called_predict = any("predict_performance" in m.get("content", "")
                              for m in msgs)
 
-        per_episode.append({
+        row = {
             "env_sample_idx": env_idx,
             "name": s.get("name", f"env_{env_idx}"),
             "model_tps": round(model_tps, 1),
             "scenario_tps": round(scenario_tps, 1),
             "default_tps": round(default_tps, 1),
-            "optimal_tps": round(optimal_tps, 1),
             "imp_vs_scenario_pct": round(imp_vs_scenario, 2),
             "imp_vs_default_pct": round(imp_vs_default, 2),
-            "imp_vs_optimal_pct": round(imp_vs_optimal, 2),
-            "gap_closed_pct": round(gap_closed, 2),
             "steps": n_steps,
             "num_knobs_set": len(model_changes),
             "called_predict": called_predict,
-        })
+        }
+        if optimal_tps is not None:
+            row["optimal_tps"] = round(optimal_tps, 1)
+            row["imp_vs_optimal_pct"] = round(imp_vs_optimal, 2)
+            row["gap_closed_pct"] = round(gap_closed, 2)
+        per_episode.append(row)
 
     # 聚合
     n = len(per_episode)
@@ -186,9 +191,6 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
 
     imp_s = [e["imp_vs_scenario_pct"] for e in per_episode]
     imp_d = [e["imp_vs_default_pct"] for e in per_episode]
-    imp_o = [e["imp_vs_optimal_pct"] for e in per_episode]
-    gc = [e["gap_closed_pct"] for e in per_episode]
-
     summary = {
         "total_episodes": n,
         # vs 场景原始配置
@@ -199,17 +201,19 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
         "avg_imp_vs_default_pct": round(np.mean(imp_d), 2),
         "median_imp_vs_default_pct": round(np.median(imp_d), 2),
         "improved_vs_default_rate": round(sum(1 for v in imp_d if v > 0) / n, 4),
-        # vs BO 最优配置
-        "avg_imp_vs_optimal_pct": round(np.mean(imp_o), 2),
-        "median_imp_vs_optimal_pct": round(np.median(imp_o), 2),
-        # gap closing
-        "avg_gap_closed_pct": round(np.mean(gc), 2),
-        "median_gap_closed_pct": round(np.median(gc), 2),
         # 行为
         "avg_steps": round(np.mean([e["steps"] for e in per_episode]), 1),
         "predict_call_rate": round(
             sum(e["called_predict"] for e in per_episode) / n, 4),
     }
+
+    if not skip_bo:
+        imp_o = [e["imp_vs_optimal_pct"] for e in per_episode]
+        gc = [e["gap_closed_pct"] for e in per_episode]
+        summary["avg_imp_vs_optimal_pct"] = round(np.mean(imp_o), 2)
+        summary["median_imp_vs_optimal_pct"] = round(np.median(imp_o), 2)
+        summary["avg_gap_closed_pct"] = round(np.mean(gc), 2)
+        summary["median_gap_closed_pct"] = round(np.median(gc), 2)
 
     return {"summary": summary, "per_episode": per_episode}
 
@@ -230,14 +234,15 @@ def print_summary(metrics: dict):
     print(f"  平均提升:              {s.get('avg_imp_vs_default_pct', 0):.2f}%")
     print(f"  中位数提升:            {s.get('median_imp_vs_default_pct', 0):.2f}%")
     print(f"  提升 > 0% 比例:        {s.get('improved_vs_default_rate', 0)*100:.1f}%")
-    print()
-    print("  ── vs BO 最优配置（Cost Model 预测）──")
-    print(f"  平均差距:              {s.get('avg_imp_vs_optimal_pct', 0):.2f}%")
-    print(f"  中位数差距:            {s.get('median_imp_vs_optimal_pct', 0):.2f}%")
-    print()
-    print("  ── Gap Closing（核心）──")
-    print(f"  平均 gap closed:       {s.get('avg_gap_closed_pct', 0):.2f}%")
-    print(f"  中位数 gap closed:     {s.get('median_gap_closed_pct', 0):.2f}%")
+    if "avg_imp_vs_optimal_pct" in s:
+        print()
+        print("  ── vs BO 最优配置（Cost Model 预测）──")
+        print(f"  平均差距:              {s.get('avg_imp_vs_optimal_pct', 0):.2f}%")
+        print(f"  中位数差距:            {s.get('median_imp_vs_optimal_pct', 0):.2f}%")
+        print()
+        print("  ── Gap Closing（核心）──")
+        print(f"  平均 gap closed:       {s.get('avg_gap_closed_pct', 0):.2f}%")
+        print(f"  中位数 gap closed:     {s.get('median_gap_closed_pct', 0):.2f}%")
     print()
     print("  ── 行为指标 ──")
     print(f"  平均步数:              {s.get('avg_steps', 0):.1f}")
@@ -258,6 +263,8 @@ def main():
                         help="报表输出目录")
     parser.add_argument("--bo-trials", type=int, default=200,
                         help="BO 搜索试验次数")
+    parser.add_argument("--skip-bo", action="store_true",
+                        help="跳过 BO baseline 和 gap closed 计算")
     args = parser.parse_args()
 
     logger.info(f"读取轨迹: {args.eval_data}")
@@ -275,7 +282,7 @@ def main():
     knob_space = KnobSpace(args.knob_space)
 
     metrics = compute_eval_metrics(
-        trajectories, scenarios, cost_model, knob_space, args.bo_trials)
+        trajectories, scenarios, cost_model, knob_space, args.bo_trials, args.skip_bo)
     print_summary(metrics)
 
     output_dir = args.output or os.path.dirname(os.path.abspath(args.eval_data))
