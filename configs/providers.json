@@ -1,68 +1,14 @@
 [
   {
-    "api_base": "http://107.173.38.30:8317/v1",
-    "api_key": "sk-ant-api03-P9kL2mR5zXqW8vT4uY7nJ1aB6dF0sH3gK5jM9pL2oN4iU6yT8rE1wQ4qA7sD0fG2hJ5kL8mN1bV3cR",
-    "model": "gpt-5",
+    "api_base": "https://ch.at/v1",
+    "api_key": "",
+    "model": "gpt-4o",
     "available": false
   },
   {
-    "api_base": "https://sub.662027.xyz/v1",
-    "api_key": "sk-2fe0ca8b5888f6a2f93e549468eed54661e6b62dc410ef512ce3a30513806838",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://code.fovts.com/v1",
-    "api_key": "sk-ce7c851830b1cecff4e68f9694f758d2632a9797d3f771b1e7cabec5f7dfe47c",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://sub.hdd.sb/v1",
-    "api_key": "sk-f0551b1a8f4b80390816abfcec8792bbb1906c816470ea0955278c9b8792d1f3",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://api.fakerclaw.online/v1",
-    "api_key": "sk-dvoHrkSIyRsXbXl11Ottq68QGwTxh4yaAf0fETNAQPYTBusz",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://api.qquu.ccwu.cc/v1",
-    "api_key": "sk-b20864b79e2204551758d4ff5820ae2d9eed560cadb477523d4fe93d6e9b79a0",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://api.heabl.top/v1",
-    "api_key": "sk-0uguQRhSztLzct9t1az2NyVBGnceDrfP9h2yG749g64WzzFa",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://sub.devbin.de/v1",
-    "api_key": "sk-9fd1b5f10bafd827911e18812a0be40f63ebfb3003130ca25e435195de18cbc1",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://api.jucode.cn/v1",
-    "api_key": "sk-zfLf1fKKdm5SgrhX0UO8ScslGj8drga9mSbAthowJgpch1zm",
-    "model": "gpt-5",
-    "available": true
-  },
-  {
-    "api_base": "https://www.codexapis.com/v1",
-    "api_key": "sk-e96MKgFQjOkUgqLwsjSMApaHfY0qLknPO9WOjDFhyUGvirg8",
-    "model": "gpt-5",
+    "api_base": "https://ai.inproute.com/v1",
+    "api_key": "null",
+    "model": "qwen3.5-plus",
     "available": false
-  },
-  {
-    "api_base": "https://code.strova.top/v1",
-    "api_key": "sk-0IhAsgXYyBUuJk263phEv7A4neZEuKfvxveY3INEEWwdD4uZ",
-    "model": "gpt-5.4",
-    "available": true
   }
 ]

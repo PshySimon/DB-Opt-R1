@@ -8,10 +8,10 @@ hardware:
     total_memory_gb: 16
     disk_type: HDD
 
-  - name: 8c16g_ssd
-    cpu_count: 8
+  - name: 16c16g_hdd
+    cpu_count: 16
     total_memory_gb: 16
-    disk_type: SSD
+    disk_type: HDD
 
   - name: 4c8g_ssd
     cpu_count: 4
