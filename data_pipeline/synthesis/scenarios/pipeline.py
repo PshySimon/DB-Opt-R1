@@ -1125,7 +1125,7 @@ if __name__ == "__main__":
     col.add_argument("--port", type=int, default=5432)
     col.add_argument("--user", default="postgres")
     col.add_argument("--password", default="")
-    col.add_argument("--database", default="postgres")
+    col.add_argument("--database", default="benchmark")
     col.add_argument("--pg-data-dir", default=None)
     col.add_argument("--start", type=int, default=None, help="起始编号（1-indexed，含）")
     col.add_argument("--end", type=int, default=None, help="结束编号（1-indexed，含）")
