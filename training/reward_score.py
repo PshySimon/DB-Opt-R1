@@ -1,11 +1,12 @@
 """
 DB 调优 Reward 计算
 
-总分 = format_score + answer_score
-- format_score（0 ~ 1.5）：检查对话格式正确性
-- answer_score（-1.0 ~ ~1.1）：通过 Cost Model 评估 knob 配置的 TPS 改善
+总分 = 0.5 * format_score + 0.5 * answer_score + termination_adj
+- format_score（0 ~ 1.5）：检查对话格式正确性 → 加权后 [0, 0.75]
+- answer_score（-2.5 ~ 10.0）：通过 Cost Model 评估 knob 配置的 TPS 改善 → 加权后 [-1.25, 5.0]
+- answer 信号主导 GRPO 组内方差（~87%），format 保底防退化（~13%）
 
-参考 Agent-R1 的 reward_score/compiler_autotuning.py 设计。
+参考 Compiler-R1 的 reward 设计。
 """
 
 import re
@@ -15,6 +16,14 @@ import logging
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
+
+
+TERMINATION_REASON_ADJUSTMENTS = {
+    "repeated_tool_call": -0.1,
+    "invalid_tool_call": -0.1,
+    "tool_execution_error": -0.1,
+    "max_turns_reached": -0.05,
+}
 
 
 # ============================================================
@@ -222,9 +231,9 @@ def compute_score_answer(
         cost_model: CostModel 实例（predict 接口）
 
     Returns:
-        float: -1.0 ~ ~1.1
-        - 正值：TPS 有改善（log 压缩）
-        - 负值：TPS 劣化（clip 到 -1）
+        float: -2.5 ~ 10.0
+        - 正值：TPS 有改善（线性放大 ×5）
+        - 负值：TPS 劣化（clip 到 -0.5 后 ×5 = -2.5）
         - 0：无法提取 knob 或无 cost_model
     """
     if cost_model is None:
@@ -249,12 +258,12 @@ def compute_score_answer(
 
         predicted_tps = cost_model.predict(knobs, hardware)
 
-        # 计算改善比例，cap 到 [0, 2.0]（200%）
+        # 计算改善比例，允许负值以惩罚劣化
         improvement = (predicted_tps - baseline_tps) / baseline_tps
-        improvement = min(2.0, max(0.0, improvement))
+        improvement = min(2.0, max(-0.5, improvement))
 
-        # log 压缩，避免大改善爆炸
-        score = math.log(1 + improvement)
+        # 线性放大，让 answer 信号主导 GRPO 组内方差
+        score = improvement * 5
 
         return score
 
@@ -263,17 +272,27 @@ def compute_score_answer(
         return 0.0
 
 
+def compute_termination_adjustment(termination_reason: Optional[str]) -> float:
+    if termination_reason is None:
+        return 0.0
+    return TERMINATION_REASON_ADJUSTMENTS.get(str(termination_reason), 0.0)
+
+
 def compute_score_format_answer(
     solution_str: str,
     ground_truth: dict,
     cost_model=None,
+    termination_reason: Optional[str] = None,
 ) -> float:
     """
-    总分 = format_score + answer_score
+    总分 = 0.5 * format_score + 0.5 * answer_score + termination_adj
+
+    format 占比 ~13%（[0, 0.75]），answer 占比 ~87%（[-2.5, 5.0]）。
+    参考 Compiler-R1 的加权设计，确保 answer 信号主导 GRPO 组内方差。
 
     Returns:
-        float: ~(-1.0) ~ ~2.6
+        float: ~(-2.6) ~ ~5.75
     """
     format_score = compute_score_format(solution_str)
     answer_score = compute_score_answer(solution_str, ground_truth, cost_model)
-    return format_score + answer_score
+    return 0.5 * format_score + 0.5 * answer_score + compute_termination_adjustment(termination_reason)

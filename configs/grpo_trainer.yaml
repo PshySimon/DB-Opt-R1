@@ -333,7 +333,7 @@ actor_rollout_ref:
     # for hf rollout
     do_sample: True
     # number of responses (i.e. num sample times)
-    n: 1
+    n: 5  # GRPO 需要 n>=2 才能计算组内相对优势，与训练脚本 N_REPEAT 一致
     val_kwargs:
       _target_: verl.workers.config.SamplingConfig
       # sampling parameters for validation

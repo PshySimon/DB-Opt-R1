@@ -1299,14 +1299,14 @@ class RayAgentTrainer(object):
                 end_token_pos = start_token_pos + len(state_tokens)
                 
                 loss_mask[i, start_token_pos:end_token_pos] = 0
-        
-            loss_mask = loss_mask * response_mask
-            batch.batch['loss_mask'] = loss_mask
-            
-            metrics.update({
-                'state_tokens/total': loss_mask.sum().item(),
-                'state_tokens/mean': loss_mask.sum().item() / len(responses),
-                'state_tokens/coverage': (loss_mask.sum() / response_mask.sum()).item(),
-            })
+
+        loss_mask = loss_mask * response_mask
+        batch.batch['loss_mask'] = loss_mask
+
+        metrics.update({
+            'state_tokens/total': loss_mask.sum().item(),
+            'state_tokens/mean': loss_mask.sum().item() / len(responses),
+            'state_tokens/coverage': (loss_mask.sum() / response_mask.sum()).item(),
+        })
         
         return batch, metrics

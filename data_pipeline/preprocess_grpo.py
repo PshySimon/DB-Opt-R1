@@ -1,133 +1,175 @@
 """
-GRPO 数据预处理：将场景数据转换为 verl 所需的 Parquet 格式
+GRPO 数据预处理：从 SFT 轨迹构造 verl 所需的 prompt parquet。
 
-GRPO 只需要 prompt（不需要 answer），模型自己 rollout 生成回复。
+核心原则：
+1. prompt 直接复用 SFT 轨迹中的 system prompt + question
+2. env_sample_idx 必须按和 sampler 一致的场景加载顺序解释
+3. 场景加载复用 DBToolEnv._load_scenarios，再应用同样的过滤参数
 
-输入：data_pipeline/data/scenarios/collected.json
 输出：datasets/grpo/train.parquet + datasets/grpo/validation.parquet
-
-Usage:
-    cd project/db-opt-r1
-    python3 -m datasets.preprocess_grpo \
-        --input data_pipeline/data/scenarios/collected.json \
-        --output_dir datasets/grpo/ \
-        --val_ratio 0.1
 """
 
-import json
+from __future__ import annotations
+
 import argparse
+from collections import defaultdict
+import glob
+import json
 import logging
+import random
 from pathlib import Path
+from typing import Iterable
 
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
+
+from core.db.scenario_filter import add_filter_args, filter_scenarios
+from environment.tools import DBToolEnv
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# System prompt（与 SFT 保持一致）
-SYSTEM_PROMPT = """你是一个专业的数据库性能调优助手。你的任务是通过调整 PostgreSQL 配置参数（knobs）来优化数据库性能。
 
-你可以使用以下工具来获取信息和执行操作：
-- get_system_info: 获取系统硬件信息
-- get_knob_info: 查询某个 knob 的详细信息
-- set_knob: 设置 knob 值
-- get_db_status: 获取数据库运行状态
-- run_benchmark: 运行性能测试
-- analyze_workload: 分析工作负载特征
-- get_wait_events: 获取等待事件
-- get_slow_queries: 获取慢查询
-- get_current_config: 获取当前配置
+def load_sft_records(input_files: list[str]) -> list[dict]:
+    records: list[dict] = []
+    resolved: list[str] = []
+    for pattern in input_files:
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            resolved.extend(matches)
+        elif Path(pattern).exists():
+            resolved.append(pattern)
 
-在每一步操作前，请先用 <think> 标签思考你的调优策略。"""
+    if not resolved:
+        raise FileNotFoundError(f"未找到输入文件: {input_files}")
 
+    for path in resolved:
+        logger.info("加载轨迹文件: %s", path)
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                records.append(json.loads(line))
 
-def build_user_message(scenario: dict) -> str:
-    """根据场景数据构建 user prompt"""
-    hardware = scenario.get("hardware", {})
-    workload = scenario.get("workload", {})
-    description = scenario.get("description", "")
-
-    parts = ["请优化这个数据库的性能。\n"]
-
-    if description:
-        parts.append(f"**场景描述**：{description}\n")
-
-    if hardware:
-        hw_info = []
-        if hardware.get("cpu_count"):
-            hw_info.append(f"CPU: {hardware['cpu_count']} 核")
-        if hardware.get("total_memory_gb"):
-            hw_info.append(f"内存: {hardware['total_memory_gb']} GB")
-        if hardware.get("disk_type"):
-            hw_info.append(f"磁盘: {hardware['disk_type']}")
-        if hw_info:
-            parts.append(f"**硬件环境**：{', '.join(hw_info)}\n")
-
-    if workload:
-        wl_info = []
-        if workload.get("type"):
-            wl_info.append(f"类型: {workload['type']}")
-        if workload.get("tps_current"):
-            wl_info.append(f"当前 TPS: {workload['tps_current']:.1f}")
-        if workload.get("latency_avg_ms"):
-            wl_info.append(f"平均延迟: {workload['latency_avg_ms']:.1f} ms")
-        if wl_info:
-            parts.append(f"**工作负载**：{', '.join(wl_info)}\n")
-
-    parts.append("请分析当前状况并给出调优建议。")
-
-    return "\n".join(parts)
-
-
-def process_scenarios(scenarios: list) -> list:
-    """将场景列表转换为 GRPO 训练数据"""
-    records = []
-
-    for idx, scenario in enumerate(scenarios):
-        user_msg = build_user_message(scenario)
-
-        prompt = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-        ]
-
-        # ground_truth 用于 reward 计算
-        ground_truth = {
-            "scenario_idx": idx,
-            "hardware": scenario.get("hardware", {}),
-        }
-
-        record = {
-            "prompt": prompt,
-            "reward_model": {
-                "style": "rule",
-                "ground_truth": ground_truth,
-            },
-            "data_source": "db_tuning",
-        }
-        records.append(record)
-
+    logger.info("共加载 %d 条轨迹", len(records))
     return records
 
 
-def main():
-    parser = argparse.ArgumentParser(description="GRPO 数据预处理")
+def load_aligned_scenarios(
+    scenarios: list[str],
+    source_filter: str | None = None,
+    tps_min: float | None = None,
+    tps_max: float | None = None,
+) -> list:
+    loaded = DBToolEnv._load_scenarios(scenarios)
+    logger.info("按 DBToolEnv 顺序加载 %d 个场景", len(loaded))
+    filtered = filter_scenarios(
+        loaded,
+        source_filter=source_filter,
+        tps_min=tps_min,
+        tps_max=tps_max,
+    )
+    logger.info("过滤后保留 %d 个场景", len(filtered))
+    return filtered
+
+
+def _first_user_content(messages: Iterable[dict]) -> str:
+    for message in messages:
+        if message.get("role") == "user":
+            return str(message.get("content", "")).strip()
+    return ""
+
+
+def build_grpo_records(records: list[dict], scenarios: list) -> list[dict]:
+    grpo_records: list[dict] = []
+
+    for item in records:
+        env_idx = item.get("env_sample_idx")
+        messages = item.get("messages", [])
+        question = str(item.get("question", "") or _first_user_content(messages)).strip()
+
+        if env_idx is None or not isinstance(env_idx, int):
+            continue
+        if env_idx < 0 or env_idx >= len(scenarios):
+            continue
+        if not messages or messages[0].get("role") != "system":
+            continue
+        if not question:
+            continue
+
+        scenario = scenarios[env_idx]
+        system_prompt = str(messages[0].get("content", "")).strip()
+
+        grpo_records.append(
+            {
+                "prompt": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": question},
+                ],
+                "reward_model": {
+                    "style": "rule",
+                    "ground_truth": {
+                        "scenario_idx": env_idx,
+                        "hardware": dict(getattr(scenario, "hardware", {}) or {}),
+                    },
+                },
+                "data_source": "db_tuning",
+            }
+        )
+
+    return grpo_records
+
+
+def sample_records_per_scene(
+    records: list[dict],
+    questions_per_scene: int,
+    seed: int,
+) -> list[dict]:
+    if questions_per_scene <= 0:
+        raise ValueError("questions_per_scene 必须 >= 1")
+
+    grouped: dict[int, list[dict]] = defaultdict(list)
+    for record in records:
+        scenario_idx = record["reward_model"]["ground_truth"]["scenario_idx"]
+        grouped[scenario_idx].append(record)
+
+    rng = random.Random(seed)
+    sampled: list[dict] = []
+    for scenario_idx in sorted(grouped):
+        candidates = list(grouped[scenario_idx])
+        rng.shuffle(candidates)
+        sampled.extend(candidates[:questions_per_scene])
+    return sampled
+
+
+def split_records(records: list[dict], val_ratio: float, seed: int) -> tuple[list[dict], list[dict]]:
+    shuffled = list(records)
+    random.Random(seed).shuffle(shuffled)
+    n_val = max(1, int(len(shuffled) * val_ratio))
+    return shuffled[n_val:], shuffled[:n_val]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="从 SFT 轨迹构造 GRPO parquet")
     parser.add_argument(
-        "--input",
-        type=str,
+        "--input-files",
+        nargs="+",
         required=True,
-        help="场景数据 JSON 文件路径",
+        help="SFT 轨迹 JSONL 文件（支持多个和 glob）",
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="datasets/grpo/",
+        "--scenarios",
+        nargs="+",
+        required=True,
+        help="生成这些 SFT 轨迹时使用的场景输入，需与 sampler 保持一致",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="datasets/grpo",
         help="输出目录",
     )
     parser.add_argument(
-        "--val_ratio",
+        "--val-ratio",
         type=float,
         default=0.1,
         help="验证集比例",
@@ -138,37 +180,42 @@ def main():
         default=42,
         help="随机种子",
     )
+    parser.add_argument(
+        "--questions-per-scene",
+        type=int,
+        default=1,
+        help="每个场景最多保留多少条 question，默认 1",
+    )
+    add_filter_args(parser)
     args = parser.parse_args()
 
-    # 加载场景数据
-    with open(args.input, "r", encoding="utf-8") as f:
-        scenarios = json.load(f)
+    records = load_sft_records(args.input_files)
+    scenarios = load_aligned_scenarios(
+        args.scenarios,
+        source_filter=args.source_filter,
+        tps_min=args.tps_min,
+        tps_max=args.tps_max,
+    )
+    grpo_records = build_grpo_records(records, scenarios)
+    grpo_records = sample_records_per_scene(
+        grpo_records,
+        questions_per_scene=args.questions_per_scene,
+        seed=args.seed,
+    )
 
-    logger.info(f"加载了 {len(scenarios)} 个场景")
+    logger.info("转换得到 %d 条 GRPO prompt", len(grpo_records))
+    if not grpo_records:
+        raise RuntimeError("没有生成任何 GRPO 记录，请检查输入轨迹和场景是否对齐")
 
-    # 转换为训练数据
-    records = process_scenarios(scenarios)
+    train_records, val_records = split_records(grpo_records, args.val_ratio, args.seed)
 
-    # 划分训练/验证集
-    import random
-    random.seed(args.seed)
-    random.shuffle(records)
-
-    n_val = max(1, int(len(records) * args.val_ratio))
-    val_records = records[:n_val]
-    train_records = records[n_val:]
-
-    logger.info(f"训练集: {len(train_records)} 条, 验证集: {len(val_records)} 条")
-
-    # 保存为 Parquet
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for split, data in [("train", train_records), ("validation", val_records)]:
-        df = pd.DataFrame(data)
-        output_path = output_dir / f"{split}.parquet"
-        df.to_parquet(output_path, index=False)
-        logger.info(f"已保存: {output_path} ({len(data)} 条)")
+    for split_name, split_records_ in (("train", train_records), ("validation", val_records)):
+        output_path = output_dir / f"{split_name}.parquet"
+        pd.DataFrame(split_records_).to_parquet(output_path, index=False)
+        logger.info("已保存 %s: %s 条", output_path, len(split_records_))
 
 
 if __name__ == "__main__":

@@ -65,32 +65,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 
 # ─────────────────────────────────── system prompt ───────────────────────────
-SYSTEM_PROMPT = """你是 PostgreSQL 数据库调优专家。你的目标是通过调整数据库配置参数来最大化性能（TPS）。
-
-## 输出格式
-
-每次回复必须严格遵循以下格式：先用 <think>...</think> 分析推理，再用 <tool_call>...</tool_call> 调用一个工具。
-
-重要规则：
-1. 每次只能调用一个工具
-2. 必须先 <think> 分析，再 <tool_call> 调用
-3. <think> 中要解释你观察到了什么、为什么这样做
-
-## 工作流程
-
-1. 先观察硬件环境（get_hardware_info）
-2. 查看关键配置（get_current_config）和运行指标（get_db_metrics）
-3. 分析瓶颈，用 set_knob 设置合理的参数
-4. 如果修改了 shared_buffers 等 static 参数，调用 restart_pg
-5. 用 predict_performance 验证效果
-
-## 调优知识
-
-- shared_buffers：总内存的 25%
-- effective_cache_size：总内存的 50%-75%
-- work_mem：根据并发连接数分配，一般 64MB-256MB
-- random_page_cost：SSD 设 1.1，HDD 设 4.0
-- 修改 shared_buffers 等 postmaster 参数后需要 restart_pg"""
+from training.data_utils import SYSTEM_PROMPT
 
 PREDICT_CALL = '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n</tool_call>'
 
@@ -126,13 +101,6 @@ def _messages_to_sft(messages: list, improvement_pct: float,
             sft_messages.append({"role": "tool", "content": obs})
         else:
             sft_messages.append({"role": role, "content": content})
-
-    # 确保以 assistant 结尾
-    if sft_messages and sft_messages[-1]["role"] == "tool":
-        sft_messages.append({
-            "role": "assistant",
-            "content": "<think>调优流程已完成，以上为全部操作步骤。</think>",
-        })
 
     result = {
         "messages": sft_messages,
@@ -250,9 +218,7 @@ def build_llm_fn(args):
         if isinstance(messages_or_prompt, str):
             return client.generate(messages_or_prompt, temperature=temperature)
         else:
-            # list[dict] 格式，拼成纯文本
-            text = "\n".join(m.get("content", "") for m in messages_or_prompt)
-            return client.generate(text, temperature=temperature)
+            return client.generate(messages_or_prompt, temperature=temperature)
 
     return generate
 

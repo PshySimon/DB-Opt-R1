@@ -250,7 +250,7 @@ class MultiProviderLLMClient:
                 
         return None
 
-    def generate(self, prompt: str, temperature: float = 0.7) -> str:
+    def generate(self, prompt, temperature: float = 0.7) -> str:
         last_error = None
         # 当因为 API 真报错导致的退避次数上限（防止全网大罢工导致的无限假死）
         max_error_retries = self.total_clients * 3
@@ -271,9 +271,13 @@ class MultiProviderLLMClient:
                 
             try:
                 t0 = time.time()
+                if isinstance(prompt, list):
+                    messages = prompt
+                else:
+                    messages = [{"role": "user", "content": prompt}]
                 response = selected.client.chat.completions.create(
                     model=selected.model_name,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=2048,
                     stop=["</tool_call>"]

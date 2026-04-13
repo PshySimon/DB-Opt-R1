@@ -6,9 +6,14 @@ rollout 本身不知道任何具体 tool 名字，不做业务指标统计。
 """
 
 import logging
+import re
 from typing import Callable, Dict, Any, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def _has_tool_call(text: str) -> bool:
+    return bool(re.search(r"<tool_call>.*?</tool_call>", text or "", re.DOTALL))
 
 
 def rollout(
@@ -52,6 +57,12 @@ def rollout(
                 action = llm_fn(messages, temperature)
             except Exception as e:
                 logger.error(f"LLM 生成失败: {e}")
+                break
+
+            if not _has_tool_call(action):
+                messages.append({"role": "assistant", "content": action})
+                env.termination_reason = "no_tool_call"
+                action = None
                 break
 
             # 试执行，检查格式是否合法

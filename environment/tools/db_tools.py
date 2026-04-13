@@ -65,6 +65,22 @@ class DBTool(Tool):
         return self.config.get_db_connection()
 
 
+class FinishTuningTool(DBTool):
+    def __init__(self, **kwargs):
+        super().__init__(
+            name="finish_tuning",
+            description="结束当前调优回合，确认保留当前配置作为最终结果",
+            parameters={"type": "object", "properties": {}, "required": []},
+            **kwargs
+        )
+
+    def execute_real(self, args):
+        return json.dumps({"status": "finished"}, ensure_ascii=False)
+
+    def execute_simulated(self, args):
+        return json.dumps({"status": "finished"}, ensure_ascii=False)
+
+
 # ==================== 观察类 ====================
 
 class GetHardwareInfoTool(DBTool):

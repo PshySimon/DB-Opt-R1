@@ -106,6 +106,61 @@ class EvaluateRunTest(unittest.TestCase):
         joined = "\n".join(str(call.args[0]) for call in mock_info.call_args_list if call.args)
         self.assertIn("评估进度", joined)
 
+    def test_compute_eval_metrics_includes_termination_reason_summary(self):
+        trajectories = [
+            {
+                "env_sample_idx": 0,
+                "termination_reason": "finish_tuning",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": (
+                            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\":\\"8GB\\"}"}}'
+                            "</tool_call>"
+                        ),
+                    }
+                ],
+            },
+            {
+                "env_sample_idx": 0,
+                "termination_reason": "repeated_tool_call",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": (
+                            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\":\\"4GB\\"}"}}'
+                            "</tool_call>"
+                        ),
+                    }
+                ],
+            },
+        ]
+        scenarios = [
+            {
+                "name": "s0",
+                "hardware": {"cpu_count": 8},
+                "workload": {"type": "oltp"},
+                "knobs": {"shared_buffers": "4GB"},
+            }
+        ]
+
+        metrics = evaluate_run.compute_eval_metrics(
+            trajectories,
+            scenarios,
+            DummyCostModel(),
+            DummyKnobSpace(),
+            n_bo_trials=200,
+            skip_bo=True,
+        )
+
+        summary = metrics["summary"]
+        self.assertEqual(summary["termination_reason_rate"]["finish_tuning"], 0.5)
+        self.assertEqual(summary["termination_reason_rate"]["repeated_tool_call"], 0.5)
+        self.assertGreater(
+            summary["avg_imp_vs_scenario_pct_by_termination_reason"]["finish_tuning"],
+            summary["avg_imp_vs_scenario_pct_by_termination_reason"]["repeated_tool_call"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

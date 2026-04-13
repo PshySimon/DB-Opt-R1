@@ -12,6 +12,7 @@ import pandas as pd
 
 from core.tool.tool_env import ToolEnv
 from .db_tools import (
+    FinishTuningTool,
     GetHardwareInfoTool,
     GetCurrentConfigTool,
     GetDBMetricsTool,
@@ -76,6 +77,7 @@ class DBToolEnv(ToolEnv):
         common = {"mode": mode, "config": config, "env_state": self.env_state}
 
         tools = [
+            FinishTuningTool(**common),
             GetHardwareInfoTool(**common),
             GetCurrentConfigTool(tunable_knobs=tunable_knobs, **common),
             GetDBMetricsTool(**common),
@@ -180,6 +182,7 @@ class DBToolEnv(ToolEnv):
                 self._reset_from_scenario(sample_idx)
             elif self.dataset is not None:
                 self._reset_from_csv(sample_idx)
+        self.last_valid_config = self.get_current_config_snapshot()
 
     def _reset_from_scenario(self, sample_idx=None):
         """从场景列表加载（深拷贝，防止搜索过程修改污染原始数据）"""
@@ -246,3 +249,10 @@ class DBToolEnv(ToolEnv):
 
         logger.debug(f"Episode reset: sample_idx={sample_idx}, "
                     f"baseline_tps={self.env_state.get('tps', 'N/A')}")
+
+    def get_current_config_snapshot(self):
+        return {
+            key.replace("knob_", ""): value
+            for key, value in self.env_state.items()
+            if key.startswith("knob_")
+        }

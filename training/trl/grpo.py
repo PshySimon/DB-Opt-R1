@@ -214,6 +214,9 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
                 text = self.rollout_tokenizer.apply_chat_template(
                     messages_list[i], tokenize=False, add_generation_prompt=True
                 )
+                # turn > 0: 追加 <think> 引导，与 VERL tool_custom_response_template 一致
+                if turn > 0:
+                    text += "<think>\n"
                 batch_texts.append(text)
 
             prompt_token_lengths = [
@@ -236,6 +239,10 @@ class MultiTurnGRPOTrainer(GRPOTrainer):
                 # 补全 stop token（include_stop_str_in_output 有时不可靠）
                 if "<tool_call>" in gen_text and "</tool_call>" not in gen_text:
                     gen_text += "</tool_call>"
+
+                # turn > 0: <think> 已作为 prompt 的一部分发送，需补回到 message 内容中
+                if turn > 0:
+                    gen_text = "<think>\n" + gen_text
 
                 messages_list[i].append({"role": "assistant", "content": gen_text})
 

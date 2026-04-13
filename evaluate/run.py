@@ -65,6 +65,13 @@ def extract_model_knobs(trajectory: dict) -> dict:
     return knobs
 
 
+def extract_termination_reason(trajectory: dict) -> str:
+    reason = trajectory.get("termination_reason")
+    if reason is None:
+        return "unknown"
+    return str(reason)
+
+
 def bo_search_optimal(cost_model, hw_info: dict, workload: str,
                       knob_space, n_trials: int = 200) -> float:
     """用 BO 搜索 Cost Model 下给定硬件+负载的最优 TPS。"""
@@ -167,6 +174,7 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
         n_steps = sum(1 for m in msgs if m.get("role") == "assistant")
         called_predict = any("predict_performance" in m.get("content", "")
                              for m in msgs)
+        termination_reason = extract_termination_reason(t)
 
         row = {
             "env_sample_idx": env_idx,
@@ -179,6 +187,7 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
             "steps": n_steps,
             "num_knobs_set": len(model_changes),
             "called_predict": called_predict,
+            "termination_reason": termination_reason,
         }
         if optimal_tps is not None:
             row["optimal_tps"] = round(optimal_tps, 1)
@@ -211,6 +220,24 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
         "predict_call_rate": round(
             sum(e["called_predict"] for e in per_episode) / n, 4),
     }
+
+    termination_reason_rate = {}
+    avg_imp_vs_scenario_pct_by_reason = {}
+    avg_imp_vs_default_pct_by_reason = {}
+    reasons = sorted({e["termination_reason"] for e in per_episode})
+    for reason in reasons:
+        matching_rows = [e for e in per_episode if e["termination_reason"] == reason]
+        termination_reason_rate[reason] = round(len(matching_rows) / n, 4)
+        avg_imp_vs_scenario_pct_by_reason[reason] = round(
+            np.mean([e["imp_vs_scenario_pct"] for e in matching_rows]), 2
+        )
+        avg_imp_vs_default_pct_by_reason[reason] = round(
+            np.mean([e["imp_vs_default_pct"] for e in matching_rows]), 2
+        )
+
+    summary["termination_reason_rate"] = termination_reason_rate
+    summary["avg_imp_vs_scenario_pct_by_termination_reason"] = avg_imp_vs_scenario_pct_by_reason
+    summary["avg_imp_vs_default_pct_by_termination_reason"] = avg_imp_vs_default_pct_by_reason
 
     if not skip_bo:
         imp_o = [e["imp_vs_optimal_pct"] for e in per_episode]
@@ -252,6 +279,12 @@ def print_summary(metrics: dict):
     print("  ── 行为指标 ──")
     print(f"  平均步数:              {s.get('avg_steps', 0):.1f}")
     print(f"  predict 调用率:        {s.get('predict_call_rate', 0)*100:.1f}%")
+    termination_reason_rate = s.get("termination_reason_rate", {})
+    if termination_reason_rate:
+        print()
+        print("  ── 结束原因分布 ──")
+        for reason, rate in sorted(termination_reason_rate.items()):
+            print(f"  {reason}: {rate*100:.1f}%")
     print("=" * 60)
 
 
@@ -268,8 +301,10 @@ def main():
                         help="报表输出目录")
     parser.add_argument("--bo-trials", type=int, default=200,
                         help="BO 搜索试验次数")
-    parser.add_argument("--skip-bo", action="store_true",
-                        help="跳过 BO baseline 和 gap closed 计算")
+    parser.add_argument("--skip-bo", action="store_true", default=True,
+                        help="跳过 BO baseline 和 gap closed 计算（默认跳过）")
+    parser.add_argument("--with-bo", dest="skip_bo", action="store_false",
+                        help="启用 BO baseline 搜索（耗时较长）")
     args = parser.parse_args()
 
     logger.info(f"读取轨迹: {args.eval_data}")

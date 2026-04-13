@@ -61,6 +61,10 @@ class DBRewardManager:
         format_score,
         score,
         tool_calls,
+        termination_reason=None,
+        predict_calls_used=None,
+        last_valid_tool_call=None,
+        last_valid_config=None,
     ) -> None:
         if not self.debug_rollout_dir:
             return
@@ -83,6 +87,10 @@ class DBRewardManager:
             f"format_score: {format_score:.6f}\n"
             f"final_score: {score:.6f}\n"
             f"extracted_knobs: {extracted_knobs}\n\n"
+            f"termination_reason: {termination_reason}\n"
+            f"predict_calls_used: {predict_calls_used}\n"
+            f"last_valid_tool_call: {last_valid_tool_call}\n"
+            f"last_valid_config: {last_valid_config}\n\n"
             "ground_truth:\n"
             f"{ground_truth}\n\n"
             "raw_trajectory:\n"
@@ -142,12 +150,25 @@ class DBRewardManager:
                 'ground_truth'
             ]
             data_source = data_item.non_tensor_batch['data_source']
+            termination_reason = data_item.non_tensor_batch.get('termination_reason')
+            predict_calls_used = data_item.non_tensor_batch.get('predict_calls_used')
+            last_valid_tool_call = data_item.non_tensor_batch.get('last_valid_tool_call')
+            last_valid_config = data_item.non_tensor_batch.get('last_valid_config')
+            if isinstance(termination_reason, (list, tuple)):
+                termination_reason = termination_reason[0]
+            if isinstance(predict_calls_used, (list, tuple)):
+                predict_calls_used = predict_calls_used[0]
+            if isinstance(last_valid_tool_call, (list, tuple)):
+                last_valid_tool_call = last_valid_tool_call[0]
+            if isinstance(last_valid_config, (list, tuple)):
+                last_valid_config = last_valid_config[0]
 
             # 计算 reward
             score = compute_score_format_answer(
                 solution_str=sequences_str,
                 ground_truth=ground_truth,
                 cost_model=self.cost_model,
+                termination_reason=termination_reason,
             )
             answer_score = compute_score_answer(
                 solution_str=sequences_str,
@@ -173,6 +194,10 @@ class DBRewardManager:
                 print("[answer_score]", answer_score)
                 print("[format_score]", format_score)
                 print("[tool_calls]", tool_calls)
+                print("[termination_reason]", termination_reason)
+                print("[predict_calls_used]", predict_calls_used)
+                print("[last_valid_tool_call]", last_valid_tool_call)
+                print("[last_valid_config]", last_valid_config)
                 print("[response_only]", response_str[:1000])
                 print("[prompt+response]", sequences_str[:500])
                 print("[ground_truth]", ground_truth)
@@ -187,6 +212,10 @@ class DBRewardManager:
                     format_score=format_score,
                     score=score,
                     tool_calls=tool_calls,
+                    termination_reason=termination_reason,
+                    predict_calls_used=predict_calls_used,
+                    last_valid_tool_call=last_valid_tool_call,
+                    last_valid_config=last_valid_config,
                 )
 
         return reward_tensor, answer_lst, format_lst

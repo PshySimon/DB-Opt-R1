@@ -129,13 +129,14 @@ class ToolGenerationManager:
     
     def _execute_tool_calls(self, response_strs: List[str], 
                           envs: List[ToolEnv], 
-                          active_mask: torch.Tensor) -> List[str]:
-        """Execute tool calls sequentially and return tool responses."""
+                          active_mask: torch.Tensor) -> Tuple[List[str], List[bool]]:
+        """Execute tool calls sequentially and return tool responses plus continue mask."""
         # Convert torch tensor to list of booleans if needed
         active_list = active_mask.tolist() if isinstance(active_mask, torch.Tensor) else active_mask
         
         # Initialize result list with empty strings
         tool_responses = [""] * len(response_strs)
+        continue_mask = [False] * len(response_strs)
         # Process each environment sequentially
         for i, (resp, env, active) in enumerate(zip(response_strs, envs, active_list)):
             if not active:
@@ -143,13 +144,14 @@ class ToolGenerationManager:
                 
             # Step the environment using the agent's response
             result = step(env, resp)
-            tool_response = result[0]  # Extract observation from (observation, reward, done, info)
+            tool_response, _, done, _ = result
             tool_responses[i] = self.config.tool_custom_response_template.format(tool_response=tool_response)            
-        return tool_responses
+            continue_mask[i] = not done
+        return tool_responses, continue_mask
     
     def _execute_tool_calls_batch(self, response_strs: List[str], 
                                  envs: List[ToolEnv], 
-                                 active_mask: torch.Tensor) -> List[str]:
+                                 active_mask: torch.Tensor) -> Tuple[List[str], List[bool]]:
         """Execute tool calls in batch for tools that support batch operations."""
         # Convert torch tensor to list of booleans
         active_list = active_mask.tolist() if isinstance(active_mask, torch.Tensor) else active_mask
@@ -167,9 +169,10 @@ class ToolGenerationManager:
         
         # Initialize result list with empty strings
         tool_responses = [""] * len(response_strs)
+        continue_mask = [False] * len(response_strs)
         
         if not active_envs:
-            return tool_responses
+            return tool_responses, continue_mask
             
         # Use the independent step_batch function for active environments
         batch_results = step_batch(active_envs, active_responses)
@@ -179,9 +182,10 @@ class ToolGenerationManager:
             if result is None:
                 tool_responses[idx] = ""
             else:
-                tool_response = result[0]  # Extract observation from (observation, reward, done, info)
+                tool_response, _, done, _ = result
                 tool_responses[idx] = self.config.tool_custom_response_template.format(tool_response=tool_response)
-        return tool_responses
+                continue_mask[idx] = not done
+        return tool_responses, continue_mask
     
     def _update_rolling_state(self, rollings, cur_responses: torch.Tensor, 
                             tool_responses_ids: torch.Tensor) -> Dict:
@@ -317,6 +321,7 @@ class ToolGenerationManager:
         turns = torch.zeros(batch_size, dtype=torch.int32)
         active_num_list = [active_mask.sum().item()]
         rollings = gen_batch
+        meta_info = {}
 
         # Main generation loop
         for step in range(self.config.max_turns):
@@ -344,10 +349,13 @@ class ToolGenerationManager:
 
             if self.config.use_batch_tool_calls:
                 # Use batch execution for tool calls
-                tool_responses = self._execute_tool_calls_batch(responses_str, envs, active_mask)
+                tool_responses, env_continue_masks = self._execute_tool_calls_batch(responses_str, envs, active_mask)
             else:
                 # Use sequential execution for tool calls
-                tool_responses = self._execute_tool_calls(responses_str, envs, active_mask)
+                tool_responses, env_continue_masks = self._execute_tool_calls(responses_str, envs, active_mask)
+
+            env_continue_masks = torch.tensor(env_continue_masks, dtype=torch.bool)
+            active_mask = active_mask & env_continue_masks
 
             active_num_list.append(active_mask.sum().item())
             tool_responses_ids = self._process_tool_responses(tool_responses)
@@ -367,14 +375,41 @@ class ToolGenerationManager:
         print("ACTIVE_TRAJ_NUM:", active_num_list)
         
         original_right_side['turns'] = turns
+        termination_reason = np.array(
+            [getattr(env, "termination_reason", None) for env in envs],
+            dtype=object,
+        )
+        predict_calls_used = np.array(
+            [getattr(env, "predict_calls_used", 0) for env in envs],
+            dtype=object,
+        )
+        last_valid_tool_call = np.array(
+            [getattr(env, "last_valid_tool_call", None) for env in envs],
+            dtype=object,
+        )
+        last_valid_config = np.array(
+            [getattr(env, "last_valid_config", None) for env in envs],
+            dtype=object,
+        )
         
         # Save trajectory and return final output
-        return self._compose_final_output(original_left_side, original_right_side, meta_info)
+        return self._compose_final_output(
+            original_left_side,
+            original_right_side,
+            meta_info,
+            non_tensor_batch={
+                "termination_reason": termination_reason,
+                "predict_calls_used": predict_calls_used,
+                "last_valid_tool_call": last_valid_tool_call,
+                "last_valid_config": last_valid_config,
+            },
+        )
 
 
     def _compose_final_output(self, left_side: Dict,
                             right_side: Dict,
-                            meta_info: Dict) -> Tuple[Dict, Dict]:
+                            meta_info: Dict,
+                            non_tensor_batch: Optional[Dict[str, Any]] = None) -> Tuple[Dict, Dict]:
         """Compose final generation output."""
         final_output = right_side.copy()
         final_output['prompts'] = left_side['input_ids']
@@ -396,7 +431,10 @@ class ToolGenerationManager:
             final_output['attention_mask']
         )
         
-        final_output = DataProto.from_dict(final_output)
+        final_output = DataProto.from_dict(
+            tensors=final_output,
+            non_tensors=non_tensor_batch or {},
+        )
         final_output.meta_info.update(meta_info)
 
         return final_output

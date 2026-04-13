@@ -1,6 +1,11 @@
+import math
 import unittest
 
-from training.reward_score import compute_score_answer, extract_final_knobs
+from training.reward_score import (
+    compute_score_answer,
+    compute_score_format_answer,
+    extract_final_knobs,
+)
 
 
 class RewardScoreTest(unittest.TestCase):
@@ -38,6 +43,52 @@ class RewardScoreTest(unittest.TestCase):
         score = compute_score_answer(solution, ground_truth, cost_model=FakeCostModel())
 
         self.assertGreater(score, 0.0)
+
+    def test_compute_score_format_answer_applies_repeated_tool_call_penalty(self):
+        class FakeCostModel:
+            def predict(self, knobs, hardware):
+                return 120.0 if knobs.get("shared_buffers") == "8GB" else 100.0
+
+        solution = (
+            "<|im_start|>assistant\n"
+            "<think>set knob</think>\n"
+            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\": \\"8GB\\"}"}}</tool_call>\n'
+            "<|im_end|>"
+        )
+        ground_truth = {"hardware": {"total_memory_gb": 80.0}}
+
+        baseline = compute_score_format_answer(solution, ground_truth, cost_model=FakeCostModel())
+        penalized = compute_score_format_answer(
+            solution,
+            ground_truth,
+            cost_model=FakeCostModel(),
+            termination_reason="repeated_tool_call",
+        )
+
+        self.assertTrue(math.isclose(baseline - 0.1, penalized, rel_tol=0.0, abs_tol=1e-6))
+
+    def test_compute_score_format_answer_applies_max_turns_penalty(self):
+        class FakeCostModel:
+            def predict(self, knobs, hardware):
+                return 120.0 if knobs.get("shared_buffers") == "8GB" else 100.0
+
+        solution = (
+            "<|im_start|>assistant\n"
+            "<think>set knob</think>\n"
+            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\": \\"8GB\\"}"}}</tool_call>\n'
+            "<|im_end|>"
+        )
+        ground_truth = {"hardware": {"total_memory_gb": 80.0}}
+
+        baseline = compute_score_format_answer(solution, ground_truth, cost_model=FakeCostModel())
+        penalized = compute_score_format_answer(
+            solution,
+            ground_truth,
+            cost_model=FakeCostModel(),
+            termination_reason="max_turns_reached",
+        )
+
+        self.assertTrue(math.isclose(baseline - 0.05, penalized, rel_tol=0.0, abs_tol=1e-6))
 
 if __name__ == "__main__":
     unittest.main()

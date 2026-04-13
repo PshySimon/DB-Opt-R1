@@ -172,6 +172,14 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> Dict[str,
         'prompt_length/clip_ratio':
             torch.mean(torch.eq(prompt_length, max_prompt_length).float()).detach().item(),
     }
+
+    termination_reasons = batch.non_tensor_batch.get('termination_reason')
+    if termination_reasons is not None:
+        valid_reasons = [str(reason) for reason in termination_reasons if reason is not None]
+        total = len(termination_reasons)
+        if total > 0:
+            for reason in sorted(set(valid_reasons)):
+                metrics[f'termination/{reason}_rate'] = valid_reasons.count(reason) / total
     return metrics
 
 
