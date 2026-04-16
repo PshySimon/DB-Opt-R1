@@ -275,9 +275,21 @@ class MultiProviderLLMClient:
                     messages = prompt
                 else:
                     messages = [{"role": "user", "content": prompt}]
+
+                # 兼容不支持 role=tool 的 API：转为 role=user + <tool_response> 包裹
+                api_messages = []
+                for msg in messages:
+                    if msg.get("role") == "tool":
+                        api_messages.append({
+                            "role": "user",
+                            "content": f"<tool_response>\n{msg['content']}\n</tool_response>",
+                        })
+                    else:
+                        api_messages.append(msg)
+
                 response = selected.client.chat.completions.create(
                     model=selected.model_name,
-                    messages=messages,
+                    messages=api_messages,
                     temperature=temperature,
                     max_tokens=2048,
                     stop=["</tool_call>"]
