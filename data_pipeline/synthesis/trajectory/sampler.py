@@ -125,6 +125,7 @@ def sample_one_scenario(
     temperature: float,
     generate_question: bool = True,
     on_rollout_done=None,
+    early_stop: bool = False,
 ) -> list:
     """对单个场景跑 num_rollouts 次 episode，返回通过阈值的 SFT 样本列表。
 
@@ -132,6 +133,7 @@ def sample_one_scenario(
         generate_question: True 时动态生成 question（generate/train 模式），
                           False 时使用 scenario.question 预设值（eval 模式）。
         on_rollout_done: 每个 rollout 完成后的回调 (is_good: bool) -> None
+        early_stop: True 时，找到第一个好样本后停止当前场景的剩余 rollout
     """
     from environment.tools import DBToolEnv
     from core.agent import rollout
@@ -197,6 +199,14 @@ def sample_one_scenario(
         if on_rollout_done:
             on_rollout_done(is_good)
 
+        # 早停：找到好样本后跳过剩余 rollout
+        if early_stop and is_good:
+            remaining = num_rollouts - rollout_idx - 1
+            if remaining > 0 and on_rollout_done:
+                for _ in range(remaining):
+                    on_rollout_done(False)  # 推进进度条
+            break
+
     return all_samples
 
 
@@ -255,6 +265,8 @@ def main():
                         help="每个场景的 rollout 次数")
     parser.add_argument("--good-threshold", type=float, default=0.03,
                         help="SFT 正样本阈值（improvement_pct / 100），默认 0.03 即 3%%")
+    parser.add_argument("--early-stop", action="store_true",
+                        help="找到好样本后跳过当前场景的剩余 rollout，减少 API 调用量")
     parser.add_argument("--temperature", type=float, default=0.7,
                         help="LLM rollout 采样温度")
     parser.add_argument("--max-turns", type=int, default=10,
@@ -647,6 +659,7 @@ def _run_rollout(args, llm_fn, generate_question: bool):
                 args.num_rollouts, args.good_threshold, args.temperature,
                 generate_question,
                 on_rollout_done=_on_rollout_done,
+                early_stop=getattr(args, 'early_stop', False),
             ): idx
             for idx in indices
         }
