@@ -1,0 +1,13 @@
+{
+  "r2": 0.9869909785049219,
+  "spearman": 0.9890759418234318,
+  "mape": 0.15164456811305072,
+  "wape": 0.07819205882735517,
+  "log_mae": 0.14695183149161736,
+  "fail_recall": NaN,
+  "model_type": "lgbm",
+  "n_train": 28952,
+  "n_features": 123,
+  "split_by_source": false,
+  "n_test": 7238
+}
