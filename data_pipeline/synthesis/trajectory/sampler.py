@@ -272,7 +272,11 @@ def main():
     parser.add_argument("--max-turns", type=int, default=10,
                         help="每个 episode 最大交互轮数")
     parser.add_argument("--num-scenarios", type=int, default=0,
-                        help="处理场景数（0=全量）")
+                        help="处理场景数（0=全量，与 start/end-index 互斥）")
+    parser.add_argument("--start-index", type=int, default=None,
+                        help="起始场景索引（含），用于多机分片")
+    parser.add_argument("--end-index", type=int, default=None,
+                        help="结束场景索引（不含），用于多机分片")
 
     # ---- 场景过滤 ----
     from core.db.scenario_filter import add_filter_args
@@ -590,10 +594,18 @@ def _run_rollout(args, llm_fn, generate_question: bool):
         logger.error("没有可用场景，退出")
         sys.exit(1)
 
-    # 4. 确定处理范围
-    n = args.num_scenarios if args.num_scenarios > 0 else len(scenarios)
-    n = min(n, len(scenarios))
-    indices = list(range(n))
+    # 4. 确定处理范围（--start-index/--end-index 优先于 --num-scenarios）
+    total = len(scenarios)
+    if args.start_index is not None or args.end_index is not None:
+        start = args.start_index or 0
+        end = min(args.end_index or total, total)
+        indices = list(range(start, end))
+        logger.info(f"  分片范围: [{start}, {end})，共 {len(indices)} 个场景")
+    elif args.num_scenarios > 0:
+        n = min(args.num_scenarios, total)
+        indices = list(range(n))
+    else:
+        indices = list(range(total))
 
     # 5. 输出文件
     os.makedirs(args.output_dir, exist_ok=True)
