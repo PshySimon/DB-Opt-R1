@@ -16,6 +16,16 @@ from core.tool.tool_base import Tool
 
 logger = logging.getLogger(__name__)
 
+PENDING_RESTART_KNOBS_KEY = "__pending_restart_knobs__"
+
+
+def _get_pending_restart_knobs(env_state: dict) -> dict:
+    pending = env_state.get(PENDING_RESTART_KNOBS_KEY)
+    if not isinstance(pending, dict):
+        pending = {}
+        env_state[PENDING_RESTART_KNOBS_KEY] = pending
+    return pending
+
 
 def _has_sudo():
     """检测是否可用 sudo（免密）"""
@@ -482,15 +492,34 @@ class SetKnobTool(DBTool):
         # 校验内存类 knob
         knobs, mem_rejected = self._validate_memory_knobs(knobs)
 
-        # 更新 env_state（兼容）
+        restart_knobs = set(getattr(self, "restart_knobs", set()))
+        active_knobs = {}
+        pending_restart = {}
+
         for k, v in knobs.items():
+            if k in restart_knobs:
+                pending_restart[k] = v
+            else:
+                active_knobs[k] = v
+
+        # 动态参数立刻生效；静态参数挂到 pending_restart，等待 restart_pg 生效
+        for k, v in active_knobs.items():
             self.env_state[f"knob_{k}"] = v
-        # 更新 scenario 并联动指标
-        if self.scenario:
-            self.scenario.apply_knob_change(knobs)
+        if self.scenario and active_knobs:
+            self.scenario.apply_knob_change(active_knobs)
+
+        pending_state = _get_pending_restart_knobs(self.env_state)
+        pending_state.update(pending_restart)
 
         failed = list(mem_rejected)
-        return json.dumps({"success": list(knobs.keys()), "pending_restart": [], "failed": failed}, indent=2)
+        return json.dumps(
+            {
+                "success": list(active_knobs.keys()),
+                "pending_restart": list(pending_restart.keys()),
+                "failed": failed,
+            },
+            indent=2,
+        )
 
 
 class RestartPGTool(DBTool):
@@ -515,6 +544,12 @@ class RestartPGTool(DBTool):
             return json.dumps({"success": False, "error": str(e)})
 
     def execute_simulated(self, args):
+        pending_knobs = dict(_get_pending_restart_knobs(self.env_state))
+        if self.scenario and pending_knobs:
+            self.scenario.apply_knob_change(pending_knobs)
+        for k, v in pending_knobs.items():
+            self.env_state[f"knob_{k}"] = v
+        _get_pending_restart_knobs(self.env_state).clear()
         return json.dumps({"success": True, "duration_seconds": 0})
 
 
@@ -565,9 +600,16 @@ class ResetConfigTool(DBTool):
 
     def execute_simulated(self, args):
         # 恢复到 env_state 的原始 knob（由 DBToolEnv.reset 保存）
+        _get_pending_restart_knobs(self.env_state).clear()
         if hasattr(self, '_original_knobs'):
             for k, v in self._original_knobs.items():
                 self.env_state[k] = v
+            if self.scenario:
+                self.scenario.knobs = {
+                    key.replace("knob_", ""): value
+                    for key, value in self._original_knobs.items()
+                    if key.startswith("knob_")
+                }
         return json.dumps({"success": True})
 
 

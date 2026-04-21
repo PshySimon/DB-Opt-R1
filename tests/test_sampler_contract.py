@@ -39,6 +39,32 @@ class SamplerContractTest(unittest.TestCase):
 
         fake_client.generate.assert_called_once_with(messages, temperature=0.2)
 
+    def test_best_predict_improvement_uses_max_predict_from_messages(self):
+        messages = [
+            {
+                "role": "user",
+                "content": '<tool_response>{"predicted_tps": 110.0, "baseline_tps": 100.0, "actual_tps": 105.0, "improvement_pct": 2.0}</tool_response>',
+            },
+            {
+                "role": "user",
+                "content": '<tool_response>{"predicted_tps": 120.0, "baseline_tps": 100.0, "actual_tps": 106.0, "improvement_pct": 5.0}</tool_response>',
+            },
+        ]
+
+        best = sampler._best_predict_improvement(messages)
+
+        self.assertEqual(5.0, best)
+
+    def test_best_predict_improvement_is_zero_when_messages_have_no_predict(self):
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+        ]
+
+        best = sampler._best_predict_improvement(messages)
+
+        self.assertEqual(0.0, best)
+
 
 if __name__ == "__main__":
     unittest.main()

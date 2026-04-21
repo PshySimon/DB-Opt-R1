@@ -25,6 +25,7 @@ from .db_tools import (
     ResetConfigTool,
     PredictPerformanceTool,
     RunBenchmarkTool,
+    PENDING_RESTART_KNOBS_KEY,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,11 +69,16 @@ class DBToolEnv(ToolEnv):
 
         # 加载可调 knob 列表
         tunable_knobs = []
+        knob_defaults = {}
+        restart_knobs = set()
         if knob_space_path:
             import yaml
             with open(knob_space_path) as f:
                 ks = yaml.safe_load(f)
-            tunable_knobs = list(ks.get("knobs", {}).keys())
+            knob_defs = ks.get("knobs", {})
+            tunable_knobs = list(knob_defs.keys())
+            knob_defaults = {name: info.get("default") for name, info in knob_defs.items()}
+            restart_knobs = {name for name, info in knob_defs.items() if info.get("restart", False)}
 
         common = {"mode": mode, "config": config, "env_state": self.env_state}
 
@@ -96,6 +102,9 @@ class DBToolEnv(ToolEnv):
             tools.append(RunBenchmarkTool(**common))
 
         super().__init__(tools=tools, max_turns=max_turns)
+        for tool in self.tools:
+            tool.knob_defaults = knob_defaults
+            tool.restart_knobs = restart_knobs
         # training.verl.agent_rl_dataset expects the training ToolEnv interface.
         self.tool_desc = [tool.get_description() for tool in self.tools]
 
@@ -202,6 +211,7 @@ class DBToolEnv(ToolEnv):
             self.env_state[f"hw_{k}"] = v
         for k, v in scenario.knobs.items():
             self.env_state[f"knob_{k}"] = v
+        self.env_state[PENDING_RESTART_KNOBS_KEY] = {}
         if scenario.workload:
             if isinstance(scenario.workload, dict):
                 self.env_state["workload"] = scenario.workload.get("type", "mixed")
@@ -229,6 +239,7 @@ class DBToolEnv(ToolEnv):
         row = self.dataset.iloc[sample_idx]
         self.env_state.clear()
         self.env_state.update(row.to_dict())
+        self.env_state[PENDING_RESTART_KNOBS_KEY] = {}
 
         # 尝试构造 ScenarioState 兼容
         try:

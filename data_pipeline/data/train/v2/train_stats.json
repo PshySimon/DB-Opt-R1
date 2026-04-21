@@ -1,0 +1,5 @@
+{
+  "rows": 6645,
+  "unique_envs": 6645,
+  "output_file": "data_pipeline/data/train/v2/sft_trajectories_v10_train.jsonl"
+}

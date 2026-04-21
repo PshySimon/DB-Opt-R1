@@ -1,0 +1,63 @@
+{
+  "target_rows": 600,
+  "selected_rows": 600,
+  "selected_groups": 41,
+  "covered_parent_names": 39,
+  "workload": {
+    "high_concurrency": 39,
+    "mixed": 81,
+    "read_only": 300,
+    "write_heavy": 180
+  },
+  "gain": {
+    "0_1": 124,
+    "10_50": 139,
+    "1_3": 136,
+    "3_10": 201
+  },
+  "depth": {
+    "main": 544,
+    "tail": 56
+  },
+  "parent_name_counts": {
+    "analyze_stale": 2,
+    "autovacuum_disabled": 1,
+    "bgwriter_lazy": 2,
+    "bgwriter_overactive": 1,
+    "cache_size_mismatch": 1,
+    "checkpoint_spike": 1,
+    "checkpoint_storm": 1,
+    "coarse_statistics": 1,
+    "cpu_cost_distortion": 1,
+    "frequent_deadlock_check": 1,
+    "geqo_too_early": 1,
+    "high_conn_low_mem": 1,
+    "idle_connection_leak": 1,
+    "index_scan_bias": 1,
+    "join_plan_explosion": 1,
+    "low_maintenance_mem": 1,
+    "low_mem_bad_join": 1,
+    "low_shared_buffers": 1,
+    "low_work_mem_spill": 1,
+    "memory_plus_checkpoint": 1,
+    "monitoring_disabled": 1,
+    "no_join_reorder": 1,
+    "oversized_shared_buffers": 1,
+    "parallel_disabled": 1,
+    "parallel_greedy": 1,
+    "parallel_underused": 1,
+    "seq_scan_bias": 1,
+    "seqscan_no_parallel": 1,
+    "slow_deadlock_detection": 1,
+    "stats_stale_vacuum_lazy": 1,
+    "too_few_connections": 1,
+    "too_many_connections": 1,
+    "vacuum_off_low_mem": 1,
+    "vacuum_too_aggressive": 1,
+    "vacuum_too_lazy": 1,
+    "wal_space_waste": 1,
+    "wal_write_bottleneck": 1,
+    "write_heavy_wal_bottleneck": 1,
+    "wrong_io_concurrency": 1
+  }
+}

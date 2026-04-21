@@ -6,6 +6,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 from environment.tools import DBToolEnv
+from data_pipeline.synthesis.scenarios.schema import ScenarioState
 
 
 class _FakeCostModel:
@@ -18,6 +19,26 @@ class _FakeCostModel:
 
 
 class DBToolEnvCompatibilityTest(unittest.TestCase):
+    def _make_train_env(self):
+        env = DBToolEnv(
+            mode="train",
+            cost_model=_FakeCostModel(),
+            max_turns=8,
+            knob_space_path="configs/knob_space.yaml",
+        )
+        env.scenarios = [
+            ScenarioState(
+                name="demo",
+                source="llm_generated",
+                hardware={"total_memory_gb": 16, "cpu_count": 8},
+                knobs={"shared_buffers": "128MB", "work_mem": "4MB"},
+                workload={"type": "mixed"},
+                db_metrics={},
+            )
+        ]
+        env.reset(sample_idx=0)
+        return env
+
     def test_db_tool_env_exposes_tool_desc_for_verl_dataset(self):
         env = DBToolEnv(mode="real", config=None, max_turns=2)
         self.assertTrue(hasattr(env, "tool_desc"))
@@ -109,6 +130,39 @@ class DBToolEnvCompatibilityTest(unittest.TestCase):
         self.assertTrue(done_second)
         self.assertFalse(info_second["action_is_valid"])
         self.assertEqual("invalid_tool_call", env.termination_reason)
+
+    def test_static_knob_requires_restart_before_predict_uses_new_value(self):
+        env = self._make_train_env()
+
+        result, _, _, _ = env.step(
+            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\": \\"512MB\\"}"}}</tool_call>'
+        )
+        payload = json.loads(result)
+        self.assertEqual(payload["success"], [])
+        self.assertEqual(payload["pending_restart"], ["shared_buffers"])
+
+        env.step('<tool_call>{"name":"predict_performance","arguments":{}}</tool_call>')
+        current_knobs = env.cost_model.calls[-1][0]
+        self.assertEqual(current_knobs["shared_buffers"], "128MB")
+
+        env.step('<tool_call>{"name":"restart_pg","arguments":{}}</tool_call>')
+        env.step('<tool_call>{"name":"predict_performance","arguments":{}}</tool_call>')
+        current_knobs = env.cost_model.calls[-1][0]
+        self.assertEqual(current_knobs["shared_buffers"], "512MB")
+
+    def test_dynamic_knob_applies_immediately_without_restart(self):
+        env = self._make_train_env()
+
+        result, _, _, _ = env.step(
+            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"work_mem\\": \\"32MB\\"}"}}</tool_call>'
+        )
+        payload = json.loads(result)
+        self.assertEqual(payload["success"], ["work_mem"])
+        self.assertEqual(payload["pending_restart"], [])
+
+        env.step('<tool_call>{"name":"predict_performance","arguments":{}}</tool_call>')
+        current_knobs = env.cost_model.calls[-1][0]
+        self.assertEqual(current_knobs["work_mem"], "32MB")
 
 
 if __name__ == "__main__":

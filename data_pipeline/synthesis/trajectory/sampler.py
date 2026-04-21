@@ -50,6 +50,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -72,17 +73,31 @@ PREDICT_CALL = '<tool_call>\n{"name": "predict_performance", "arguments": {}}\n<
 
 # ───────────────────────────────── 核心函数 ──────────────────────────────────
 
-def _get_improvement_pct(env) -> float:
-    """调用 predict_performance 获取最终 TPS 提升比例（%）。"""
-    try:
-        obs, _, _, _ = env.step(PREDICT_CALL)
-        if isinstance(obs, dict):
-            return float(obs.get("improvement_pct", 0.0))
-        parsed = json.loads(obs)
-        return float(parsed.get("improvement_pct", 0.0))
-    except Exception as e:
-        logger.debug(f"predict_performance 解析失败: {e}")
-        return 0.0
+def _best_predict_improvement(messages: list) -> float:
+    """从 rollout messages 里提取所有 predict_performance 返回中的最大 improvement_pct。"""
+    best = 0.0
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        payload = None
+        if role == "user" and "<tool_response>" in content:
+            m = re.search(r"<tool_response>\n?(.*?)\n?</tool_response>", content, re.DOTALL)
+            if m:
+                try:
+                    payload = json.loads(m.group(1))
+                except Exception:
+                    payload = None
+        elif role == "tool":
+            try:
+                payload = json.loads(content)
+            except Exception:
+                payload = None
+        if isinstance(payload, dict) and "improvement_pct" in payload:
+            try:
+                best = max(best, float(payload.get("improvement_pct", 0.0) or 0.0))
+            except Exception:
+                continue
+    return best
 
 
 def _messages_to_sft(messages: list, improvement_pct: float,
@@ -182,7 +197,7 @@ def sample_one_scenario(
                 temperature=temperature,
             )
 
-            improvement_pct = _get_improvement_pct(env)
+            improvement_pct = _best_predict_improvement(messages)
             is_good = improvement_pct > threshold_pct
 
             all_samples.append(
