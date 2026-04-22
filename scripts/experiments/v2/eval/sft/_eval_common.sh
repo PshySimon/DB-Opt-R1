@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/_common.sh"
+source "$SCRIPT_DIR/../../train/sft/_common.sh"
 
 run_eval_experiment() {
     local exp_id="$1"

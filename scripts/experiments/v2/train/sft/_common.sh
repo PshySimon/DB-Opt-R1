@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../../" && pwd)"
 
 V2_TRAIN_DATA="$REPO_ROOT/data_pipeline/data/train/v2/sft_trajectories_v10_train.jsonl"
 V2_MANIFEST_DIR="$REPO_ROOT/data_pipeline/data/train/v2/manifests"
@@ -39,4 +39,27 @@ prepare_experiment_train_jsonl() {
     fi
 
     echo "$output_jsonl"
+}
+
+prepare_experiment_train_parquet() {
+    local exp_id="$1"
+    local manifest_path="$2"
+    local data_dir="${EXPERIMENT_DATA_DIR:-$REPO_ROOT/datasets/sft_v2/$exp_id/verl}"
+
+    ensure_file "$V2_TRAIN_DATA"
+    ensure_file "$manifest_path"
+    mkdir -p "$data_dir"
+
+    if [ "${FORCE_REBUILD_DATA:-false}" = "true" ] || [ ! -f "$data_dir/train.parquet" ] || [ ! -f "$data_dir/validation.parquet" ]; then
+        local train_jsonl
+        train_jsonl="$(prepare_experiment_train_jsonl "$exp_id" "$manifest_path")"
+        python -m data_pipeline.preprocess_sft \
+            --input_files "$train_jsonl" \
+            --output_dir "$data_dir" \
+            --train_ratio "${SFT_TRAIN_RATIO:-0.95}" \
+            --min_turns "${SFT_MIN_TURNS:-2}" \
+            --seed "${SFT_DATA_SEED:-42}"
+    fi
+
+    echo "$data_dir"
 }
