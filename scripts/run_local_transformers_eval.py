@@ -40,11 +40,14 @@ class LocalTransformersLLM:
         dtype: str = "bfloat16",
         max_new_tokens: int = 512,
         attn_implementation: str | None = None,
+        log_interval: int = 20,
     ) -> None:
         self.model_path = model_path
         self.device = device
         self.max_new_tokens = max_new_tokens
         self._lock = threading.Lock()
+        self._num_calls = 0
+        self._log_interval = log_interval
 
         logger.info("加载本地 tokenizer: %s", model_path)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
@@ -80,6 +83,18 @@ class LocalTransformersLLM:
             inputs = self.tokenizer(prompt, return_tensors="pt")
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             prompt_len = inputs["input_ids"].shape[1]
+            self._num_calls += 1
+            call_idx = self._num_calls
+
+            if self._log_interval > 0 and (
+                call_idx == 1 or call_idx % self._log_interval == 0
+            ):
+                logger.info(
+                    "本地生成进度: call=%s prompt_tokens=%s max_new_tokens=%s",
+                    call_idx,
+                    prompt_len,
+                    self.max_new_tokens,
+                )
 
             generate_kwargs = {
                 "max_new_tokens": self.max_new_tokens,
@@ -112,9 +127,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-turns", type=int, default=10)
     parser.add_argument("--parallel", type=int, default=1, help="沿用 sampler 参数；本地模型建议 1")
     parser.add_argument("--num-scenarios", type=int, default=-1)
+    parser.add_argument("--start-index", type=int, default=None)
+    parser.add_argument("--end-index", type=int, default=None)
+    parser.add_argument("--source-filter", default=None)
+    parser.add_argument("--tps-min", type=float, default=None)
+    parser.add_argument("--tps-max", type=float, default=None)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", default="bfloat16", choices=sorted(_DTYPE_MAP.keys()))
     parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--log-interval", type=int, default=20)
     parser.add_argument("--attn-implementation", default=None,
                         help="可选 attention backend，如 sdpa/eager")
     return parser.parse_args()
@@ -132,6 +153,7 @@ def main() -> None:
         dtype=args.dtype,
         max_new_tokens=args.max_new_tokens,
         attn_implementation=args.attn_implementation,
+        log_interval=args.log_interval,
     )
 
     from data_pipeline.synthesis.trajectory.sampler import _run_eval

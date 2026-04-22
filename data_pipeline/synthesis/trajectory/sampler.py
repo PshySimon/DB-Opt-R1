@@ -439,6 +439,7 @@ def _run_eval(args, llm_fn):
     """
     import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from tqdm import tqdm
 
     # 1. 加载 Cost Model
     logger.info("加载 Cost Model...")
@@ -541,6 +542,7 @@ def _run_eval(args, llm_fn):
     t0 = time.time()
     total_ok = 0
 
+    pbar = tqdm(total=n, desc="eval", dynamic_ncols=True)
     with ThreadPoolExecutor(max_workers=args.parallel) as pool:
         futs = {pool.submit(eval_one, idx): idx for idx in indices}
 
@@ -557,10 +559,16 @@ def _run_eval(args, llm_fn):
 
                 done += 1
                 n_steps = sum(1 for m in result["messages"] if m["role"] == "assistant") if result else 0
+                pbar.update(1)
+                pbar.set_postfix(ok=total_ok, current=s_name[:24], refresh=False)
                 logger.info(f"  [{done}/{n}] {s_name}: {n_steps} 步")
             except Exception as e:
                 done += 1
+                pbar.update(1)
+                pbar.set_postfix(ok=total_ok, current=s_name[:24], refresh=False)
                 logger.error(f"  [{done}/{n}] {s_name}: 失败: {e}")
+
+    pbar.close()
 
     elapsed = time.time() - t0
     logger.info(f"eval 完成: {total_ok}/{n} 个场景, 耗时 {elapsed:.0f}s → {sft_path}")

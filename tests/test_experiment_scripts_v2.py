@@ -93,6 +93,9 @@ class ExperimentScriptsV2Test(unittest.TestCase):
         self.assertIn("python \"${report_args[@]}\"", eval_common)
         self.assertIn('if [ -n "${LOCAL_MODEL_PATH:-}" ]; then', eval_common)
         self.assertIn('scripts/run_local_transformers_eval.py', eval_common)
+        self.assertIn('if [ -n "${START_INDEX:-}" ]; then', eval_common)
+        self.assertIn('if [ -n "${END_INDEX:-}" ]; then', eval_common)
+        self.assertIn('LOCAL_LOG_INTERVAL', eval_common)
 
     def test_rl_train_script_references_v2_rl_assets(self):
         wrapper = (TRAIN_RL_DIR / "verl" / "lora" / "train_frontier_1q.sh").read_text(encoding="utf-8")

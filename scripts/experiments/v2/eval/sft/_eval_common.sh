@@ -42,10 +42,26 @@ run_eval_experiment() {
             --device "${LOCAL_DEVICE:-cuda}"
             --dtype "${LOCAL_DTYPE:-bfloat16}"
             --max-new-tokens "${LOCAL_MAX_NEW_TOKENS:-512}"
+            --log-interval "${LOCAL_LOG_INTERVAL:-20}"
         )
 
         if [ -n "${LOCAL_ATTN_IMPL:-}" ]; then
             local_eval_args+=(--attn-implementation "$LOCAL_ATTN_IMPL")
+        fi
+        if [ -n "${START_INDEX:-}" ]; then
+            local_eval_args+=(--start-index "$START_INDEX")
+        fi
+        if [ -n "${END_INDEX:-}" ]; then
+            local_eval_args+=(--end-index "$END_INDEX")
+        fi
+        if [ -n "${SOURCE_FILTER:-}" ]; then
+            local_eval_args+=(--source-filter "$SOURCE_FILTER")
+        fi
+        if [ -n "${TPS_MIN:-}" ]; then
+            local_eval_args+=(--tps-min "$TPS_MIN")
+        fi
+        if [ -n "${TPS_MAX:-}" ]; then
+            local_eval_args+=(--tps-max "$TPS_MAX")
         fi
 
         python "${local_eval_args[@]}"
