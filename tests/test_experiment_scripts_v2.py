@@ -12,6 +12,7 @@ EVAL_SFT_DIR = REPO_ROOT / "scripts" / "experiments" / "v2" / "eval" / "sft"
 class ExperimentScriptsV2Test(unittest.TestCase):
     def test_expected_script_files_exist(self):
         expected = [
+            REPO_ROOT / "scripts" / "run_local_transformers_eval.py",
             TRAIN_SFT_DIR / "_common.sh",
             TRAIN_SFT_DIR / "trl" / "_common.sh",
             TRAIN_SFT_DIR / "trl" / "lora" / "train_a0_direct_only.sh",
@@ -90,6 +91,8 @@ class ExperimentScriptsV2Test(unittest.TestCase):
         self.assertIn("../../train/sft/_common.sh", eval_common)
         self.assertIn("python \"${sampler_args[@]}\"", eval_common)
         self.assertIn("python \"${report_args[@]}\"", eval_common)
+        self.assertIn('if [ -n "${LOCAL_MODEL_PATH:-}" ]; then', eval_common)
+        self.assertIn('scripts/run_local_transformers_eval.py', eval_common)
 
     def test_rl_train_script_references_v2_rl_assets(self):
         wrapper = (TRAIN_RL_DIR / "verl" / "lora" / "train_frontier_1q.sh").read_text(encoding="utf-8")
