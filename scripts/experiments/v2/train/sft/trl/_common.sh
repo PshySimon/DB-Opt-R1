@@ -39,6 +39,9 @@ run_trl_sft_train_experiment() {
     export BATCH_SIZE="${BATCH_SIZE:-2}"
     export GRAD_ACCUM="${GRAD_ACCUM:-4}"
     export MAX_LENGTH="${MAX_LENGTH:-4096}"
+    export N_GPUS="${N_GPUS:-1}"
+    export CUDA_DEVICES="${CUDA_DEVICES:-0}"
+    export TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$output_dir/train_config.json}"
     export GRADIENT_CHECKPOINTING="${GRADIENT_CHECKPOINTING:-true}"
     export FLASH_ATTN="${FLASH_ATTN:-false}"
     if [ "$train_mode" = "lora" ]; then

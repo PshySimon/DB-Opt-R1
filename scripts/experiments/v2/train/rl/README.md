@@ -32,6 +32,19 @@ RL 这轮只保留 `verl`：
 
 - `model_save/experiments/v2/rl/verl/...`
 
+每次训练也会在输出目录写：
+
+- `train_config.json`
+
+用于回溯 RL 训练所用的：
+
+- checkpoint
+- 数据集
+- 场景文件
+- cost model
+- 训练超参
+- 多卡配置
+
 ## 运行方式
 
 模型路径支持两种方式：
@@ -54,6 +67,24 @@ bash scripts/experiments/v2/train/rl/verl/full/train_frontier_1q.sh /path/to/mod
 - `scripts/train_grpo_verl_full.sh`
 
 因此可以继续附加 Hydra override。
+
+## 多卡
+
+RL 这套 `verl` 训练默认就是多卡入口，主要通过：
+
+- `CUDA_DEVICES`
+- `N_GPUS`
+
+控制。
+
+例如：
+
+```bash
+MODEL_PATH=/path/to/model \
+CUDA_DEVICES=0,1,2,3 \
+N_GPUS=4 \
+bash scripts/experiments/v2/train/rl/verl/lora/train_frontier_1q.sh
+```
 
 ## 默认依赖
 

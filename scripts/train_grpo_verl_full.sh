@@ -2,12 +2,16 @@
 # GRPO 训练启动脚本（verl, 全量）
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_train_common.sh"
+
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"
 export HYDRA_FULL_ERROR=1
 
 SFT_CHECKPOINT="${SFT_CHECKPOINT:-./model_save/sft/global_step_latest/actor}"
 TRAIN_DATA="${TRAIN_DATA:-./datasets/grpo/train.parquet}"
 VAL_DATA="${VAL_DATA:-./datasets/grpo/validation.parquet}"
+OUTPUT_DIR="${OUTPUT_DIR:-./model_save/grpo_full/}"
 COST_MODEL_PATH="${COST_MODEL_PATH:-./cost_model/checkpoints/v9_lgbm}"
 SCENARIO_FILES="${SCENARIO_FILES:-./data_pipeline/data/scenarios/collected/collected_server1.json,./data_pipeline/data/scenarios/collected/collected_server2.json,./data_pipeline/data/scenarios/collected/collected_server3.json}"
 SCENARIO_SOURCE_FILTER="${SCENARIO_SOURCE_FILTER:-llm_generated}"
@@ -39,19 +43,35 @@ EARLY_STOPPING_METRIC="${EARLY_STOPPING_METRIC:-val/compiler_autotuning/db_tunin
 EARLY_STOPPING_MODE="${EARLY_STOPPING_MODE:-max}"
 EARLY_STOPPING_PATIENCE="${EARLY_STOPPING_PATIENCE:-5}"
 EARLY_STOPPING_MIN_DELTA="${EARLY_STOPPING_MIN_DELTA:-0.0}"
+PROJECT_NAME="${PROJECT_NAME:-db_tuning}"
+GRPO_EXPERIMENT_NAME="${GRPO_EXPERIMENT_NAME:-grpo-full}"
+TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"
 
 export CUDA_VISIBLE_DEVICES=$CUDA_DEVICES
+mkdir -p "$OUTPUT_DIR"
+write_train_config_json "$TRAIN_CONFIG_JSON" \
+  SFT_CHECKPOINT TRAIN_DATA VAL_DATA OUTPUT_DIR COST_MODEL_PATH SCENARIO_FILES SCENARIO_SOURCE_FILTER \
+  N_GPUS CUDA_DEVICES LR BATCH_SIZE N_REPEAT TOTAL_STEPS SAVE_FREQ TEST_FREQ MAX_TURNS \
+  MAX_PROMPT_LENGTH MAX_RESPONSE_LENGTH MAX_START_LENGTH MAX_TOOL_RESPONSE_LENGTH \
+  PPO_MINI_BATCH_SIZE PPO_MICRO_BATCH_SIZE REF_LOG_PROB_MICRO_BATCH_SIZE \
+  ROLLOUT_LOG_PROB_MICRO_BATCH_SIZE GPU_MEMORY_UTILIZATION FREE_CACHE_ENGINE \
+  ATTN_IMPL DEBUG_ROLLOUT_DIR REWARD_DEBUG_NUM_EXAMINE VAL_REWARD_DEBUG_NUM_EXAMINE \
+  EARLY_STOPPING_ENABLED EARLY_STOPPING_METRIC EARLY_STOPPING_MODE \
+  EARLY_STOPPING_PATIENCE EARLY_STOPPING_MIN_DELTA PROJECT_NAME \
+  GRPO_EXPERIMENT_NAME TRAIN_CONFIG_JSON
 
 echo "============================================"
 echo "  DB-Opt GRPO 训练 (verl, 全量)"
 echo "============================================"
 echo "SFT Checkpoint: $SFT_CHECKPOINT"
 echo "训练数据: $TRAIN_DATA"
+echo "输出目录: $OUTPUT_DIR"
 echo "Cost Model:  $COST_MODEL_PATH"
 echo "GPU 数量: $N_GPUS"
 echo "N_REPEAT: $N_REPEAT"
 echo "总步数: $TOTAL_STEPS"
 echo "attn_impl: $ATTN_IMPL"
+echo "配置: $TRAIN_CONFIG_JSON"
 echo "============================================"
 
 python3 -m training.verl.main_grpo \
@@ -87,8 +107,9 @@ python3 -m training.verl.main_grpo \
   \
   algorithm.kl_ctrl.kl_coef=0.001 \
   \
-  trainer.project_name=db_tuning \
-  trainer.experiment_name=grpo-full \
+  trainer.default_local_dir=$OUTPUT_DIR \
+  trainer.project_name=$PROJECT_NAME \
+  trainer.experiment_name=$GRPO_EXPERIMENT_NAME \
   trainer.n_gpus_per_node=$N_GPUS \
   trainer.save_freq=$SAVE_FREQ \
   trainer.test_freq=$TEST_FREQ \

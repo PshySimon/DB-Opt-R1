@@ -11,6 +11,8 @@ Usage:
 """
 
 import argparse
+import json
+from pathlib import Path
 import torch
 from datasets import Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -43,12 +45,33 @@ def build_parser():
     parser.add_argument("--gradient_checkpointing", action="store_true", default=True)
     parser.add_argument("--no_gradient_checkpointing", dest="gradient_checkpointing", action="store_false")
     parser.add_argument("--flash_attn", action="store_true", default=False)
+    parser.add_argument("--save_config_path", default=None)
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--use_lora", nargs=0, action=_SetTrainMode, const="lora")
     mode_group.add_argument("--full_finetune", nargs=0, action=_SetTrainMode, const="full")
     parser.set_defaults(use_lora=True, full_finetune=False)
     return parser
+
+
+def is_rank_zero() -> bool:
+    if not torch.distributed.is_available() or not torch.distributed.is_initialized():
+        return True
+    return torch.distributed.get_rank() == 0
+
+
+def save_training_config(args, extra: dict) -> None:
+    if not args.save_config_path or not is_rank_zero():
+        return
+
+    payload = vars(args).copy()
+    payload.update(extra)
+    path = Path(args.save_config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main():
@@ -79,6 +102,18 @@ def main():
     records = filtered
     if len(records) < before:
         print(f"过滤超长轨迹: {before} → {len(records)} 条 (max_length={args.max_length})")
+
+    save_training_config(
+        args,
+        {
+            "records_before_filter": before,
+            "records_after_filter": len(records),
+            "train_mode": "lora" if args.use_lora else "full",
+            "world_size": int(torch.distributed.get_world_size())
+            if torch.distributed.is_available() and torch.distributed.is_initialized()
+            else 1,
+        },
+    )
 
     dataset = Dataset.from_list(records)
 
@@ -124,6 +159,7 @@ def main():
         report_to="none",
         max_steps=args.max_steps,
         seed=42,
+        ddp_find_unused_parameters=False if args.use_lora else None,
     )
 
     # Trainer

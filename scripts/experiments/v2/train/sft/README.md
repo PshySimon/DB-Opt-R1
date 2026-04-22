@@ -33,6 +33,17 @@
 
 - `model_save/experiments/v2/sft/...`
 
+每次训练都会在输出目录额外写一份：
+
+- `train_config.json`
+
+用于回溯：
+
+- 模型路径
+- 数据路径
+- 训练超参
+- 多卡配置
+
 模型路径支持两种方式：
 
 1. 环境变量：
@@ -46,6 +57,30 @@ MODEL_PATH=/path/to/model bash scripts/experiments/v2/train/sft/trl/lora/train_a
 ```bash
 bash scripts/experiments/v2/train/sft/verl/full/train_a0_direct_only.sh /path/to/model
 ```
+
+## 多卡
+
+### `trl`
+
+`trl` 现在支持多卡；当 `N_GPUS>1` 时会自动走 `torchrun`。
+
+例如：
+
+```bash
+MODEL_PATH=/path/to/model \
+CUDA_DEVICES=0,1,2,3 \
+N_GPUS=4 \
+bash scripts/experiments/v2/train/sft/trl/lora/train_b1_depth_trimmed.sh
+```
+
+### `verl`
+
+`verl` 本来就是多卡入口，仍然通过：
+
+- `CUDA_VISIBLE_DEVICES`
+- `N_GPUS`
+
+控制卡数。
 
 ## 评估
 

@@ -8,6 +8,44 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TrainingScriptDefaultsTest(unittest.TestCase):
+    def test_trl_sft_scripts_support_multigpu_and_write_config_json(self):
+        lora_content = (ROOT / "scripts" / "train_sft_trl_lora.sh").read_text()
+        self.assertIn('N_GPUS="${N_GPUS:-1}"', lora_content)
+        self.assertIn('CUDA_DEVICES="${CUDA_DEVICES:-0}"', lora_content)
+        self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', lora_content)
+        self.assertIn("torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS", lora_content)
+        self.assertIn('--save_config_path "$TRAIN_CONFIG_JSON"', lora_content)
+
+        full_content = (ROOT / "scripts" / "train_sft_trl_full.sh").read_text()
+        self.assertIn('N_GPUS="${N_GPUS:-1}"', full_content)
+        self.assertIn('CUDA_DEVICES="${CUDA_DEVICES:-0}"', full_content)
+        self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', full_content)
+        self.assertIn("torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS", full_content)
+        self.assertIn('--save_config_path "$TRAIN_CONFIG_JSON"', full_content)
+
+        trl_entry = (ROOT / "training" / "trl" / "sft.py").read_text()
+        self.assertIn('parser.add_argument("--save_config_path"', trl_entry)
+        self.assertIn("save_training_config(", trl_entry)
+
+    def test_verl_training_scripts_write_config_json(self):
+        sft_lora = (ROOT / "scripts" / "train_sft_verl_lora.sh").read_text()
+        self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$SFT_OUTPUT_DIR/train_config.json}"', sft_lora)
+        self.assertIn("write_train_config_json", sft_lora)
+
+        sft_full = (ROOT / "scripts" / "train_sft_verl_full.sh").read_text()
+        self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$SFT_OUTPUT_DIR/train_config.json}"', sft_full)
+        self.assertIn("write_train_config_json", sft_full)
+
+        grpo_lora = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
+        self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', grpo_lora)
+        self.assertIn("write_train_config_json", grpo_lora)
+        self.assertIn("trainer.default_local_dir=$OUTPUT_DIR", grpo_lora)
+
+        grpo_full = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
+        self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', grpo_full)
+        self.assertIn("write_train_config_json", grpo_full)
+        self.assertIn("trainer.default_local_dir=$OUTPUT_DIR", grpo_full)
+
     def test_verl_sft_lora_uses_multiturn_dataset_fields(self):
         content = (ROOT / "scripts" / "train_sft_verl_lora.sh").read_text()
         self.assertIn('DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"', content)

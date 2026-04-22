@@ -1,6 +1,9 @@
 #!/bin/bash
 # SFT 训练启动脚本（verl, 全量）
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/_train_common.sh"
 
 export VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"
 export HYDRA_FULL_ERROR=1
@@ -8,7 +11,8 @@ export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
 
 BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-3B-Instruct}"
 PROJECT_NAME="${PROJECT_NAME:-db_tuning}"
-SFT_OUTPUT_DIR="${SFT_OUTPUT_DIR:-./model_save/sft_full/}"
+OUTPUT_DIR="${OUTPUT_DIR:-${SFT_OUTPUT_DIR:-./model_save/sft_full/}}"
+SFT_OUTPUT_DIR="$OUTPUT_DIR"
 SFT_EXPERIMENT_NAME="${SFT_EXPERIMENT_NAME:-sft-full-$(basename "$BASE_MODEL")-$(date +%Y%m%d)}"
 DATA_DIR="${DATA_DIR:-./datasets/sft_cleaned}"
 MAX_LENGTH="${MAX_LENGTH:-8192}"
@@ -18,6 +22,13 @@ BATCH_SIZE="${BATCH_SIZE:-16}"
 MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-4}"
 N_GPUS="${N_GPUS:-2}"
 ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"
+TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$SFT_OUTPUT_DIR/train_config.json}"
+
+mkdir -p "$SFT_OUTPUT_DIR"
+write_train_config_json "$TRAIN_CONFIG_JSON" \
+    BASE_MODEL PROJECT_NAME SFT_OUTPUT_DIR SFT_EXPERIMENT_NAME DATA_DIR MAX_LENGTH \
+    LR EPOCHS BATCH_SIZE MICRO_BATCH_SIZE N_GPUS CUDA_VISIBLE_DEVICES \
+    ATTN_IMPL TRAIN_CONFIG_JSON
 
 if [ ! -f "$DATA_DIR/train.parquet" ]; then
     echo "错误: 未找到 $DATA_DIR/train.parquet"
@@ -38,6 +49,7 @@ echo "epochs:       $EPOCHS"
 echo "batch_size:   $BATCH_SIZE"
 echo "GPU 数量:     $N_GPUS"
 echo "attn_impl:    $ATTN_IMPL"
+echo "配置:         $TRAIN_CONFIG_JSON"
 echo "============================================================"
 
 torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \

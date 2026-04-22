@@ -27,8 +27,10 @@ run_verl_rl_train_experiment() {
     train_script="$REPO_ROOT/scripts/train_grpo_verl_${train_mode}.sh"
 
     export SFT_CHECKPOINT="$model_path"
+    export OUTPUT_DIR="$output_dir"
     export TRAIN_DATA="${TRAIN_DATA:-$data_dir/train.parquet}"
     export VAL_DATA="${VAL_DATA:-$data_dir/validation.parquet}"
+    export TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"
     export SCENARIO_FILES="${SCENARIO_FILES:-$V2_RL_SCENARIOS_DEFAULT}"
     export COST_MODEL_PATH="${COST_MODEL_PATH:-$V2_COST_MODEL_DEFAULT}"
     export PROJECT_NAME="${PROJECT_NAME:-db_opt_r1_v2_rl}"
@@ -78,9 +80,5 @@ run_verl_rl_train_experiment() {
     echo "输出目录:     $output_dir"
     echo "============================================"
 
-    exec bash "$train_script" \
-        trainer.default_local_dir="$output_dir" \
-        trainer.project_name="$PROJECT_NAME" \
-        trainer.experiment_name="$GRPO_EXPERIMENT_NAME" \
-        "$@"
+    exec bash "$train_script" "$@"
 }
