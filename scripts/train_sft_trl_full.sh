@@ -18,18 +18,25 @@ FLASH_ATTN="${FLASH_ATTN:-false}"
 CUDA_DEVICES="${CUDA_DEVICES:-0}"
 N_GPUS="${N_GPUS:-1}"
 TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"
+MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
+TORCHRUN_PORT="${TORCHRUN_PORT:-${MASTER_PORT:-}}"
+TORCHRUN_RUN_ID="${TORCHRUN_RUN_ID:-}"
 
 mkdir -p "$OUTPUT_DIR"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-$CUDA_DEVICES}"
 export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"
 export ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"
 N_GPUS="$(infer_n_gpus "$CUDA_VISIBLE_DEVICES" "$N_GPUS")"
+TORCHRUN_PORT="$(infer_torchrun_port "$TORCHRUN_PORT")"
+TORCHRUN_RUN_ID="$(infer_torchrun_run_id "$TORCHRUN_RUN_ID")"
+export MASTER_ADDR TORCHRUN_PORT TORCHRUN_RUN_ID
+export MASTER_PORT="$TORCHRUN_PORT"
 
 write_train_config_json "$TRAIN_CONFIG_JSON" \
     BASE_MODEL DATA_FILES OUTPUT_DIR EPOCHS LR BATCH_SIZE GRAD_ACCUM \
     MAX_LENGTH GRADIENT_CHECKPOINTING FLASH_ATTN \
     CUDA_DEVICES CUDA_VISIBLE_DEVICES HIP_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES \
-    N_GPUS TRAIN_CONFIG_JSON
+    N_GPUS MASTER_ADDR MASTER_PORT TORCHRUN_PORT TORCHRUN_RUN_ID TRAIN_CONFIG_JSON
 
 echo "============================================"
 echo "  SFT 训练 (trl, 全量)"
@@ -39,6 +46,7 @@ echo "数据:     $DATA_FILES"
 echo "输出:     $OUTPUT_DIR"
 echo "Epochs:   $EPOCHS"
 echo "GPU 数量: $N_GPUS"
+echo "Rdzv:     $MASTER_ADDR:$TORCHRUN_PORT ($TORCHRUN_RUN_ID)"
 echo "配置:     $TRAIN_CONFIG_JSON"
 echo "============================================"
 
@@ -64,7 +72,13 @@ if [ "$FLASH_ATTN" = "true" ]; then
 fi
 
 if [ "$N_GPUS" -gt 1 ]; then
-    exec torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS "${cmd[@]:1}"
+    exec torchrun \
+        --nnodes=1 \
+        --nproc_per_node=$N_GPUS \
+        --rdzv-backend=c10d \
+        --rdzv-endpoint="$MASTER_ADDR:$TORCHRUN_PORT" \
+        --rdzv-id="$TORCHRUN_RUN_ID" \
+        "${cmd[@]:1}"
 else
     exec "${cmd[@]}"
 fi

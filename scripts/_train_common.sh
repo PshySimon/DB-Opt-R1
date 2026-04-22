@@ -22,6 +22,38 @@ PY
     echo "1"
 }
 
+infer_torchrun_port() {
+    local requested_port="${1:-}"
+
+    if [ -n "$requested_port" ]; then
+        echo "$requested_port"
+        return
+    fi
+
+    python - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+infer_torchrun_run_id() {
+    local requested_id="${1:-}"
+
+    if [ -n "$requested_id" ]; then
+        echo "$requested_id"
+        return
+    fi
+
+    python - <<'PY'
+import uuid
+
+print(uuid.uuid4().hex)
+PY
+}
+
 write_train_config_json() {
     local output_path="$1"
     shift

@@ -25,13 +25,20 @@ MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-4}"
 N_GPUS="${N_GPUS:-2}"
 ATTN_IMPL="${ATTN_IMPL:-flash_attention_2}"
 TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$SFT_OUTPUT_DIR/train_config.json}"
+MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
+TORCHRUN_PORT="${TORCHRUN_PORT:-${MASTER_PORT:-}}"
+TORCHRUN_RUN_ID="${TORCHRUN_RUN_ID:-}"
 
 mkdir -p "$SFT_OUTPUT_DIR"
+TORCHRUN_PORT="$(infer_torchrun_port "$TORCHRUN_PORT")"
+TORCHRUN_RUN_ID="$(infer_torchrun_run_id "$TORCHRUN_RUN_ID")"
+export MASTER_ADDR TORCHRUN_PORT TORCHRUN_RUN_ID
+export MASTER_PORT="$TORCHRUN_PORT"
 write_train_config_json "$TRAIN_CONFIG_JSON" \
     BASE_MODEL PROJECT_NAME SFT_OUTPUT_DIR SFT_EXPERIMENT_NAME DATA_DIR MAX_LENGTH \
     LR EPOCHS BATCH_SIZE MICRO_BATCH_SIZE N_GPUS CUDA_VISIBLE_DEVICES \
     HIP_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES \
-    ATTN_IMPL TRAIN_CONFIG_JSON
+    ATTN_IMPL MASTER_ADDR MASTER_PORT TORCHRUN_PORT TORCHRUN_RUN_ID TRAIN_CONFIG_JSON
 
 if [ ! -f "$DATA_DIR/train.parquet" ]; then
     echo "错误: 未找到 $DATA_DIR/train.parquet"
@@ -52,10 +59,16 @@ echo "epochs:       $EPOCHS"
 echo "batch_size:   $BATCH_SIZE"
 echo "GPU 数量:     $N_GPUS"
 echo "attn_impl:    $ATTN_IMPL"
+echo "Rdzv:         $MASTER_ADDR:$TORCHRUN_PORT ($TORCHRUN_RUN_ID)"
 echo "配置:         $TRAIN_CONFIG_JSON"
 echo "============================================================"
 
-torchrun --standalone --nnodes=1 --nproc_per_node=$N_GPUS \
+torchrun \
+    --nnodes=1 \
+    --nproc_per_node=$N_GPUS \
+    --rdzv-backend=c10d \
+    --rdzv-endpoint="$MASTER_ADDR:$TORCHRUN_PORT" \
+    --rdzv-id="$TORCHRUN_RUN_ID" \
     -m verl.trainer.sft_trainer \
     data.train_files=$DATA_DIR/train.parquet \
     data.val_files=$DATA_DIR/validation.parquet \
