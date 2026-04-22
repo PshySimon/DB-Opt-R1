@@ -96,6 +96,8 @@ class ExperimentScriptsV2Test(unittest.TestCase):
         self.assertIn('if [ -n "${START_INDEX:-}" ]; then', eval_common)
         self.assertIn('if [ -n "${END_INDEX:-}" ]; then', eval_common)
         self.assertIn('LOCAL_LOG_INTERVAL', eval_common)
+        self.assertIn('ensure_loopback_no_proxy', eval_common)
+        self.assertIn('127.0.0.1,localhost,::1', eval_common)
 
     def test_rl_train_script_references_v2_rl_assets(self):
         wrapper = (TRAIN_RL_DIR / "verl" / "lora" / "train_frontier_1q.sh").read_text(encoding="utf-8")

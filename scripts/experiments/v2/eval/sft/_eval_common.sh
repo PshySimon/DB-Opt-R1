@@ -4,6 +4,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../train/sft/_common.sh"
 
+ensure_loopback_no_proxy() {
+    local api_base="$1"
+
+    case "$api_base" in
+        http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*|http://[::1]:*|https://[::1]:*)
+            local loopback_hosts="127.0.0.1,localhost,::1"
+            export no_proxy="${no_proxy:+$no_proxy,}$loopback_hosts"
+            export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$loopback_hosts"
+            echo "no_proxy:   $NO_PROXY"
+            ;;
+    esac
+}
+
 run_eval_experiment() {
     local exp_id="$1"
     local run_name="${RUN_NAME:-$(date +%Y%m%d_%H%M%S)}"
@@ -93,6 +106,7 @@ run_eval_experiment() {
                 echo "错误: 未设置 PROVIDERS_CONFIG 时，必须提供 API_BASE"
                 exit 1
             fi
+            ensure_loopback_no_proxy "$API_BASE"
             sampler_args+=(--api-base "$API_BASE" --api-key "${API_KEY:-EMPTY}")
         fi
 
