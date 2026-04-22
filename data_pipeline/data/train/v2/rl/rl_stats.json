@@ -1,0 +1,29 @@
+{
+  "pre_outlier_bucket_envs": {
+    "easy": 2705,
+    "all_fail": 4775,
+    "hard_but_learnable": 4619,
+    "frontier": 7301
+  },
+  "post_outlier_bucket_envs": {
+    "easy": 2318,
+    "all_fail": 4775,
+    "hard_but_learnable": 4557,
+    "frontier": 4156
+  },
+  "dropped_high_gain_outlier_envs": 3594,
+  "outputs": {
+    "rl_frontier_1q": {
+      "rows": 4156,
+      "unique_envs": 4156
+    },
+    "rl_hard_1q": {
+      "rows": 4557,
+      "unique_envs": 4557
+    },
+    "rl_frontier_plus_hard_1q": {
+      "rows": 8713,
+      "unique_envs": 8713
+    }
+  }
+}
