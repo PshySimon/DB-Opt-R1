@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import unittest
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -8,12 +9,27 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TrainingScriptDefaultsTest(unittest.TestCase):
+    def test_configure_accelerator_visible_devices_remaps_physical_ids(self):
+        script = """
+source scripts/_train_common.sh
+configure_accelerator_visible_devices "4,5,6,7" "4" "4,5,6,7" "4,5,6,7" ""
+printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEVICES"
+"""
+        result = subprocess.run(
+            ["bash", "-lc", script],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        lines = result.stdout.strip().splitlines()
+        self.assertEqual(lines, ["0,1,2,3", "0,1,2,3", "4,5,6,7"])
+
     def test_trl_sft_scripts_support_multigpu_and_write_config_json(self):
         lora_content = (ROOT / "scripts" / "train_sft_trl_lora.sh").read_text()
         self.assertIn('N_GPUS="${N_GPUS:-1}"', lora_content)
         self.assertIn('CUDA_DEVICES="${CUDA_DEVICES:-0}"', lora_content)
-        self.assertIn('export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', lora_content)
-        self.assertIn('export ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', lora_content)
+        self.assertIn('configure_accelerator_visible_devices', lora_content)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', lora_content)
         self.assertIn('TORCHRUN_PORT="${TORCHRUN_PORT:-${MASTER_PORT:-}}"', lora_content)
         self.assertIn('TORCHRUN_RUN_ID="${TORCHRUN_RUN_ID:-}"', lora_content)
@@ -26,8 +42,7 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         full_content = (ROOT / "scripts" / "train_sft_trl_full.sh").read_text()
         self.assertIn('N_GPUS="${N_GPUS:-1}"', full_content)
         self.assertIn('CUDA_DEVICES="${CUDA_DEVICES:-0}"', full_content)
-        self.assertIn('export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', full_content)
-        self.assertIn('export ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', full_content)
+        self.assertIn('configure_accelerator_visible_devices', full_content)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', full_content)
         self.assertIn('TORCHRUN_PORT="${TORCHRUN_PORT:-${MASTER_PORT:-}}"', full_content)
         self.assertIn('TORCHRUN_RUN_ID="${TORCHRUN_RUN_ID:-}"', full_content)
@@ -40,6 +55,8 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
         common_content = (ROOT / "scripts" / "_train_common.sh").read_text()
         self.assertIn("infer_torchrun_port()", common_content)
         self.assertIn("infer_torchrun_run_id()", common_content)
+        self.assertIn("infer_logical_visible_devices()", common_content)
+        self.assertIn("configure_accelerator_visible_devices()", common_content)
 
         trl_entry = (ROOT / "training" / "trl" / "sft.py").read_text()
         self.assertIn('parser.add_argument("--save_config_path"', trl_entry)
@@ -47,27 +64,23 @@ class TrainingScriptDefaultsTest(unittest.TestCase):
 
     def test_verl_training_scripts_write_config_json(self):
         sft_lora = (ROOT / "scripts" / "train_sft_verl_lora.sh").read_text()
-        self.assertIn('export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', sft_lora)
-        self.assertIn('export ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', sft_lora)
+        self.assertIn('configure_accelerator_visible_devices', sft_lora)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$SFT_OUTPUT_DIR/train_config.json}"', sft_lora)
         self.assertIn("write_train_config_json", sft_lora)
 
         sft_full = (ROOT / "scripts" / "train_sft_verl_full.sh").read_text()
-        self.assertIn('export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', sft_full)
-        self.assertIn('export ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', sft_full)
+        self.assertIn('configure_accelerator_visible_devices', sft_full)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$SFT_OUTPUT_DIR/train_config.json}"', sft_full)
         self.assertIn("write_train_config_json", sft_full)
 
         grpo_lora = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
-        self.assertIn('export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', grpo_lora)
-        self.assertIn('export ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', grpo_lora)
+        self.assertIn('configure_accelerator_visible_devices', grpo_lora)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', grpo_lora)
         self.assertIn("write_train_config_json", grpo_lora)
         self.assertIn("trainer.default_local_dir=$OUTPUT_DIR", grpo_lora)
 
         grpo_full = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
-        self.assertIn('export HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', grpo_full)
-        self.assertIn('export ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-$CUDA_VISIBLE_DEVICES}"', grpo_full)
+        self.assertIn('configure_accelerator_visible_devices', grpo_full)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', grpo_full)
         self.assertIn("write_train_config_json", grpo_full)
         self.assertIn("trainer.default_local_dir=$OUTPUT_DIR", grpo_full)

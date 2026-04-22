@@ -22,6 +22,42 @@ PY
     echo "1"
 }
 
+infer_logical_visible_devices() {
+    local n_gpus="${1:-1}"
+
+    python - "$n_gpus" <<'PY'
+import sys
+
+n = max(int(sys.argv[1]), 1)
+print(",".join(str(i) for i in range(n)))
+PY
+}
+
+configure_accelerator_visible_devices() {
+    local physical_devices="${1:-0}"
+    local n_gpus="${2:-1}"
+    local requested_cuda_visible="${3:-}"
+    local requested_hip_visible="${4:-}"
+    local requested_rocr_visible="${5:-}"
+
+    local logical_devices
+    logical_devices="$(infer_logical_visible_devices "$n_gpus")"
+
+    export ROCR_VISIBLE_DEVICES="${requested_rocr_visible:-$physical_devices}"
+
+    if [ -n "$requested_cuda_visible" ] && [ "$requested_cuda_visible" != "$physical_devices" ]; then
+        export CUDA_VISIBLE_DEVICES="$requested_cuda_visible"
+    else
+        export CUDA_VISIBLE_DEVICES="$logical_devices"
+    fi
+
+    if [ -n "$requested_hip_visible" ] && [ "$requested_hip_visible" != "$physical_devices" ]; then
+        export HIP_VISIBLE_DEVICES="$requested_hip_visible"
+    else
+        export HIP_VISIBLE_DEVICES="$logical_devices"
+    fi
+}
+
 infer_torchrun_port() {
     local requested_port="${1:-}"
 
