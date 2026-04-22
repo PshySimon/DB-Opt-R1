@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import json
+import os
 from pathlib import Path
 import torch
 from datasets import Dataset
@@ -74,9 +75,33 @@ def save_training_config(args, extra: dict) -> None:
     )
 
 
+def maybe_configure_torch_device_for_distributed():
+    """Bind each torchrun worker to its local device before model init.
+
+    Flash Attention 2 availability checks are device-sensitive on ROCm/HIP.
+    Under torchrun, leaving the current device on the default rank-0 device can
+    cause some workers to incorrectly fail the dispatch check even though the
+    visible device set is valid.
+    """
+    local_rank = os.environ.get("LOCAL_RANK")
+    if local_rank is None or not torch.cuda.is_available():
+        return None
+
+    device_index = int(local_rank)
+    if device_index >= torch.cuda.device_count():
+        raise RuntimeError(
+            f"LOCAL_RANK={device_index} 超出可见 GPU 范围 (device_count={torch.cuda.device_count()})"
+        )
+
+    torch.cuda.set_device(device_index)
+    return device_index
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
+
+    maybe_configure_torch_device_for_distributed()
 
     # 先加载 tokenizer（用于筛选超长轨迹）
     tokenizer = AutoTokenizer.from_pretrained(
