@@ -141,8 +141,8 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
 
     def test_requirements_trl_pins_supported_trl_range(self):
         content = (ROOT / "requirements-trl.txt").read_text()
-        self.assertIn("trl>=1.2.0,<1.3", content)
-        self.assertIn("transformers>=4.56.2,<6", content)
+        self.assertIn("trl==1.2.0", content)
+        self.assertIn("transformers==5.6.0", content)
 
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
