@@ -136,7 +136,7 @@ def build_sft_config_kwargs(args, has_eval: bool):
         "gradient_accumulation_steps": args.grad_accum,
         "learning_rate": args.lr,
         "warmup_ratio": 0.1,
-        "max_seq_length": args.max_length,
+        "max_length": args.max_length,
         "bf16": args.bf16,
         "fp16": not args.bf16,
         "gradient_checkpointing": args.gradient_checkpointing,

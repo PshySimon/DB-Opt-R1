@@ -108,6 +108,8 @@ class TrlSftConfigTest(unittest.TestCase):
         kwargs = sft.build_sft_config_kwargs(args, has_eval=True)
 
         self.assertTrue(kwargs["assistant_only_loss"])
+        self.assertEqual(kwargs["max_length"], 8192)
+        self.assertNotIn("max_seq_length", kwargs)
         self.assertEqual(kwargs["eval_strategy"], "steps")
         self.assertEqual(kwargs["eval_steps"], 50)
         self.assertTrue(kwargs["load_best_model_at_end"])
@@ -132,6 +134,8 @@ class TrlSftConfigTest(unittest.TestCase):
         kwargs = sft.build_sft_config_kwargs(args, has_eval=False)
 
         self.assertTrue(kwargs["assistant_only_loss"])
+        self.assertEqual(kwargs["max_length"], 8192)
+        self.assertNotIn("max_seq_length", kwargs)
         self.assertNotIn("eval_strategy", kwargs)
         self.assertNotIn("load_best_model_at_end", kwargs)
 
