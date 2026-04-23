@@ -143,6 +143,7 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         content = (ROOT / "requirements-trl.txt").read_text()
         self.assertIn("trl==1.2.0", content)
         self.assertIn("transformers==5.5.4", content)
+        self.assertIn("peft==0.18.1", content)
 
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
