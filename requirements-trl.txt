@@ -1,2 +1,3 @@
 -r requirements.txt
 trl>=1.2.0,<1.3
+transformers>=4.56.2,<6

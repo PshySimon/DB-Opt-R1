@@ -2,10 +2,12 @@ import importlib
 import importlib.machinery
 import os
 import sys
+import tempfile
 import types
 import unittest
 from unittest import mock
 from types import SimpleNamespace
+from pathlib import Path
 
 
 def load_sft_module():
@@ -103,6 +105,7 @@ class TrlSftConfigTest(unittest.TestCase):
             gradient_checkpointing=True,
             max_steps=-1,
             use_lora=True,
+            chat_template_path=None,
         )
 
         kwargs = sft.build_sft_config_kwargs(args, has_eval=True)
@@ -129,6 +132,7 @@ class TrlSftConfigTest(unittest.TestCase):
             gradient_checkpointing=True,
             max_steps=-1,
             use_lora=False,
+            chat_template_path=None,
         )
 
         kwargs = sft.build_sft_config_kwargs(args, has_eval=False)
@@ -138,6 +142,63 @@ class TrlSftConfigTest(unittest.TestCase):
         self.assertNotIn("max_seq_length", kwargs)
         self.assertNotIn("eval_strategy", kwargs)
         self.assertNotIn("load_best_model_at_end", kwargs)
+
+
+class TrlSftAssistantMaskSupportTest(unittest.TestCase):
+    def test_resolve_training_chat_template_path_uses_qwen3_template_when_available(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            template_path = Path(tmpdir) / "qwen3_training.jinja"
+            template_path.write_text("{{ 'qwen3' }}", encoding="utf-8")
+
+            with mock.patch.object(sft, "TRL_CHAT_TEMPLATES_DIR", Path(tmpdir)):
+                resolved = sft.resolve_training_chat_template_path(
+                    model_path="/root/workspace/models/Qwen3-8B",
+                    explicit_path=None,
+                )
+
+        self.assertEqual(resolved, str(template_path))
+
+    def test_validate_assistant_mask_support_rejects_empty_masks(self):
+        tokenizer = mock.Mock()
+        tokenizer.apply_chat_template.return_value = {
+            "input_ids": [1, 2, 3],
+            "assistant_masks": [0, 0, 0],
+        }
+
+        records = [
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "hello"},
+                ]
+            }
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "assistant mask"):
+            sft.validate_assistant_mask_support(records, tokenizer)
+
+    def test_validate_assistant_mask_support_accepts_non_empty_masks(self):
+        tokenizer = mock.Mock()
+        tokenizer.apply_chat_template.return_value = {
+            "input_ids": [1, 2, 3],
+            "assistant_masks": [0, 1, 1],
+        }
+
+        records = [
+            {
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "assistant", "content": "hello"},
+                ]
+            }
+        ]
+
+        sft.validate_assistant_mask_support(records, tokenizer)
+
+    def test_validate_transformers_version_for_assistant_masks_requires_supported_version(self):
+        with mock.patch.object(sft.transformers, "__version__", "4.51.1"):
+            with self.assertRaisesRegex(RuntimeError, "transformers>=4.56.2"):
+                sft.validate_transformers_version_for_assistant_masks()
 
 
 if __name__ == "__main__":

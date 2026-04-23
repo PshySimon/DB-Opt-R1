@@ -17,11 +17,22 @@ from pathlib import Path
 import random
 import torch
 from datasets import Dataset
+from packaging.version import Version
+import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
+import trl
 from trl import SFTConfig, SFTTrainer
 from peft import LoraConfig
 
 from training.data_utils import load_sft_data
+
+
+MIN_TRANSFORMERS_FOR_ASSISTANT_MASKS = Version("4.56.2")
+TRL_CHAT_TEMPLATES_DIR = (
+    Path(trl.__file__).resolve().parent / "chat_templates"
+    if getattr(trl, "__file__", None)
+    else Path("chat_templates")
+)
 
 
 class _SetTrainMode(argparse.Action):
@@ -51,6 +62,7 @@ def build_parser():
     parser.add_argument("--no_gradient_checkpointing", dest="gradient_checkpointing", action="store_false")
     parser.add_argument("--flash_attn", action="store_true", default=False)
     parser.add_argument("--save_config_path", default=None)
+    parser.add_argument("--chat_template_path", default=None)
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--use_lora", nargs=0, action=_SetTrainMode, const="lora")
@@ -99,6 +111,88 @@ def maybe_configure_torch_device_for_distributed():
 
     torch.cuda.set_device(device_index)
     return device_index
+
+
+def validate_transformers_version_for_assistant_masks():
+    current = Version(transformers.__version__)
+    if current < MIN_TRANSFORMERS_FOR_ASSISTANT_MASKS:
+        raise RuntimeError(
+            "当前 TRL SFT 的 assistant-only loss 依赖 "
+            f"transformers>={MIN_TRANSFORMERS_FOR_ASSISTANT_MASKS}，"
+            f"但当前环境是 {transformers.__version__}。"
+        )
+
+
+def resolve_training_chat_template_path(model_path: str, explicit_path: str | None = None) -> str | None:
+    if explicit_path:
+        return explicit_path
+
+    lowered = str(model_path).lower()
+    candidate_names = []
+    if "qwen3" in lowered:
+        candidate_names.append("qwen3_training.jinja")
+    elif any(tag in lowered for tag in ("qwen2.5", "qwen2_5", "qwen2-5")):
+        candidate_names.append("qwen2_5_training.jinja")
+
+    for candidate_name in candidate_names:
+        candidate_path = TRL_CHAT_TEMPLATES_DIR / candidate_name
+        if candidate_path.exists():
+            return str(candidate_path)
+    return None
+
+
+def maybe_apply_training_chat_template(args, tokenizer) -> str | None:
+    chat_template_path = resolve_training_chat_template_path(
+        model_path=args.model_path,
+        explicit_path=args.chat_template_path,
+    )
+    if chat_template_path:
+        tokenizer.chat_template = Path(chat_template_path).read_text(encoding="utf-8")
+        args.chat_template_path = chat_template_path
+    return chat_template_path
+
+
+def extract_chat_template_kwargs(record: dict) -> dict:
+    kwargs = dict(record.get("chat_template_kwargs") or {})
+    enable_thinking = record.get("enable_thinking")
+    if enable_thinking is not None:
+        kwargs["enable_thinking"] = enable_thinking
+    return kwargs
+
+
+def extract_tools(record: dict):
+    tools = record.get("tools")
+    return json.loads(tools) if isinstance(tools, str) else tools
+
+
+def validate_assistant_mask_support(records, tokenizer):
+    sample = next(
+        (
+            record
+            for record in records
+            if any(message.get("role") == "assistant" for message in record.get("messages", []))
+        ),
+        None,
+    )
+    if sample is None:
+        return
+
+    processed = tokenizer.apply_chat_template(
+        sample["messages"],
+        tools=extract_tools(sample),
+        tokenize=True,
+        return_dict=True,
+        return_assistant_tokens_mask=True,
+        **extract_chat_template_kwargs(sample),
+    )
+    assistant_masks = processed.get("assistant_masks")
+    mask_values = assistant_masks.tolist() if hasattr(assistant_masks, "tolist") else assistant_masks
+    if not mask_values or 1 not in mask_values:
+        raise RuntimeError(
+            "TRL assistant-only loss 的 assistant mask 预检查失败：当前 tokenizer/chat template "
+            "没有为 assistant token 生成有效 mask。请确认 transformers 版本满足要求，并使用带 "
+            "`{% generation %}` 的训练模板。"
+        )
 
 
 def filter_records_by_max_length(records, tokenizer, max_length: int):
@@ -150,6 +244,9 @@ def build_sft_config_kwargs(args, has_eval: bool):
         "assistant_only_loss": True,
         "ddp_find_unused_parameters": False if args.use_lora else None,
     }
+    chat_template_path = getattr(args, "chat_template_path", None)
+    if chat_template_path:
+        kwargs["chat_template_path"] = chat_template_path
     if has_eval:
         kwargs.update(
             {
@@ -168,11 +265,13 @@ def main():
     args = parser.parse_args()
 
     maybe_configure_torch_device_for_distributed()
+    validate_transformers_version_for_assistant_masks()
 
     # 先加载 tokenizer（用于筛选超长轨迹）
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_path, trust_remote_code=True
     )
+    chat_template_path = maybe_apply_training_chat_template(args, tokenizer)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     if args.flash_attn:
@@ -196,6 +295,8 @@ def main():
         eval_before_filter = 0
         train_records, eval_records = split_train_eval_records(records, args.train_ratio, args.seed)
 
+    validate_assistant_mask_support(train_records, tokenizer)
+
     save_training_config(
         args,
         {
@@ -205,6 +306,7 @@ def main():
             "eval_records": len(eval_records),
             "eval_records_before_filter": eval_before_filter,
             "train_mode": "lora" if args.use_lora else "full",
+            "chat_template_path": chat_template_path,
             "world_size": int(torch.distributed.get_world_size())
             if torch.distributed.is_available() and torch.distributed.is_initialized()
             else 1,
