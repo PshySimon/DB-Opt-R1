@@ -139,6 +139,10 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn("flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE", content)
         self.assertNotIn("flashinfer-python", content)
 
+    def test_requirements_trl_pins_supported_trl_range(self):
+        content = (ROOT / "requirements-trl.txt").read_text()
+        self.assertIn("trl>=1.2.0,<1.3", content)
+
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
         self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', lora_content)

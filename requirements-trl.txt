@@ -1,2 +1,2 @@
 -r requirements.txt
-trl>=0.14,<0.17
+trl>=1.2.0,<1.3
