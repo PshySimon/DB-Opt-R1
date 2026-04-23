@@ -250,6 +250,7 @@ def build_sft_config_kwargs(args, has_eval: bool):
     if has_eval:
         kwargs.update(
             {
+                "per_device_eval_batch_size": args.batch_size,
                 "eval_strategy": "steps",
                 "eval_steps": 50,
                 "load_best_model_at_end": True,

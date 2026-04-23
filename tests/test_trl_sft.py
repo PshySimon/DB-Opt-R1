@@ -113,6 +113,7 @@ class TrlSftConfigTest(unittest.TestCase):
         self.assertTrue(kwargs["assistant_only_loss"])
         self.assertEqual(kwargs["max_length"], 8192)
         self.assertNotIn("max_seq_length", kwargs)
+        self.assertEqual(kwargs["per_device_eval_batch_size"], 2)
         self.assertEqual(kwargs["eval_strategy"], "steps")
         self.assertEqual(kwargs["eval_steps"], 50)
         self.assertTrue(kwargs["load_best_model_at_end"])
@@ -140,6 +141,7 @@ class TrlSftConfigTest(unittest.TestCase):
         self.assertTrue(kwargs["assistant_only_loss"])
         self.assertEqual(kwargs["max_length"], 8192)
         self.assertNotIn("max_seq_length", kwargs)
+        self.assertNotIn("per_device_eval_batch_size", kwargs)
         self.assertNotIn("eval_strategy", kwargs)
         self.assertNotIn("load_best_model_at_end", kwargs)
 
