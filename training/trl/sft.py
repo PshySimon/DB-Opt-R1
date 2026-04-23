@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import random
 import torch
 from datasets import Dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -42,6 +43,9 @@ def build_parser():
     parser.add_argument("--max_length", type=int, default=8192)
     parser.add_argument("--lora_rank", type=int, default=64)
     parser.add_argument("--max_steps", type=int, default=-1)
+    parser.add_argument("--train_ratio", type=float, default=0.95)
+    parser.add_argument("--eval_data_files", nargs="*", default=None)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--gradient_checkpointing", action="store_true", default=True)
     parser.add_argument("--no_gradient_checkpointing", dest="gradient_checkpointing", action="store_false")
@@ -97,6 +101,68 @@ def maybe_configure_torch_device_for_distributed():
     return device_index
 
 
+def filter_records_by_max_length(records, tokenizer, max_length: int):
+    filtered = []
+    for record in records:
+        msgs = record.get("messages", [])
+        text = tokenizer.apply_chat_template(msgs, tokenize=False)
+        n_tokens = len(tokenizer.encode(text, add_special_tokens=False))
+        if n_tokens <= max_length:
+            filtered.append(record)
+    return filtered
+
+
+def split_train_eval_records(records, train_ratio: float, seed: int):
+    if not 0 < train_ratio < 1:
+        raise ValueError(f"train_ratio 必须在 (0, 1) 区间内，当前为 {train_ratio}")
+
+    shuffled = list(records)
+    random.Random(seed).shuffle(shuffled)
+    split_idx = int(len(shuffled) * train_ratio)
+    train_records = shuffled[:split_idx]
+    eval_records = shuffled[split_idx:]
+
+    if not eval_records and len(train_records) > 1:
+        eval_records = [train_records.pop()]
+
+    return train_records, eval_records
+
+
+def build_sft_config_kwargs(args, has_eval: bool):
+    kwargs = {
+        "output_dir": args.output_dir,
+        "num_train_epochs": args.num_epochs,
+        "per_device_train_batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.grad_accum,
+        "learning_rate": args.lr,
+        "warmup_ratio": 0.1,
+        "max_seq_length": args.max_length,
+        "bf16": args.bf16,
+        "fp16": not args.bf16,
+        "gradient_checkpointing": args.gradient_checkpointing,
+        "logging_steps": 5,
+        "save_steps": 50,
+        "save_strategy": "steps",
+        "save_total_limit": 3,
+        "report_to": "none",
+        "max_steps": args.max_steps,
+        "seed": args.seed,
+        "assistant_only_loss": True,
+        "ddp_find_unused_parameters": False if args.use_lora else None,
+    }
+    if has_eval:
+        kwargs.update(
+            {
+                "eval_strategy": "steps",
+                "eval_steps": 50,
+                "load_best_model_at_end": True,
+                "metric_for_best_model": "eval_loss",
+                "greater_is_better": False,
+            }
+        )
+    return kwargs
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -114,25 +180,30 @@ def main():
 
     # 加载数据
     records = load_sft_data(args.data_files)
+    train_before_filter = len(records)
+    records = filter_records_by_max_length(records, tokenizer, args.max_length)
+    if len(records) < train_before_filter:
+        print(f"过滤超长轨迹: {train_before_filter} → {len(records)} 条 (max_length={args.max_length})")
 
-    # 按 token 数过滤超长轨迹（截断的轨迹不完整，直接丢弃）
-    before = len(records)
-    filtered = []
-    for r in records:
-        msgs = r.get("messages", [])
-        text = tokenizer.apply_chat_template(msgs, tokenize=False)
-        n_tokens = len(tokenizer.encode(text, add_special_tokens=False))
-        if n_tokens <= args.max_length:
-            filtered.append(r)
-    records = filtered
-    if len(records) < before:
-        print(f"过滤超长轨迹: {before} → {len(records)} 条 (max_length={args.max_length})")
+    if args.eval_data_files:
+        eval_records = load_sft_data(args.eval_data_files)
+        eval_before_filter = len(eval_records)
+        eval_records = filter_records_by_max_length(eval_records, tokenizer, args.max_length)
+        if len(eval_records) < eval_before_filter:
+            print(f"过滤超长验证轨迹: {eval_before_filter} → {len(eval_records)} 条 (max_length={args.max_length})")
+        train_records = records
+    else:
+        eval_before_filter = 0
+        train_records, eval_records = split_train_eval_records(records, args.train_ratio, args.seed)
 
     save_training_config(
         args,
         {
-            "records_before_filter": before,
+            "records_before_filter": train_before_filter,
             "records_after_filter": len(records),
+            "train_records": len(train_records),
+            "eval_records": len(eval_records),
+            "eval_records_before_filter": eval_before_filter,
             "train_mode": "lora" if args.use_lora else "full",
             "world_size": int(torch.distributed.get_world_size())
             if torch.distributed.is_available() and torch.distributed.is_initialized()
@@ -140,7 +211,8 @@ def main():
         },
     )
 
-    dataset = Dataset.from_list(records)
+    dataset = Dataset.from_list(train_records)
+    eval_dataset = Dataset.from_list(eval_records) if eval_records else None
 
     # 加载模型
     print(f"加载模型: {args.model_path}")
@@ -167,31 +239,14 @@ def main():
         )
 
     # 训练配置
-    training_args = SFTConfig(
-        output_dir=args.output_dir,
-        num_train_epochs=args.num_epochs,
-        per_device_train_batch_size=args.batch_size,
-        gradient_accumulation_steps=args.grad_accum,
-        learning_rate=args.lr,
-        warmup_ratio=0.1,
-        max_seq_length=args.max_length,
-        bf16=args.bf16,
-        fp16=not args.bf16,
-        gradient_checkpointing=args.gradient_checkpointing,
-        logging_steps=5,
-        save_steps=50,
-        save_total_limit=3,
-        report_to="none",
-        max_steps=args.max_steps,
-        seed=42,
-        ddp_find_unused_parameters=False if args.use_lora else None,
-    )
+    training_args = SFTConfig(**build_sft_config_kwargs(args, has_eval=eval_dataset is not None))
 
     # Trainer
     trainer = SFTTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
+        eval_dataset=eval_dataset,
         processing_class=tokenizer,
         peft_config=peft_config,
     )

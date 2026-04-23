@@ -29,6 +29,8 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         lora_content = (ROOT / "scripts" / "train_sft_trl_lora.sh").read_text()
         self.assertIn('N_GPUS="${N_GPUS:-1}"', lora_content)
         self.assertIn('CUDA_DEVICES="${CUDA_DEVICES:-0}"', lora_content)
+        self.assertIn('MAX_LENGTH="${MAX_LENGTH:-8192}"', lora_content)
+        self.assertIn('SFT_TRAIN_RATIO="${SFT_TRAIN_RATIO:-0.95}"', lora_content)
         self.assertIn('configure_accelerator_visible_devices', lora_content)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', lora_content)
         self.assertIn('TORCHRUN_PORT="${TORCHRUN_PORT:-${MASTER_PORT:-}}"', lora_content)
@@ -38,10 +40,13 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn("--rdzv-endpoint=\"$MASTER_ADDR:$TORCHRUN_PORT\"", lora_content)
         self.assertIn("--rdzv-id=\"$TORCHRUN_RUN_ID\"", lora_content)
         self.assertIn('--save_config_path "$TRAIN_CONFIG_JSON"', lora_content)
+        self.assertIn('--train_ratio $SFT_TRAIN_RATIO', lora_content)
 
         full_content = (ROOT / "scripts" / "train_sft_trl_full.sh").read_text()
         self.assertIn('N_GPUS="${N_GPUS:-1}"', full_content)
         self.assertIn('CUDA_DEVICES="${CUDA_DEVICES:-0}"', full_content)
+        self.assertIn('MAX_LENGTH="${MAX_LENGTH:-8192}"', full_content)
+        self.assertIn('SFT_TRAIN_RATIO="${SFT_TRAIN_RATIO:-0.95}"', full_content)
         self.assertIn('configure_accelerator_visible_devices', full_content)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', full_content)
         self.assertIn('TORCHRUN_PORT="${TORCHRUN_PORT:-${MASTER_PORT:-}}"', full_content)
@@ -51,6 +56,7 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn("--rdzv-endpoint=\"$MASTER_ADDR:$TORCHRUN_PORT\"", full_content)
         self.assertIn("--rdzv-id=\"$TORCHRUN_RUN_ID\"", full_content)
         self.assertIn('--save_config_path "$TRAIN_CONFIG_JSON"', full_content)
+        self.assertIn('--train_ratio $SFT_TRAIN_RATIO', full_content)
 
         common_content = (ROOT / "scripts" / "_train_common.sh").read_text()
         self.assertIn("infer_torchrun_port()", common_content)
@@ -60,6 +66,9 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
 
         trl_entry = (ROOT / "training" / "trl" / "sft.py").read_text()
         self.assertIn('parser.add_argument("--save_config_path"', trl_entry)
+        self.assertIn('parser.add_argument("--train_ratio"', trl_entry)
+        self.assertIn('"assistant_only_loss": True', trl_entry)
+        self.assertIn('eval_dataset=eval_dataset', trl_entry)
         self.assertIn("save_training_config(", trl_entry)
 
     def test_verl_training_scripts_write_config_json(self):
