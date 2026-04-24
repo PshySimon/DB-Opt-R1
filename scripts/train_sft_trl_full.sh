@@ -19,6 +19,9 @@ FLASH_ATTN="${FLASH_ATTN:-false}"
 CUDA_DEVICES="${CUDA_DEVICES:-0}"
 N_GPUS="${N_GPUS:-1}"
 TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"
+DEEPSPEED_CONFIG="${DEEPSPEED_CONFIG:-}"
+FSDP="${FSDP:-}"
+FSDP_CONFIG="${FSDP_CONFIG:-}"
 MASTER_ADDR="${MASTER_ADDR:-127.0.0.1}"
 TORCHRUN_PORT="${TORCHRUN_PORT:-${MASTER_PORT:-}}"
 TORCHRUN_RUN_ID="${TORCHRUN_RUN_ID:-}"
@@ -42,6 +45,7 @@ export MASTER_PORT="$TORCHRUN_PORT"
 write_train_config_json "$TRAIN_CONFIG_JSON" \
     BASE_MODEL DATA_FILES OUTPUT_DIR EPOCHS LR BATCH_SIZE GRAD_ACCUM \
     MAX_LENGTH SFT_TRAIN_RATIO GRADIENT_CHECKPOINTING FLASH_ATTN \
+    DEEPSPEED_CONFIG FSDP FSDP_CONFIG \
     CUDA_DEVICES CUDA_VISIBLE_DEVICES HIP_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES \
     N_GPUS MASTER_ADDR MASTER_PORT TORCHRUN_PORT TORCHRUN_RUN_ID TRAIN_CONFIG_JSON
 
@@ -53,6 +57,12 @@ echo "数据:     $DATA_FILES"
 echo "输出:     $OUTPUT_DIR"
 echo "Epochs:   $EPOCHS"
 echo "GPU 数量: $N_GPUS"
+if [ -n "$DEEPSPEED_CONFIG" ]; then
+    echo "DeepSpeed: $DEEPSPEED_CONFIG"
+fi
+if [ -n "$FSDP" ]; then
+    echo "FSDP:      $FSDP"
+fi
 echo "Rdzv:     $MASTER_ADDR:$TORCHRUN_PORT ($TORCHRUN_RUN_ID)"
 echo "配置:     $TRAIN_CONFIG_JSON"
 echo "============================================"
@@ -77,6 +87,15 @@ if [ "$GRADIENT_CHECKPOINTING" = "false" ]; then
 fi
 if [ "$FLASH_ATTN" = "true" ]; then
     cmd+=(--flash_attn)
+fi
+if [ -n "$DEEPSPEED_CONFIG" ]; then
+    cmd+=(--deepspeed "$DEEPSPEED_CONFIG")
+fi
+if [ -n "$FSDP" ]; then
+    cmd+=(--fsdp "$FSDP")
+fi
+if [ -n "$FSDP_CONFIG" ]; then
+    cmd+=(--fsdp_config "$FSDP_CONFIG")
 fi
 
 if [ "$N_GPUS" -gt 1 ]; then

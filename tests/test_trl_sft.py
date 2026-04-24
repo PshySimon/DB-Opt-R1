@@ -106,6 +106,9 @@ class TrlSftConfigTest(unittest.TestCase):
             max_steps=-1,
             use_lora=True,
             chat_template_path=None,
+            deepspeed=None,
+            fsdp=None,
+            fsdp_config=None,
         )
 
         kwargs = sft.build_sft_config_kwargs(args, has_eval=True)
@@ -134,6 +137,9 @@ class TrlSftConfigTest(unittest.TestCase):
             max_steps=-1,
             use_lora=False,
             chat_template_path=None,
+            deepspeed=None,
+            fsdp=None,
+            fsdp_config=None,
         )
 
         kwargs = sft.build_sft_config_kwargs(args, has_eval=False)
@@ -144,6 +150,39 @@ class TrlSftConfigTest(unittest.TestCase):
         self.assertNotIn("per_device_eval_batch_size", kwargs)
         self.assertNotIn("eval_strategy", kwargs)
         self.assertNotIn("load_best_model_at_end", kwargs)
+
+    def test_build_sft_config_kwargs_forwards_distributed_backend_options(self):
+        args = SimpleNamespace(
+            output_dir="/tmp/out",
+            num_epochs=3,
+            batch_size=1,
+            grad_accum=8,
+            lr=1e-5,
+            max_length=8192,
+            seed=42,
+            bf16=True,
+            gradient_checkpointing=True,
+            max_steps=-1,
+            use_lora=False,
+            chat_template_path=None,
+            deepspeed="configs/deepspeed_zero3_bf16.json",
+            fsdp=None,
+            fsdp_config=None,
+        )
+
+        kwargs = sft.build_sft_config_kwargs(args, has_eval=False)
+
+        self.assertEqual(kwargs["deepspeed"], "configs/deepspeed_zero3_bf16.json")
+
+    def test_validate_distributed_backend_args_rejects_deepspeed_with_fsdp(self):
+        args = SimpleNamespace(
+            deepspeed="configs/deepspeed_zero3_bf16.json",
+            fsdp="full_shard auto_wrap",
+            fsdp_config=None,
+        )
+
+        with self.assertRaisesRegex(ValueError, "不能同时启用 DeepSpeed 和 FSDP"):
+            sft.validate_distributed_backend_args(args)
 
 
 class TrlSftAssistantMaskSupportTest(unittest.TestCase):

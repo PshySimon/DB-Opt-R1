@@ -63,12 +63,26 @@ def build_parser():
     parser.add_argument("--flash_attn", action="store_true", default=False)
     parser.add_argument("--save_config_path", default=None)
     parser.add_argument("--chat_template_path", default=None)
+    parser.add_argument("--deepspeed", default=None, help="DeepSpeed 配置 JSON 路径或 JSON 字符串")
+    parser.add_argument("--fsdp", default=None, help="Transformers TrainingArguments 的 FSDP 策略字符串")
+    parser.add_argument("--fsdp_config", default=None, help="FSDP 配置 JSON 路径或 JSON 字符串")
 
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--use_lora", nargs=0, action=_SetTrainMode, const="lora")
     mode_group.add_argument("--full_finetune", nargs=0, action=_SetTrainMode, const="full")
     parser.set_defaults(use_lora=True, full_finetune=False)
     return parser
+
+
+def validate_distributed_backend_args(args) -> None:
+    deepspeed = getattr(args, "deepspeed", None)
+    fsdp = getattr(args, "fsdp", None)
+    fsdp_config = getattr(args, "fsdp_config", None)
+
+    if deepspeed and (fsdp or fsdp_config):
+        raise ValueError("不能同时启用 DeepSpeed 和 FSDP，请只设置其中一种分布式优化后端。")
+    if fsdp_config and not fsdp:
+        raise ValueError("--fsdp_config 需要同时设置 --fsdp。")
 
 
 def is_rank_zero() -> bool:
@@ -247,6 +261,15 @@ def build_sft_config_kwargs(args, has_eval: bool):
     chat_template_path = getattr(args, "chat_template_path", None)
     if chat_template_path:
         kwargs["chat_template_path"] = chat_template_path
+    deepspeed = getattr(args, "deepspeed", None)
+    if deepspeed:
+        kwargs["deepspeed"] = deepspeed
+    fsdp = getattr(args, "fsdp", None)
+    if fsdp:
+        kwargs["fsdp"] = fsdp
+    fsdp_config = getattr(args, "fsdp_config", None)
+    if fsdp_config:
+        kwargs["fsdp_config"] = fsdp_config
     if has_eval:
         kwargs.update(
             {
@@ -264,6 +287,7 @@ def build_sft_config_kwargs(args, has_eval: bool):
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    validate_distributed_backend_args(args)
 
     maybe_configure_torch_device_for_distributed()
     validate_transformers_version_for_assistant_masks()
@@ -316,6 +340,7 @@ def main():
 
     dataset = Dataset.from_list(train_records)
     eval_dataset = Dataset.from_list(eval_records) if eval_records else None
+    training_args = SFTConfig(**build_sft_config_kwargs(args, has_eval=eval_dataset is not None))
 
     # 加载模型
     print(f"加载模型: {args.model_path}")
@@ -340,9 +365,6 @@ def main():
             ],
             task_type="CAUSAL_LM",
         )
-
-    # 训练配置
-    training_args = SFTConfig(**build_sft_config_kwargs(args, has_eval=eval_dataset is not None))
 
     # Trainer
     trainer = SFTTrainer(
