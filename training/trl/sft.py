@@ -284,6 +284,45 @@ def build_sft_config_kwargs(args, has_eval: bool):
     return kwargs
 
 
+def get_logical_param_numel(param) -> int:
+    """DeepSpeed ZeRO-3 may shard tensors so local numel can be 0."""
+    ds_numel = getattr(param, "ds_numel", None)
+    if ds_numel is not None:
+        return int(ds_numel)
+    return int(param.numel())
+
+
+def collect_param_stats(model) -> dict:
+    total, trainable = 0, 0
+    frozen_bytes, trainable_bytes = 0, 0
+    local_param_bytes = 0
+
+    for p in model.parameters():
+        logical_n = get_logical_param_numel(p)
+        local_n = int(p.numel())
+        elem_bytes = p.element_size()
+
+        total += logical_n
+        local_param_bytes += local_n * elem_bytes
+        logical_bytes = logical_n * elem_bytes
+        if p.requires_grad:
+            trainable += logical_n
+            trainable_bytes += logical_bytes
+        else:
+            frozen_bytes += logical_bytes
+
+    return {
+        "total": total,
+        "trainable": trainable,
+        "trainable_ratio": trainable / total if total else 0.0,
+        "frozen_bytes": frozen_bytes,
+        "trainable_bytes": trainable_bytes,
+        "grad_bytes": trainable * 2,
+        "optim_bytes": trainable * 12,
+        "local_param_bytes": local_param_bytes,
+    }
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -392,34 +431,25 @@ def main():
         print(f"{'='*60}")
 
     def print_param_stats(model):
-        total, trainable = 0, 0
-        frozen_bytes, trainable_bytes = 0, 0
-        for p in model.parameters():
-            n = p.numel()
-            total += n
-            b = n * p.element_size()
-            if p.requires_grad:
-                trainable += n
-                trainable_bytes += b
-            else:
-                frozen_bytes += b
-
-        # 可训练参数的优化器开销: master(fp32) + m(fp32) + v(fp32) = 12 bytes/param
-        optim_bytes = trainable * 12
-        grad_bytes = trainable * 2  # bf16 梯度
+        stats = collect_param_stats(model)
 
         print(f"\n{'='*60}")
         print(f"  参数 & 显存拆解（理论值）")
         print(f"{'='*60}")
-        print(f"  总参数:           {total/1e6:>10.1f} M")
-        print(f"  可训练参数:       {trainable/1e6:>10.1f} M  ({trainable/total:.2%})")
+        print(f"  总参数:           {stats['total']/1e6:>10.1f} M")
+        print(f"  可训练参数:       {stats['trainable']/1e6:>10.1f} M  ({stats['trainable_ratio']:.2%})")
         print(f"{'─'*60}")
-        print(f"  冻结模型 (bf16):  {frozen_bytes/1024**3:>10.2f} GB")
-        print(f"  可训练参数 (bf16):{trainable_bytes/1024**3:>10.2f} GB")
-        print(f"  梯度 (bf16):      {grad_bytes/1024**3:>10.2f} GB")
-        print(f"  优化器状态 (fp32):{optim_bytes/1024**3:>10.2f} GB")
+        print(f"  冻结模型 (bf16):  {stats['frozen_bytes']/1024**3:>10.2f} GB")
+        print(f"  可训练参数 (bf16):{stats['trainable_bytes']/1024**3:>10.2f} GB")
+        print(f"  梯度 (bf16):      {stats['grad_bytes']/1024**3:>10.2f} GB")
+        print(f"  优化器状态 (fp32):{stats['optim_bytes']/1024**3:>10.2f} GB")
         print(f"{'─'*60}")
-        subtotal = frozen_bytes + trainable_bytes + grad_bytes + optim_bytes
+        subtotal = (
+            stats["frozen_bytes"]
+            + stats["trainable_bytes"]
+            + stats["grad_bytes"]
+            + stats["optim_bytes"]
+        )
         print(f"  小计 (不含激活):  {subtotal/1024**3:>10.2f} GB")
         print(f"{'='*60}")
 

@@ -185,6 +185,54 @@ class TrlSftConfigTest(unittest.TestCase):
             sft.validate_distributed_backend_args(args)
 
 
+class TrlSftParamStatsTest(unittest.TestCase):
+    class FakeParam:
+        def __init__(self, numel, element_size=2, requires_grad=True, ds_numel=None):
+            self._numel = numel
+            self._element_size = element_size
+            self.requires_grad = requires_grad
+            if ds_numel is not None:
+                self.ds_numel = ds_numel
+
+        def numel(self):
+            return self._numel
+
+        def element_size(self):
+            return self._element_size
+
+    class FakeModel:
+        def __init__(self, params):
+            self._params = params
+
+        def parameters(self):
+            return iter(self._params)
+
+    def test_collect_param_stats_uses_deepspeed_logical_numel(self):
+        model = self.FakeModel(
+            [
+                self.FakeParam(numel=0, ds_numel=100, requires_grad=True),
+                self.FakeParam(numel=0, ds_numel=50, requires_grad=False),
+            ]
+        )
+
+        stats = sft.collect_param_stats(model)
+
+        self.assertEqual(stats["total"], 150)
+        self.assertEqual(stats["trainable"], 100)
+        self.assertAlmostEqual(stats["trainable_ratio"], 100 / 150)
+        self.assertEqual(stats["trainable_bytes"], 200)
+        self.assertEqual(stats["frozen_bytes"], 100)
+
+    def test_collect_param_stats_handles_empty_zero3_partition_without_dividing_by_zero(self):
+        model = self.FakeModel([])
+
+        stats = sft.collect_param_stats(model)
+
+        self.assertEqual(stats["total"], 0)
+        self.assertEqual(stats["trainable"], 0)
+        self.assertEqual(stats["trainable_ratio"], 0.0)
+
+
 class TrlSftAssistantMaskSupportTest(unittest.TestCase):
     def test_resolve_training_chat_template_path_uses_qwen3_template_when_available(self):
         with tempfile.TemporaryDirectory() as tmpdir:
