@@ -67,6 +67,7 @@ class ExperimentScriptsV2Test(unittest.TestCase):
         train_common = (TRAIN_SFT_DIR / "trl" / "_common.sh").read_text(encoding="utf-8")
         self.assertIn("sft_manifest_a0_direct_only.jsonl", wrapper)
         self.assertIn("data_pipeline.build_sft_experiment_dataset_v2", common)
+        self.assertIn("cost_model/checkpoints/v10_lgbm", common)
         self.assertIn('train_script="$REPO_ROOT/scripts/train_sft_trl_${train_mode}.sh"', train_common)
         self.assertIn('model_save/experiments/v2/sft/trl/$train_mode', train_common)
         self.assertIn('BASE_MODEL="$model_path"', train_common)

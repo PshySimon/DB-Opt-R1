@@ -5,7 +5,7 @@ set -e
 MODEL_PATH="${MODEL_PATH:-/root/private_data/DB-Opt-R1/model_save/sft_qwen3_4b_cleaned_merged}"
 TRAIN_DATA="${TRAIN_DATA:-./data_pipeline/data/train/sft_trajectories.jsonl}"
 SCENARIO_FILES="${SCENARIO_FILES:-data_pipeline/data/scenarios/collected/collected_server1.json data_pipeline/data/scenarios/collected/collected_server2.json data_pipeline/data/scenarios/collected/collected_server3.json}"
-COST_MODEL="${COST_MODEL:-./cost_model/checkpoints/v9_lgbm}"
+COST_MODEL="${COST_MODEL:-./cost_model/checkpoints/v10_lgbm}"
 OUTPUT_DIR="${OUTPUT_DIR:-./model_save/grpo_lora/}"
 EPOCHS="${EPOCHS:-2}"
 LR="${LR:-5e-7}"

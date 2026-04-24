@@ -9,7 +9,7 @@ V2_MANIFEST_DIR="$REPO_ROOT/data_pipeline/data/train/v2/manifests"
 V2_EVAL_QUESTIONS="$REPO_ROOT/data_pipeline/data/eval/v2/eval_trajectories_v2.jsonl"
 V2_EVAL_SCENARIOS="$REPO_ROOT/data_pipeline/data/eval/v2/collected_eval_v2.json"
 V2_KNOB_SPACE="$REPO_ROOT/configs/knob_space.yaml"
-V2_COST_MODEL_DEFAULT="${V2_COST_MODEL:-$REPO_ROOT/cost_model/checkpoints/v8_lgbm}"
+V2_COST_MODEL_DEFAULT="${V2_COST_MODEL:-$REPO_ROOT/cost_model/checkpoints/v10_lgbm}"
 
 ensure_file() {
     local path="$1"
