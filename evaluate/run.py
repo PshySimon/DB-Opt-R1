@@ -1,11 +1,13 @@
 """
 评估报表生成（三 baseline 体系）
 
-从 sampler eval 模式产出的轨迹中提取模型设置的 knobs，
-用 Cost Model 重新预测 TPS，与三个 baseline 对比：
-  1. scenario_tps  — 场景原始 tps_current
-  2. default_tps   — PG 默认配置的 Cost Model 预测
-  3. optimal_tps   — BO 搜索的 Cost Model 最优预测
+主指标优先复用 rollout 里 predict_performance 的结果：
+  1. scenario_tps  — rollout 中返回的 baseline_tps
+  2. model_tps     — rollout 中返回的最佳 predicted_tps
+
+仅对缺失字段做兼容性回退；default / optimal baseline 仍由 Cost Model 计算：
+  3. default_tps   — PG 默认配置的 Cost Model 预测
+  4. optimal_tps   — BO 搜索的 Cost Model 最优预测
 
 核心指标：gap_closed = (model - default) / (optimal - default)
 
@@ -65,6 +67,63 @@ def extract_model_knobs(trajectory: dict) -> dict:
     return knobs
 
 
+def extract_best_predict_stats(trajectory: dict) -> dict:
+    """从轨迹中提取 predict_performance 的 baseline_tps 和最佳 predicted_tps。"""
+    baseline_tps = None
+    best_tps = None
+    best_improvement_pct = None
+
+    for msg in trajectory.get("messages", []):
+        role = msg.get("role")
+        content = msg.get("content", "")
+        payload = None
+
+        if role == "tool":
+            try:
+                payload = json.loads(content)
+            except Exception:
+                payload = None
+        elif role == "user" and "<tool_response>" in content:
+            match = re.search(r"<tool_response>\n?(.*?)\n?</tool_response>", content, re.DOTALL)
+            if match:
+                try:
+                    payload = json.loads(match.group(1))
+                except Exception:
+                    payload = None
+
+        if not isinstance(payload, dict):
+            continue
+
+        if baseline_tps is None and "baseline_tps" in payload:
+            try:
+                baseline_tps = float(payload["baseline_tps"])
+            except Exception:
+                baseline_tps = baseline_tps
+
+        if "predicted_tps" in payload:
+            try:
+                predicted_tps = float(payload["predicted_tps"])
+                best_tps = predicted_tps if best_tps is None else max(best_tps, predicted_tps)
+            except Exception:
+                pass
+
+        if "improvement_pct" in payload:
+            try:
+                improvement_pct = float(payload["improvement_pct"])
+                if best_improvement_pct is None:
+                    best_improvement_pct = improvement_pct
+                else:
+                    best_improvement_pct = max(best_improvement_pct, improvement_pct)
+            except Exception:
+                pass
+
+    return {
+        "baseline_tps": baseline_tps,
+        "best_tps": best_tps,
+        "best_improvement_pct": best_improvement_pct,
+    }
+
+
 def extract_termination_reason(trajectory: dict) -> str:
     reason = trajectory.get("termination_reason")
     if reason is None:
@@ -87,7 +146,11 @@ def bo_search_optimal(cost_model, hw_info: dict, workload: str,
 
 def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
                          n_bo_trials=200, skip_bo=False, progress_interval=50) -> dict:
-    """三 baseline 体系评估。"""
+    """三 baseline 体系评估。
+
+    主口径使用 rollout 中 predict_performance 的最佳结果，只对 default/BO baseline
+    额外调用 Cost Model。若轨迹里没有 predict_performance 结果，则兼容旧数据回退到重算。
+    """
     if not trajectories:
         return {"error": "无轨迹数据"}
 
@@ -96,6 +159,8 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
 
     # BO 缓存：(hw_hash, wl_type) → optimal_tps
     bo_cache = {}
+    # default_tps 缓存：(hw_hash, wl_type) → default_tps
+    default_cache = {}
 
     per_episode = []
 
@@ -110,44 +175,53 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
         hw = s.get("hardware", {})
         wl = s.get("workload", {})
         wl_type = wl.get("type", "mixed") if isinstance(wl, dict) else str(wl)
-
-        # 场景原始配置 TPS（用 Cost Model 预测，和其他 baseline 保持一致）
+        cache_key = json.dumps(hw, sort_keys=True) + "|" + wl_type
         original_knobs = s.get("knobs", {})
-        ok = {**original_knobs, "workload": wl_type}
-        try:
-            scenario_tps = cost_model.predict(ok, hw)
-        except Exception:
-            scenario_tps = 0.0
 
-        # 默认配置 TPS
-        dk = default_knobs.copy()
-        dk["workload"] = wl_type
-        try:
-            default_tps = cost_model.predict(dk, hw)
-        except Exception:
-            default_tps = 0.0
+        # rollout 主口径：直接读取轨迹中的 baseline_tps / best predicted_tps
+        predict_stats = extract_best_predict_stats(t)
+        scenario_tps = predict_stats["baseline_tps"]
+        model_tps = predict_stats["best_tps"]
+
+        # 兼容旧轨迹：如果没有 predict_performance 结果，再回退到重算
+        if scenario_tps is None:
+            ok = {**original_knobs, "workload": wl_type}
+            try:
+                scenario_tps = cost_model.predict(ok, hw)
+            except Exception:
+                scenario_tps = 0.0
+
+        if model_tps is None:
+            model_changes = extract_model_knobs(t)
+            if model_changes:
+                mk = {**original_knobs, **model_changes, "workload": wl_type}
+                try:
+                    model_tps = cost_model.predict(mk, hw)
+                except Exception:
+                    model_tps = 0.0
+            else:
+                model_tps = 0.0
+
+        # 默认配置 TPS：只按 (hardware, workload) 计算一次
+        if cache_key not in default_cache:
+            dk = default_knobs.copy()
+            dk["workload"] = wl_type
+            try:
+                default_cache[cache_key] = cost_model.predict(dk, hw)
+            except Exception:
+                default_cache[cache_key] = 0.0
+        default_tps = default_cache[cache_key]
 
         optimal_tps = None
         if not skip_bo:
             # BO 最优 TPS（按 hw+wl 缓存）
-            cache_key = json.dumps(hw, sort_keys=True) + "|" + wl_type
             if cache_key not in bo_cache:
                 bo_cache[cache_key] = bo_search_optimal(
                     cost_model, hw, wl_type, knob_space, n_bo_trials)
                 logger.info(f"  BO ({len(bo_cache)}): wl={wl_type}, "
                             f"optimal={bo_cache[cache_key]:.1f}")
             optimal_tps = bo_cache[cache_key]
-
-        # 模型预测 TPS（以场景原始 knobs 为基底，叠加模型的修改）
         model_changes = extract_model_knobs(t)
-        if model_changes:
-            mk = {**original_knobs, **model_changes, "workload": wl_type}
-            try:
-                model_tps = cost_model.predict(mk, hw)
-            except Exception:
-                model_tps = 0.0
-        else:
-            model_tps = 0.0
 
         # 三个 improvement（与 predict_performance 保持一致：下限 0%，上限 200%）
         IMPROVEMENT_CAP = 200.0
@@ -189,6 +263,8 @@ def compute_eval_metrics(trajectories, scenarios, cost_model, knob_space,
             "called_predict": called_predict,
             "termination_reason": termination_reason,
         }
+        if predict_stats["best_improvement_pct"] is not None:
+            row["best_improvement_pct"] = round(predict_stats["best_improvement_pct"], 2)
         if optimal_tps is not None:
             row["optimal_tps"] = round(optimal_tps, 1)
             row["imp_vs_optimal_pct"] = round(imp_vs_optimal, 2)

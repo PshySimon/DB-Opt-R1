@@ -435,7 +435,8 @@ def _run_generate_train(args, llm_fn):
 def _run_eval(args, llm_fn):
     """eval 模式: 用固定 question 跑 rollout，保存原始轨迹（不计算指标、不过滤）。
 
-    指标在 evaluate/run.py 阶段由 Cost Model 重新计算。
+    主指标在 evaluate/run.py 阶段优先复用 rollout 中 predict_performance 的结果；
+    default / BO baseline 才额外调用 Cost Model。
     """
     import time
     from concurrent.futures import ThreadPoolExecutor, as_completed

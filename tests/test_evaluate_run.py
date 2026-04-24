@@ -20,6 +20,71 @@ class DummyKnobSpace:
 
 
 class EvaluateRunTest(unittest.TestCase):
+    def test_compute_eval_metrics_uses_best_predict_from_trajectory(self):
+        trajectories = [
+            {
+                "env_sample_idx": 0,
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": (
+                            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\":\\"8GB\\"}"}}'
+                            "</tool_call>"
+                        ),
+                    },
+                    {
+                        "role": "tool",
+                        "content": (
+                            '{'
+                            '"predicted_tps": 130.0, '
+                            '"baseline_tps": 105.0, '
+                            '"improvement_pct": 23.81'
+                            '}'
+                        ),
+                    },
+                    {
+                        "role": "assistant",
+                        "content": (
+                            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"shared_buffers\\":\\"4GB\\"}"}}'
+                            "</tool_call>"
+                        ),
+                    },
+                    {
+                        "role": "tool",
+                        "content": (
+                            '{'
+                            '"predicted_tps": 105.0, '
+                            '"baseline_tps": 105.0, '
+                            '"improvement_pct": 0.0'
+                            '}'
+                        ),
+                    },
+                ],
+            }
+        ]
+        scenarios = [
+            {
+                "name": "s0",
+                "hardware": {"cpu_count": 8},
+                "workload": {"type": "oltp"},
+                "knobs": {"shared_buffers": "4GB"},
+            }
+        ]
+
+        metrics = evaluate_run.compute_eval_metrics(
+            trajectories,
+            scenarios,
+            DummyCostModel(),
+            DummyKnobSpace(),
+            n_bo_trials=200,
+            skip_bo=True,
+        )
+
+        episode = metrics["per_episode"][0]
+        self.assertEqual(episode["scenario_tps"], 105.0)
+        self.assertEqual(episode["model_tps"], 130.0)
+        self.assertGreater(episode["imp_vs_scenario_pct"], 20.0)
+
     def test_compute_eval_metrics_skip_bo_does_not_run_bo(self):
         trajectories = [
             {
@@ -160,6 +225,75 @@ class EvaluateRunTest(unittest.TestCase):
             summary["avg_imp_vs_scenario_pct_by_termination_reason"]["finish_tuning"],
             summary["avg_imp_vs_scenario_pct_by_termination_reason"]["repeated_tool_call"],
         )
+
+    def test_compute_eval_metrics_caches_default_tps_by_hw_and_workload(self):
+        class CountingCostModel(DummyCostModel):
+            def __init__(self):
+                self.default_calls = 0
+
+            def predict(self, knobs, hw_info):
+                if knobs.get("shared_buffers") == "4GB":
+                    self.default_calls += 1
+                return super().predict(knobs, hw_info)
+
+        cost_model = CountingCostModel()
+        trajectories = [
+            {
+                "env_sample_idx": 0,
+                "messages": [
+                    {
+                        "role": "tool",
+                        "content": (
+                            '{'
+                            '"predicted_tps": 130.0, '
+                            '"baseline_tps": 105.0, '
+                            '"improvement_pct": 23.81'
+                            '}'
+                        ),
+                    }
+                ],
+            },
+            {
+                "env_sample_idx": 1,
+                "messages": [
+                    {
+                        "role": "tool",
+                        "content": (
+                            '{'
+                            '"predicted_tps": 130.0, '
+                            '"baseline_tps": 105.0, '
+                            '"improvement_pct": 23.81'
+                            '}'
+                        ),
+                    }
+                ],
+            },
+        ]
+        scenarios = [
+            {
+                "name": "s0",
+                "hardware": {"cpu_count": 8},
+                "workload": {"type": "oltp"},
+                "knobs": {"shared_buffers": "4GB"},
+            },
+            {
+                "name": "s1",
+                "hardware": {"cpu_count": 8},
+                "workload": {"type": "oltp"},
+                "knobs": {"shared_buffers": "4GB"},
+            },
+        ]
+
+        evaluate_run.compute_eval_metrics(
+            trajectories,
+            scenarios,
+            cost_model,
+            DummyKnobSpace(),
+            n_bo_trials=200,
+            skip_bo=True,
+        )
+
+        self.assertEqual(cost_model.default_calls, 1)
 
 
 if __name__ == "__main__":
