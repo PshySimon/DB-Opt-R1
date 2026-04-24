@@ -114,6 +114,7 @@ class BuildSftManifestsV2Test(unittest.TestCase):
         manifests = manifests_v2.build_manifest_sets(
             labels=labels,
             abc_size=8,
+            scale_sizes=(6, 8, 10, 12),
             seed=7,
         )
 
@@ -123,9 +124,32 @@ class BuildSftManifestsV2Test(unittest.TestCase):
         self.assertEqual(8, len(manifests["sft_manifest_b2_depth_full.jsonl"]))
         self.assertEqual(8, len(manifests["sft_manifest_c1_gain_natural.jsonl"]))
         self.assertEqual(8, len(manifests["sft_manifest_c2_gain_balanced.jsonl"]))
+        self.assertEqual(6, len(manifests["sft_manifest_d1_1p5k.jsonl"]))
+        self.assertEqual(8, len(manifests["sft_manifest_d2_3k.jsonl"]))
+        self.assertEqual(10, len(manifests["sft_manifest_d3_4p5k.jsonl"]))
+        self.assertEqual(12, len(manifests["sft_manifest_d4_6k.jsonl"]))
 
         a1_shapes = {item["shape"] for item in manifests["sft_manifest_a1_full3k.jsonl"]}
         self.assertIn("retry_success", a1_shapes)
+
+        tail_envs = {
+            item["env_sample_idx"]
+            for item in labels
+            if item["depth_bucket"] == "tail"
+        }
+        for name in [
+            "sft_manifest_d1_1p5k.jsonl",
+            "sft_manifest_d2_3k.jsonl",
+            "sft_manifest_d3_4p5k.jsonl",
+            "sft_manifest_d4_6k.jsonl",
+        ]:
+            manifest_envs = {item["env_sample_idx"] for item in manifests[name]}
+            self.assertTrue(tail_envs.issubset(manifest_envs), name)
+
+        self.assertEqual(
+            {item["env_sample_idx"] for item in manifests["sft_manifest_b2_depth_full.jsonl"]},
+            {item["env_sample_idx"] for item in manifests["sft_manifest_d2_3k.jsonl"]},
+        )
 
         balanced_counts = {}
         for item in manifests["sft_manifest_c2_gain_balanced.jsonl"]:
@@ -135,8 +159,20 @@ class BuildSftManifestsV2Test(unittest.TestCase):
     def test_write_manifests_outputs_jsonl_and_stats(self):
         manifests = {
             "one.jsonl": [
-                {"env_sample_idx": 1, "shape": "direct_success"},
-                {"env_sample_idx": 2, "shape": "retry_success"},
+                {
+                    "env_sample_idx": 1,
+                    "shape": "direct_success",
+                    "depth_bucket": "main",
+                    "gain_bucket": "0_1",
+                    "workload": "read_only",
+                },
+                {
+                    "env_sample_idx": 2,
+                    "shape": "retry_success",
+                    "depth_bucket": "tail",
+                    "gain_bucket": "3_10",
+                    "workload": "mixed",
+                },
             ]
         }
 
@@ -153,6 +189,8 @@ class BuildSftManifestsV2Test(unittest.TestCase):
 
             stats = json.loads((out_dir / "manifest_stats.json").read_text(encoding="utf-8"))
             self.assertEqual(2, stats["one.jsonl"]["rows"])
+            self.assertEqual(1, stats["one.jsonl"]["tail_rows"])
+            self.assertEqual(1, stats["one.jsonl"]["retry_rows"])
 
 
 if __name__ == "__main__":

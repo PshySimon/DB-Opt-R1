@@ -149,7 +149,35 @@ def sample_stratified(items: list[dict], total: int, strata_keys: tuple[str, ...
     return sampled
 
 
-def build_manifest_sets(labels: list[dict], abc_size: int = 3000, seed: int = 20260421) -> dict[str, list[dict]]:
+def build_scale_manifest(
+    main: list[dict],
+    tail: list[dict],
+    total: int,
+    seed: int,
+) -> list[dict]:
+    if total < len(tail):
+        raise ValueError("requested scale size is smaller than tail pool")
+    if total > len(main) + len(tail):
+        raise ValueError("requested scale size exceeds main+tail population")
+
+    sampled_main = sample_stratified(
+        main,
+        total - len(tail),
+        ("workload", "gain_bucket"),
+        seed,
+    )
+    rng = random.Random(seed)
+    merged = tail[:] + sampled_main
+    rng.shuffle(merged)
+    return merged
+
+
+def build_manifest_sets(
+    labels: list[dict],
+    abc_size: int = 3000,
+    scale_sizes: tuple[int, int, int, int] = (1500, 3000, 4500, 6000),
+    seed: int = 20260421,
+) -> dict[str, list[dict]]:
     rng = random.Random(seed)
     direct = [item for item in labels if item["shape"] == "direct_success"]
     retry = [item for item in labels if item["shape"] == "retry_success"]
@@ -211,6 +239,12 @@ def build_manifest_sets(labels: list[dict], abc_size: int = 3000, seed: int = 20
     rng.shuffle(c2)
     manifests["sft_manifest_c2_gain_balanced.jsonl"] = c2
 
+    d1, d2, d3, d4 = scale_sizes
+    manifests["sft_manifest_d1_1p5k.jsonl"] = build_scale_manifest(main, tail, d1, seed + 20)
+    manifests["sft_manifest_d2_3k.jsonl"] = build_scale_manifest(main, tail, d2, seed + 4)
+    manifests["sft_manifest_d3_4p5k.jsonl"] = build_scale_manifest(main, tail, d3, seed + 22)
+    manifests["sft_manifest_d4_6k.jsonl"] = build_scale_manifest(main, tail, d4, seed + 23)
+
     return manifests
 
 
@@ -224,6 +258,8 @@ def write_manifests(manifests: dict[str, list[dict]], output_dir: Path) -> None:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
         stats[file_name] = {
             "rows": len(rows),
+            "tail_rows": sum(1 for r in rows if r.get("depth_bucket") == "tail"),
+            "retry_rows": sum(1 for r in rows if r.get("shape") == "retry_success"),
             "workload": dict(sorted(Counter(r.get("workload", "unknown") for r in rows).items())),
             "gain_bucket": dict(sorted(Counter(r.get("gain_bucket", "unknown") for r in rows).items())),
             "depth_bucket": dict(sorted(Counter(r.get("depth_bucket", "unknown") for r in rows).items())),

@@ -1,6 +1,8 @@
 {
   "sft_manifest_a0_direct_only.jsonl": {
     "rows": 3000,
+    "tail_rows": 233,
+    "retry_rows": 0,
     "workload": {
       "high_concurrency": 606,
       "mixed": 659,
@@ -23,6 +25,8 @@
   },
   "sft_manifest_a1_full3k.jsonl": {
     "rows": 3000,
+    "tail_rows": 323,
+    "retry_rows": 96,
     "workload": {
       "high_concurrency": 604,
       "mixed": 654,
@@ -46,6 +50,8 @@
   },
   "sft_manifest_b1_depth_trimmed.jsonl": {
     "rows": 3000,
+    "tail_rows": 0,
+    "retry_rows": 0,
     "workload": {
       "high_concurrency": 588,
       "mixed": 660,
@@ -67,6 +73,8 @@
   },
   "sft_manifest_b2_depth_full.jsonl": {
     "rows": 3000,
+    "tail_rows": 606,
+    "retry_rows": 96,
     "workload": {
       "high_concurrency": 625,
       "mixed": 650,
@@ -90,6 +98,8 @@
   },
   "sft_manifest_c1_gain_natural.jsonl": {
     "rows": 3000,
+    "tail_rows": 272,
+    "retry_rows": 52,
     "workload": {
       "high_concurrency": 605,
       "mixed": 656,
@@ -113,6 +123,8 @@
   },
   "sft_manifest_c2_gain_balanced.jsonl": {
     "rows": 3000,
+    "tail_rows": 270,
+    "retry_rows": 48,
     "workload": {
       "high_concurrency": 594,
       "mixed": 666,
@@ -132,6 +144,106 @@
     "shape": {
       "direct_success": 2952,
       "retry_success": 48
+    }
+  },
+  "sft_manifest_d1_1p5k.jsonl": {
+    "rows": 1500,
+    "tail_rows": 606,
+    "retry_rows": 96,
+    "workload": {
+      "high_concurrency": 331,
+      "mixed": 320,
+      "read_only": 470,
+      "write_heavy": 379
+    },
+    "gain_bucket": {
+      "0_1": 338,
+      "10_50": 304,
+      "1_3": 383,
+      "3_10": 475
+    },
+    "depth_bucket": {
+      "main": 894,
+      "tail": 606
+    },
+    "shape": {
+      "direct_success": 1404,
+      "retry_success": 96
+    }
+  },
+  "sft_manifest_d2_3k.jsonl": {
+    "rows": 3000,
+    "tail_rows": 606,
+    "retry_rows": 96,
+    "workload": {
+      "high_concurrency": 625,
+      "mixed": 650,
+      "read_only": 955,
+      "write_heavy": 770
+    },
+    "gain_bucket": {
+      "0_1": 659,
+      "10_50": 657,
+      "1_3": 735,
+      "3_10": 949
+    },
+    "depth_bucket": {
+      "main": 2394,
+      "tail": 606
+    },
+    "shape": {
+      "direct_success": 2904,
+      "retry_success": 96
+    }
+  },
+  "sft_manifest_d3_4p5k.jsonl": {
+    "rows": 4500,
+    "tail_rows": 606,
+    "retry_rows": 96,
+    "workload": {
+      "high_concurrency": 919,
+      "mixed": 981,
+      "read_only": 1441,
+      "write_heavy": 1159
+    },
+    "gain_bucket": {
+      "0_1": 980,
+      "10_50": 1012,
+      "1_3": 1086,
+      "3_10": 1422
+    },
+    "depth_bucket": {
+      "main": 3894,
+      "tail": 606
+    },
+    "shape": {
+      "direct_success": 4404,
+      "retry_success": 96
+    }
+  },
+  "sft_manifest_d4_6k.jsonl": {
+    "rows": 6000,
+    "tail_rows": 606,
+    "retry_rows": 96,
+    "workload": {
+      "high_concurrency": 1214,
+      "mixed": 1311,
+      "read_only": 1928,
+      "write_heavy": 1547
+    },
+    "gain_bucket": {
+      "0_1": 1304,
+      "10_50": 1364,
+      "1_3": 1437,
+      "3_10": 1895
+    },
+    "depth_bucket": {
+      "main": 5394,
+      "tail": 606
+    },
+    "shape": {
+      "direct_success": 5904,
+      "retry_success": 96
     }
   }
 }
