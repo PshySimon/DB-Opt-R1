@@ -383,7 +383,7 @@ def main():
 
     # 加载模型
     print(f"加载模型: {args.model_path}")
-    attn_impl = "flash_attention_2" if args.flash_attn else "eager"
+    attn_impl = "flash_attention_2" if args.flash_attn else "sdpa"
     model = AutoModelForCausalLM.from_pretrained(
         args.model_path,
         torch_dtype=torch.bfloat16 if args.bf16 else torch.float16,
