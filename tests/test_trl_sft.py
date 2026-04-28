@@ -174,6 +174,30 @@ class TrlSftConfigTest(unittest.TestCase):
 
         self.assertEqual(kwargs["deepspeed"], "configs/deepspeed_zero3_bf16.json")
 
+    def test_build_sft_config_kwargs_skips_prepare_for_tokenized_dataset(self):
+        args = SimpleNamespace(
+            output_dir="/tmp/out",
+            num_epochs=3,
+            batch_size=1,
+            grad_accum=8,
+            lr=1e-5,
+            max_length=8192,
+            seed=42,
+            bf16=True,
+            gradient_checkpointing=True,
+            max_steps=-1,
+            use_lora=False,
+            chat_template_path=None,
+            deepspeed=None,
+            fsdp=None,
+            fsdp_config=None,
+            tokenized_dataset_dir="/tmp/tokenized",
+        )
+
+        kwargs = sft.build_sft_config_kwargs(args, has_eval=False)
+
+        self.assertEqual(kwargs["dataset_kwargs"], {"skip_prepare_dataset": True})
+
     def test_validate_distributed_backend_args_rejects_deepspeed_with_fsdp(self):
         args = SimpleNamespace(
             deepspeed="configs/deepspeed_zero3_bf16.json",

@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 import random
 import torch
-from datasets import Dataset
+from datasets import Dataset, load_from_disk
 from packaging.version import Version
 import transformers
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -45,7 +45,8 @@ class _SetTrainMode(argparse.Action):
 def build_parser():
     parser = argparse.ArgumentParser(description="trl SFT 训练")
     parser.add_argument("--model_path", default="Qwen/Qwen2.5-3B-Instruct")
-    parser.add_argument("--data_files", nargs="+", required=True)
+    parser.add_argument("--data_files", nargs="*", default=None)
+    parser.add_argument("--tokenized_dataset_dir", default=None)
     parser.add_argument("--output_dir", default="./model_save/sft/")
     parser.add_argument("--num_epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=1e-5)
@@ -83,6 +84,11 @@ def validate_distributed_backend_args(args) -> None:
         raise ValueError("不能同时启用 DeepSpeed 和 FSDP，请只设置其中一种分布式优化后端。")
     if fsdp_config and not fsdp:
         raise ValueError("--fsdp_config 需要同时设置 --fsdp。")
+
+
+def validate_data_args(args) -> None:
+    if not args.tokenized_dataset_dir and not args.data_files:
+        raise ValueError("必须设置 --data_files 或 --tokenized_dataset_dir。")
 
 
 def is_rank_zero() -> bool:
@@ -270,6 +276,8 @@ def build_sft_config_kwargs(args, has_eval: bool):
     fsdp_config = getattr(args, "fsdp_config", None)
     if fsdp_config:
         kwargs["fsdp_config"] = fsdp_config
+    if getattr(args, "tokenized_dataset_dir", None):
+        kwargs["dataset_kwargs"] = {"skip_prepare_dataset": True}
     if has_eval:
         kwargs.update(
             {
@@ -282,6 +290,39 @@ def build_sft_config_kwargs(args, has_eval: bool):
             }
         )
     return kwargs
+
+
+def validate_tokenized_dataset(dataset, name: str) -> None:
+    required = {"input_ids", "assistant_masks"}
+    missing = required.difference(set(dataset.column_names))
+    if missing:
+        raise ValueError(f"{name} tokenized dataset 缺少字段: {sorted(missing)}")
+    if len(dataset) == 0:
+        raise ValueError(f"{name} tokenized dataset 为空")
+    sample = dataset[0]
+    if len(sample["input_ids"]) != len(sample["assistant_masks"]):
+        raise ValueError(f"{name} tokenized dataset 的 input_ids/assistant_masks 长度不一致")
+    if sum(sample["assistant_masks"]) <= 0:
+        raise ValueError(f"{name} tokenized dataset 的 assistant_masks 没有有效 assistant token")
+
+
+def load_tokenized_sft_datasets(tokenized_dataset_dir: str):
+    root = Path(tokenized_dataset_dir)
+    train_path = root / "train"
+    eval_path = root / "eval"
+    if not train_path.exists():
+        raise FileNotFoundError(f"tokenized train dataset 不存在: {train_path}")
+    train_dataset = load_from_disk(str(train_path))
+    eval_dataset = load_from_disk(str(eval_path)) if eval_path.exists() else None
+    validate_tokenized_dataset(train_dataset, "train")
+    if eval_dataset is not None:
+        validate_tokenized_dataset(eval_dataset, "eval")
+
+    metadata_path = root / "metadata.json"
+    metadata = {}
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    return train_dataset, eval_dataset, metadata
 
 
 def get_logical_param_numel(param) -> int:
@@ -327,6 +368,7 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
     validate_distributed_backend_args(args)
+    validate_data_args(args)
 
     maybe_configure_torch_device_for_distributed()
     validate_transformers_version_for_assistant_masks()
@@ -341,44 +383,56 @@ def main():
     if args.flash_attn:
         tokenizer.padding_side = "left"
 
-    # 加载数据
-    records = load_sft_data(args.data_files)
-    train_before_filter = len(records)
-    records = filter_records_by_max_length(records, tokenizer, args.max_length)
-    if len(records) < train_before_filter:
-        print(f"过滤超长轨迹: {train_before_filter} → {len(records)} 条 (max_length={args.max_length})")
-
-    if args.eval_data_files:
-        eval_records = load_sft_data(args.eval_data_files)
-        eval_before_filter = len(eval_records)
-        eval_records = filter_records_by_max_length(eval_records, tokenizer, args.max_length)
-        if len(eval_records) < eval_before_filter:
-            print(f"过滤超长验证轨迹: {eval_before_filter} → {len(eval_records)} 条 (max_length={args.max_length})")
-        train_records = records
+    if args.tokenized_dataset_dir:
+        train_dataset, eval_dataset, tokenized_metadata = load_tokenized_sft_datasets(args.tokenized_dataset_dir)
+        train_before_filter = tokenized_metadata.get("records_before_filter", len(train_dataset))
+        eval_before_filter = tokenized_metadata.get("eval_records", len(eval_dataset) if eval_dataset else 0)
+        records_after_filter = tokenized_metadata.get(
+            "records_after_filter",
+            len(train_dataset) + (len(eval_dataset) if eval_dataset else 0),
+        )
+        chat_template_path = tokenized_metadata.get("chat_template_path") or chat_template_path
     else:
-        eval_before_filter = 0
-        train_records, eval_records = split_train_eval_records(records, args.train_ratio, args.seed)
+        # 加载数据
+        records = load_sft_data(args.data_files)
+        train_before_filter = len(records)
+        records = filter_records_by_max_length(records, tokenizer, args.max_length)
+        records_after_filter = len(records)
+        if len(records) < train_before_filter:
+            print(f"过滤超长轨迹: {train_before_filter} → {len(records)} 条 (max_length={args.max_length})")
 
-    validate_assistant_mask_support(train_records, tokenizer)
+        if args.eval_data_files:
+            eval_records = load_sft_data(args.eval_data_files)
+            eval_before_filter = len(eval_records)
+            eval_records = filter_records_by_max_length(eval_records, tokenizer, args.max_length)
+            if len(eval_records) < eval_before_filter:
+                print(f"过滤超长验证轨迹: {eval_before_filter} → {len(eval_records)} 条 (max_length={args.max_length})")
+            train_records = records
+        else:
+            eval_before_filter = 0
+            train_records, eval_records = split_train_eval_records(records, args.train_ratio, args.seed)
+
+        validate_assistant_mask_support(train_records, tokenizer)
+        train_dataset = Dataset.from_list(train_records)
+        eval_dataset = Dataset.from_list(eval_records) if eval_records else None
 
     save_training_config(
         args,
         {
             "records_before_filter": train_before_filter,
-            "records_after_filter": len(records),
-            "train_records": len(train_records),
-            "eval_records": len(eval_records),
+            "records_after_filter": records_after_filter,
+            "train_records": len(train_dataset),
+            "eval_records": len(eval_dataset) if eval_dataset else 0,
             "eval_records_before_filter": eval_before_filter,
             "train_mode": "lora" if args.use_lora else "full",
             "chat_template_path": chat_template_path,
+            "tokenized_dataset_dir": args.tokenized_dataset_dir,
             "world_size": int(torch.distributed.get_world_size())
             if torch.distributed.is_available() and torch.distributed.is_initialized()
             else 1,
         },
     )
 
-    dataset = Dataset.from_list(train_records)
-    eval_dataset = Dataset.from_list(eval_records) if eval_records else None
     training_args = SFTConfig(**build_sft_config_kwargs(args, has_eval=eval_dataset is not None))
 
     # 加载模型
@@ -409,7 +463,7 @@ def main():
     trainer = SFTTrainer(
         model=model,
         args=training_args,
-        train_dataset=dataset,
+        train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
         peft_config=peft_config,
