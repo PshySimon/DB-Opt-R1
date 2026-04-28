@@ -56,6 +56,13 @@ def build_parser():
     parser.add_argument("--max_length", type=int, default=8192)
     parser.add_argument("--lora_rank", type=int, default=64)
     parser.add_argument("--max_steps", type=int, default=-1)
+    parser.add_argument("--logging_steps", type=int, default=5)
+    parser.add_argument("--save_steps", type=int, default=50)
+    parser.add_argument("--save_total_limit", type=int, default=3)
+    parser.add_argument("--save_strategy", default="steps", choices=["no", "steps", "epoch"])
+    parser.add_argument("--eval_steps", type=int, default=50)
+    parser.add_argument("--eval_strategy", default="steps", choices=["no", "steps", "epoch"])
+    parser.add_argument("--disable_eval", action="store_true", default=False)
     parser.add_argument("--train_ratio", type=float, default=0.95)
     parser.add_argument("--eval_data_files", nargs="*", default=None)
     parser.add_argument("--seed", type=int, default=42)
@@ -307,6 +314,11 @@ def split_train_eval_records(records, train_ratio: float, seed: int):
 
 
 def build_sft_config_kwargs(args, has_eval: bool):
+    save_strategy = getattr(args, "save_strategy", "steps")
+    eval_strategy = getattr(args, "eval_strategy", "steps")
+    save_steps = getattr(args, "save_steps", 50)
+    eval_steps = getattr(args, "eval_steps", 50)
+
     kwargs = {
         "output_dir": args.output_dir,
         "num_train_epochs": args.num_epochs,
@@ -318,10 +330,10 @@ def build_sft_config_kwargs(args, has_eval: bool):
         "bf16": args.bf16,
         "fp16": not args.bf16,
         "gradient_checkpointing": args.gradient_checkpointing,
-        "logging_steps": 5,
-        "save_steps": 50,
-        "save_strategy": "steps",
-        "save_total_limit": 3,
+        "logging_steps": getattr(args, "logging_steps", 5),
+        "save_steps": save_steps,
+        "save_strategy": save_strategy,
+        "save_total_limit": getattr(args, "save_total_limit", 3),
         "report_to": "none",
         "max_steps": args.max_steps,
         "seed": args.seed,
@@ -345,17 +357,27 @@ def build_sft_config_kwargs(args, has_eval: bool):
         kwargs["fsdp_config"] = fsdp_config
     if getattr(args, "tokenized_dataset_dir", None):
         kwargs["dataset_kwargs"] = {"skip_prepare_dataset": True}
+    load_best_model_at_end = (
+        has_eval
+        and save_strategy != "no"
+        and eval_strategy != "no"
+        and save_strategy == eval_strategy
+        and (save_strategy != "steps" or save_steps % eval_steps == 0)
+    )
     if has_eval:
         kwargs.update(
             {
                 "per_device_eval_batch_size": args.batch_size,
-                "eval_strategy": "steps",
-                "eval_steps": 50,
-                "load_best_model_at_end": True,
+                "eval_strategy": eval_strategy,
+                "eval_steps": eval_steps,
+                "load_best_model_at_end": load_best_model_at_end,
                 "metric_for_best_model": "eval_loss",
                 "greater_is_better": False,
             }
         )
+        if not load_best_model_at_end:
+            kwargs.pop("metric_for_best_model", None)
+            kwargs.pop("greater_is_better", None)
     return kwargs
 
 
@@ -482,6 +504,9 @@ def main():
         validate_assistant_mask_support(train_records, tokenizer)
         train_dataset = Dataset.from_list(train_records)
         eval_dataset = Dataset.from_list(eval_records) if eval_records else None
+
+    if args.disable_eval or args.eval_strategy == "no":
+        eval_dataset = None
 
     save_training_config(
         args,

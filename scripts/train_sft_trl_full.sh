@@ -13,6 +13,14 @@ LR="${LR:-1e-5}"
 BATCH_SIZE="${BATCH_SIZE:-2}"
 GRAD_ACCUM="${GRAD_ACCUM:-4}"
 MAX_LENGTH="${MAX_LENGTH:-8192}"
+MAX_STEPS="${MAX_STEPS:--1}"
+LOGGING_STEPS="${LOGGING_STEPS:-5}"
+SAVE_STEPS="${SAVE_STEPS:-50}"
+SAVE_TOTAL_LIMIT="${SAVE_TOTAL_LIMIT:-3}"
+SAVE_STRATEGY="${SAVE_STRATEGY:-steps}"
+EVAL_STEPS="${EVAL_STEPS:-50}"
+EVAL_STRATEGY="${EVAL_STRATEGY:-steps}"
+DISABLE_EVAL="${DISABLE_EVAL:-false}"
 SFT_TRAIN_RATIO="${SFT_TRAIN_RATIO:-0.95}"
 GRADIENT_CHECKPOINTING="${GRADIENT_CHECKPOINTING:-true}"
 FLASH_ATTN="${FLASH_ATTN:-false}"
@@ -46,7 +54,8 @@ export MASTER_PORT="$TORCHRUN_PORT"
 
 write_train_config_json "$TRAIN_CONFIG_JSON" \
     BASE_MODEL DATA_FILES OUTPUT_DIR EPOCHS LR BATCH_SIZE GRAD_ACCUM \
-    MAX_LENGTH SFT_TRAIN_RATIO GRADIENT_CHECKPOINTING FLASH_ATTN \
+    MAX_LENGTH MAX_STEPS LOGGING_STEPS SAVE_STEPS SAVE_TOTAL_LIMIT SAVE_STRATEGY \
+    EVAL_STEPS EVAL_STRATEGY DISABLE_EVAL SFT_TRAIN_RATIO GRADIENT_CHECKPOINTING FLASH_ATTN \
     DEEPSPEED_CONFIG FSDP FSDP_CONFIG TOKENIZED_DATASET_DIR RESUME_FROM_CHECKPOINT \
     CUDA_DEVICES CUDA_VISIBLE_DEVICES HIP_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES \
     N_GPUS MASTER_ADDR MASTER_PORT TORCHRUN_PORT TORCHRUN_RUN_ID TRAIN_CONFIG_JSON
@@ -58,6 +67,10 @@ echo "模型:     $BASE_MODEL"
 echo "数据:     $DATA_FILES"
 echo "输出:     $OUTPUT_DIR"
 echo "Epochs:   $EPOCHS"
+echo "MaxSteps: $MAX_STEPS"
+echo "Logging:  every $LOGGING_STEPS step(s)"
+echo "Save:     strategy=$SAVE_STRATEGY steps=$SAVE_STEPS limit=$SAVE_TOTAL_LIMIT"
+echo "Eval:     disabled=$DISABLE_EVAL strategy=$EVAL_STRATEGY steps=$EVAL_STEPS"
 echo "GPU 数量: $N_GPUS"
 if [ -n "$DEEPSPEED_CONFIG" ]; then
     echo "DeepSpeed: $DEEPSPEED_CONFIG"
@@ -86,6 +99,13 @@ cmd=(
     --batch_size $BATCH_SIZE
     --grad_accum $GRAD_ACCUM
     --max_length $MAX_LENGTH
+    --max_steps $MAX_STEPS
+    --logging_steps $LOGGING_STEPS
+    --save_steps $SAVE_STEPS
+    --save_total_limit $SAVE_TOTAL_LIMIT
+    --save_strategy "$SAVE_STRATEGY"
+    --eval_steps $EVAL_STEPS
+    --eval_strategy "$EVAL_STRATEGY"
     --train_ratio $SFT_TRAIN_RATIO
     --full_finetune
 )
@@ -95,6 +115,9 @@ if [ "$GRADIENT_CHECKPOINTING" = "false" ]; then
 fi
 if [ "$FLASH_ATTN" = "true" ]; then
     cmd+=(--flash_attn)
+fi
+if [ "$DISABLE_EVAL" = "true" ]; then
+    cmd+=(--disable_eval)
 fi
 if [ -n "$DEEPSPEED_CONFIG" ]; then
     cmd+=(--deepspeed "$DEEPSPEED_CONFIG")

@@ -175,6 +175,12 @@ class TrlSftConfigTest(unittest.TestCase):
             bf16=True,
             gradient_checkpointing=True,
             max_steps=-1,
+            logging_steps=5,
+            save_steps=50,
+            save_total_limit=3,
+            save_strategy="steps",
+            eval_steps=50,
+            eval_strategy="steps",
             use_lora=True,
             chat_template_path=None,
             deepspeed=None,
@@ -206,6 +212,12 @@ class TrlSftConfigTest(unittest.TestCase):
             bf16=True,
             gradient_checkpointing=True,
             max_steps=-1,
+            logging_steps=5,
+            save_steps=50,
+            save_total_limit=3,
+            save_strategy="steps",
+            eval_steps=50,
+            eval_strategy="steps",
             use_lora=False,
             chat_template_path=None,
             deepspeed=None,
@@ -234,6 +246,12 @@ class TrlSftConfigTest(unittest.TestCase):
             bf16=True,
             gradient_checkpointing=True,
             max_steps=-1,
+            logging_steps=5,
+            save_steps=50,
+            save_total_limit=3,
+            save_strategy="steps",
+            eval_steps=50,
+            eval_strategy="steps",
             use_lora=False,
             chat_template_path=None,
             deepspeed="configs/deepspeed_zero3_bf16.json",
@@ -244,6 +262,74 @@ class TrlSftConfigTest(unittest.TestCase):
         kwargs = sft.build_sft_config_kwargs(args, has_eval=False)
 
         self.assertEqual(kwargs["deepspeed"], "configs/deepspeed_zero3_bf16.json")
+
+    def test_build_sft_config_kwargs_forwards_profile_controls(self):
+        args = SimpleNamespace(
+            output_dir="/tmp/out",
+            num_epochs=1,
+            batch_size=1,
+            grad_accum=4,
+            lr=1e-6,
+            max_length=8192,
+            seed=42,
+            bf16=True,
+            gradient_checkpointing=True,
+            max_steps=60,
+            logging_steps=2,
+            save_steps=200,
+            save_total_limit=2,
+            save_strategy="steps",
+            eval_steps=200,
+            eval_strategy="steps",
+            use_lora=False,
+            chat_template_path=None,
+            deepspeed=None,
+            fsdp=None,
+            fsdp_config=None,
+        )
+
+        kwargs = sft.build_sft_config_kwargs(args, has_eval=True)
+
+        self.assertEqual(kwargs["max_steps"], 60)
+        self.assertEqual(kwargs["logging_steps"], 2)
+        self.assertEqual(kwargs["save_steps"], 200)
+        self.assertEqual(kwargs["save_total_limit"], 2)
+        self.assertEqual(kwargs["save_strategy"], "steps")
+        self.assertEqual(kwargs["eval_steps"], 200)
+        self.assertEqual(kwargs["eval_strategy"], "steps")
+        self.assertTrue(kwargs["load_best_model_at_end"])
+
+    def test_build_sft_config_kwargs_can_disable_save_and_eval_for_profiling(self):
+        args = SimpleNamespace(
+            output_dir="/tmp/out",
+            num_epochs=1,
+            batch_size=1,
+            grad_accum=4,
+            lr=1e-6,
+            max_length=8192,
+            seed=42,
+            bf16=True,
+            gradient_checkpointing=True,
+            max_steps=60,
+            logging_steps=1,
+            save_steps=50,
+            save_total_limit=1,
+            save_strategy="no",
+            eval_steps=50,
+            eval_strategy="steps",
+            use_lora=False,
+            chat_template_path=None,
+            deepspeed=None,
+            fsdp=None,
+            fsdp_config=None,
+        )
+
+        kwargs = sft.build_sft_config_kwargs(args, has_eval=False)
+
+        self.assertEqual(kwargs["save_strategy"], "no")
+        self.assertEqual(kwargs["logging_steps"], 1)
+        self.assertNotIn("eval_strategy", kwargs)
+        self.assertNotIn("load_best_model_at_end", kwargs)
 
     def test_build_sft_config_kwargs_skips_prepare_for_tokenized_dataset(self):
         args = SimpleNamespace(
@@ -257,6 +343,12 @@ class TrlSftConfigTest(unittest.TestCase):
             bf16=True,
             gradient_checkpointing=True,
             max_steps=-1,
+            logging_steps=5,
+            save_steps=50,
+            save_total_limit=3,
+            save_strategy="steps",
+            eval_steps=50,
+            eval_strategy="steps",
             use_lora=False,
             chat_template_path=None,
             deepspeed=None,
