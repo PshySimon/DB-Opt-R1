@@ -53,6 +53,7 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn('FSDP="${FSDP:-}"', full_content)
         self.assertIn('FSDP_CONFIG="${FSDP_CONFIG:-}"', full_content)
         self.assertIn('TOKENIZED_DATASET_DIR="${TOKENIZED_DATASET_DIR:-}"', full_content)
+        self.assertIn('RESUME_FROM_CHECKPOINT="${RESUME_FROM_CHECKPOINT:-}"', full_content)
         self.assertIn('TORCHRUN_PORT="${TORCHRUN_PORT:-${MASTER_PORT:-}}"', full_content)
         self.assertIn('TORCHRUN_RUN_ID="${TORCHRUN_RUN_ID:-}"', full_content)
         self.assertIn('TORCHRUN_PORT="$(infer_torchrun_port "$TORCHRUN_PORT")"', full_content)
@@ -65,6 +66,7 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn('--fsdp "$FSDP"', full_content)
         self.assertIn('--fsdp_config "$FSDP_CONFIG"', full_content)
         self.assertIn('--tokenized_dataset_dir "$TOKENIZED_DATASET_DIR"', full_content)
+        self.assertIn('--resume_from_checkpoint "$RESUME_FROM_CHECKPOINT"', full_content)
 
         common_content = (ROOT / "scripts" / "_train_common.sh").read_text()
         self.assertIn("infer_torchrun_port()", common_content)

@@ -91,6 +91,41 @@ class TrlSftDataSplitTest(unittest.TestCase):
         self.assertEqual(len(eval_records), 1)
 
 
+class TrlSftResumeCheckpointTest(unittest.TestCase):
+    def test_resolve_resume_checkpoint_accepts_empty_values(self):
+        args = SimpleNamespace(output_dir="/tmp/out", resume_from_checkpoint=None)
+        self.assertIsNone(sft.resolve_resume_checkpoint(args))
+
+        args.resume_from_checkpoint = ""
+        self.assertIsNone(sft.resolve_resume_checkpoint(args))
+
+    def test_resolve_resume_checkpoint_uses_explicit_path(self):
+        args = SimpleNamespace(output_dir="/tmp/out", resume_from_checkpoint="/tmp/out/checkpoint-50")
+        self.assertEqual(sft.resolve_resume_checkpoint(args), "/tmp/out/checkpoint-50")
+
+    def test_resolve_resume_checkpoint_auto_finds_latest_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "checkpoint-50").mkdir()
+            (root / "checkpoint-100").mkdir()
+            (root / "checkpoint-bad").mkdir()
+            args = SimpleNamespace(output_dir=str(root), resume_from_checkpoint="auto")
+
+            self.assertEqual(sft.resolve_resume_checkpoint(args), str(root / "checkpoint-100"))
+
+    def test_resolve_resume_checkpoint_auto_returns_none_without_checkpoints(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = SimpleNamespace(output_dir=tmpdir, resume_from_checkpoint="latest")
+
+            self.assertIsNone(sft.resolve_resume_checkpoint(args))
+
+    def test_resolve_resume_checkpoint_rejects_unknown_keyword(self):
+        args = SimpleNamespace(output_dir="/tmp/out", resume_from_checkpoint="checkpoint")
+
+        with self.assertRaisesRegex(ValueError, "resume_from_checkpoint"):
+            sft.resolve_resume_checkpoint(args)
+
+
 class TrlSftConfigTest(unittest.TestCase):
     def test_build_sft_config_kwargs_enables_assistant_only_loss_and_eval(self):
         args = SimpleNamespace(
@@ -192,6 +227,7 @@ class TrlSftConfigTest(unittest.TestCase):
             fsdp=None,
             fsdp_config=None,
             tokenized_dataset_dir="/tmp/tokenized",
+            resume_from_checkpoint=None,
         )
 
         kwargs = sft.build_sft_config_kwargs(args, has_eval=False)

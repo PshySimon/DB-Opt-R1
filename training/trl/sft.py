@@ -64,6 +64,11 @@ def build_parser():
     parser.add_argument("--flash_attn", action="store_true", default=False)
     parser.add_argument("--save_config_path", default=None)
     parser.add_argument("--chat_template_path", default=None)
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        default=None,
+        help="Checkpoint path, or 'auto'/'latest' to resume from the latest checkpoint under output_dir.",
+    )
     parser.add_argument("--deepspeed", default=None, help="DeepSpeed 配置 JSON 路径或 JSON 字符串")
     parser.add_argument("--fsdp", default=None, help="Transformers TrainingArguments 的 FSDP 策略字符串")
     parser.add_argument("--fsdp_config", default=None, help="FSDP 配置 JSON 路径或 JSON 字符串")
@@ -89,6 +94,34 @@ def validate_distributed_backend_args(args) -> None:
 def validate_data_args(args) -> None:
     if not args.tokenized_dataset_dir and not args.data_files:
         raise ValueError("必须设置 --data_files 或 --tokenized_dataset_dir。")
+
+
+def resolve_resume_checkpoint(args) -> str | None:
+    value = getattr(args, "resume_from_checkpoint", None)
+    if not value:
+        return None
+    lowered = str(value).lower()
+    if lowered not in {"auto", "latest"}:
+        path = Path(value)
+        if not path.exists() and not str(value).startswith("/"):
+            raise ValueError(
+                "--resume_from_checkpoint 只接受 checkpoint 路径，或 auto/latest。"
+            )
+        return str(path)
+
+    output_dir = Path(args.output_dir)
+    checkpoints = []
+    for path in output_dir.glob("checkpoint-*"):
+        if not path.is_dir():
+            continue
+        try:
+            step = int(path.name.rsplit("-", 1)[1])
+        except ValueError:
+            continue
+        checkpoints.append((step, path))
+    if not checkpoints:
+        return None
+    return str(max(checkpoints, key=lambda item: item[0])[1])
 
 
 def is_rank_zero() -> bool:
@@ -427,6 +460,7 @@ def main():
             "train_mode": "lora" if args.use_lora else "full",
             "chat_template_path": chat_template_path,
             "tokenized_dataset_dir": args.tokenized_dataset_dir,
+            "resolved_resume_from_checkpoint": resolve_resume_checkpoint(args),
             "world_size": int(torch.distributed.get_world_size())
             if torch.distributed.is_available() and torch.distributed.is_initialized()
             else 1,
@@ -514,7 +548,10 @@ def main():
 
     mode_name = "LoRA" if args.use_lora else "全量"
     print(f"\n开始 SFT 训练... 模式: {mode_name}")
-    trainer.train()
+    resume_checkpoint = resolve_resume_checkpoint(args)
+    if resume_checkpoint:
+        print(f"从 checkpoint 恢复训练: {resume_checkpoint}")
+    trainer.train(resume_from_checkpoint=resume_checkpoint)
 
     if torch.cuda.is_available():
         print_memory_stats("训练后")
