@@ -125,6 +125,42 @@ class TrlSftResumeCheckpointTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "resume_from_checkpoint"):
             sft.resolve_resume_checkpoint(args)
 
+    def test_maybe_disable_rng_resume_patches_trainer_on_unsafe_torch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoint = Path(tmpdir) / "checkpoint-50"
+            checkpoint.mkdir()
+            (checkpoint / "rng_state_0.pth").write_text("unsafe pickle", encoding="utf-8")
+
+            class FakeTrainer:
+                def __init__(self):
+                    self.original_called = False
+
+                def _load_rng_state(self, _checkpoint):
+                    self.original_called = True
+
+            trainer = FakeTrainer()
+
+            with mock.patch.object(sft.torch, "__version__", "2.5.1+rocm6.3"):
+                disabled = sft.maybe_disable_unsafe_rng_state_resume(trainer, str(checkpoint))
+
+            self.assertTrue(disabled)
+            trainer._load_rng_state(str(checkpoint))
+            self.assertFalse(trainer.original_called)
+
+    def test_maybe_disable_rng_resume_keeps_rng_on_safe_torch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoint = Path(tmpdir) / "checkpoint-50"
+            checkpoint.mkdir()
+            (checkpoint / "rng_state_0.pth").write_text("safe enough", encoding="utf-8")
+            trainer = mock.Mock()
+
+            with mock.patch.object(sft.torch, "__version__", "2.6.0"):
+                disabled = sft.maybe_disable_unsafe_rng_state_resume(trainer, str(checkpoint))
+
+            self.assertFalse(disabled)
+            trainer._load_rng_state(str(checkpoint))
+            trainer._load_rng_state.assert_called_once_with(str(checkpoint))
+
 
 class TrlSftConfigTest(unittest.TestCase):
     def test_build_sft_config_kwargs_enables_assistant_only_loss_and_eval(self):

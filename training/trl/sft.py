@@ -28,6 +28,7 @@ from training.data_utils import load_sft_data
 
 
 MIN_TRANSFORMERS_FOR_ASSISTANT_MASKS = Version("4.56.2")
+MIN_TORCH_FOR_SAFE_RNG_STATE_LOAD = Version("2.6.0")
 TRL_CHAT_TEMPLATES_DIR = (
     Path(trl.__file__).resolve().parent / "chat_templates"
     if getattr(trl, "__file__", None)
@@ -122,6 +123,36 @@ def resolve_resume_checkpoint(args) -> str | None:
     if not checkpoints:
         return None
     return str(max(checkpoints, key=lambda item: item[0])[1])
+
+
+def get_torch_base_version() -> Version:
+    return Version(str(torch.__version__).split("+", 1)[0])
+
+
+def checkpoint_has_rng_state(checkpoint: str | None) -> bool:
+    if not checkpoint:
+        return False
+    return any(Path(checkpoint).glob("rng_state*.pth"))
+
+
+def maybe_disable_unsafe_rng_state_resume(trainer, resume_checkpoint: str | None) -> bool:
+    if not checkpoint_has_rng_state(resume_checkpoint):
+        return False
+    if get_torch_base_version() >= MIN_TORCH_FOR_SAFE_RNG_STATE_LOAD:
+        return False
+
+    torch_version = torch.__version__
+
+    def _skip_rng_state(_checkpoint):
+        print(
+            "跳过 checkpoint RNG state 恢复: "
+            f"torch=={torch_version} 低于 {MIN_TORCH_FOR_SAFE_RNG_STATE_LOAD}，"
+            "transformers 会拒绝 torch.load(rng_state*.pth)。"
+            "模型/优化器/学习率状态仍会正常恢复。"
+        )
+
+    trainer._load_rng_state = _skip_rng_state
+    return True
 
 
 def is_rank_zero() -> bool:
@@ -554,6 +585,7 @@ def main():
     resume_checkpoint = resolve_resume_checkpoint(args)
     if resume_checkpoint:
         print(f"从 checkpoint 恢复训练: {resume_checkpoint}")
+        maybe_disable_unsafe_rng_state_resume(trainer, resume_checkpoint)
     trainer.train(resume_from_checkpoint=resume_checkpoint)
 
     if torch.cuda.is_available():
