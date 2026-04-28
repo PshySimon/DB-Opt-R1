@@ -233,6 +233,7 @@ class TrlSftConfigTest(unittest.TestCase):
         kwargs = sft.build_sft_config_kwargs(args, has_eval=False)
 
         self.assertEqual(kwargs["dataset_kwargs"], {"skip_prepare_dataset": True})
+        self.assertFalse(kwargs["assistant_only_loss"])
 
     def test_validate_distributed_backend_args_rejects_deepspeed_with_fsdp(self):
         args = SimpleNamespace(

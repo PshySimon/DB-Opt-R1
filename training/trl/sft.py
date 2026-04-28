@@ -294,7 +294,10 @@ def build_sft_config_kwargs(args, has_eval: bool):
         "report_to": "none",
         "max_steps": args.max_steps,
         "seed": args.seed,
-        "assistant_only_loss": True,
+        # For pre-tokenized datasets, assistant_masks are already materialized and
+        # TRL's collator applies them directly. Keeping assistant_only_loss=True
+        # would make SFTTrainer reject the processed dataset as non-conversational.
+        "assistant_only_loss": not bool(getattr(args, "tokenized_dataset_dir", None)),
         "ddp_find_unused_parameters": False if args.use_lora else None,
     }
     chat_template_path = getattr(args, "chat_template_path", None)
