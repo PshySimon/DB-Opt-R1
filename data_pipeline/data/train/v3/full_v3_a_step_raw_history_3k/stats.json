@@ -1,0 +1,32 @@
+{
+  "assistant_steps": 20248,
+  "finish_oversample": 1,
+  "finish_steps": 3000,
+  "history_turns": 4,
+  "input_jsonl": "data_pipeline/data/train/v2/sft_trajectories_v10_train.jsonl",
+  "max_shard_mb": 90,
+  "output_json": "data_pipeline/data/train/v3/full_v3_a_step_raw_history_3k/train.jsonl",
+  "output_jsonl_shards": [
+    "data_pipeline/data/train/v3/full_v3_a_step_raw_history_3k/train-00000-of-00002.jsonl",
+    "data_pipeline/data/train/v3/full_v3_a_step_raw_history_3k/train-00001-of-00002.jsonl"
+  ],
+  "output_rows": 20248,
+  "oversampled_finish_extra_rows": 0,
+  "remove_think_history": false,
+  "require_tool_call": true,
+  "skipped": {},
+  "source_trajectory_rows": 3000,
+  "target_tool_counts": {
+    "finish_tuning": 3000,
+    "get_current_config": 3057,
+    "get_db_metrics": 1922,
+    "get_hardware_info": 2867,
+    "get_system_stats": 34,
+    "get_workload_info": 30,
+    "predict_performance": 3088,
+    "reload_pg": 26,
+    "restart_pg": 2883,
+    "set_knob": 3316,
+    "view_logs": 25
+  }
+}
