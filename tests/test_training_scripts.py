@@ -171,6 +171,34 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn("transformers==5.5.4", content)
         self.assertIn("peft==0.18.1", content)
 
+    def test_requirements_llama_factory_pins_separate_stack(self):
+        content = (ROOT / "requirements-llama-factory.txt").read_text()
+        self.assertIn("llamafactory[deepspeed,metrics]==0.9.3", content)
+        self.assertIn("transformers>=4.51.0,<=4.52.4", content)
+        self.assertIn("datasets>=2.16.0,<=3.6.0", content)
+
+    def test_llamafactory_sft_full_script_uses_v3_step_data(self):
+        content = (ROOT / "scripts" / "train_sft_llamafactory_full.sh").read_text()
+        self.assertIn('DATA_DIR="${DATA_DIR:-$PROJECT_ROOT/data_pipeline/data/train/v3/full_v3_b_step_no_think_history_3k}"', content)
+        self.assertIn('OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/model_save/experiments/v3/sft/llamafactory/full/full_v3_b_step_no_think_history_3k}"', content)
+        self.assertIn('TEMPLATE="${TEMPLATE:-qwen3}"', content)
+        self.assertIn('MASK_HISTORY="${MASK_HISTORY:-true}"', content)
+        self.assertIn('ENABLE_THINKING="${ENABLE_THINKING:-true}"', content)
+        self.assertIn('FLASH_ATTN="${FLASH_ATTN:-fa2}"', content)
+        self.assertIn('DATASET_FILE="$LF_DATASET_DIR/${DATASET_NAME}.jsonl"', content)
+        self.assertIn('DATASET_INFO="$LF_DATASET_DIR/dataset_info.json"', content)
+        self.assertIn('"formatting": "alpaca"', content)
+        self.assertIn('"history": "history"', content)
+        self.assertIn("mask_history: $(yaml_bool \"$MASK_HISTORY\")", content)
+        self.assertIn("enable_thinking: $(yaml_bool \"$ENABLE_THINKING\")", content)
+        self.assertIn("flash_attn: $FLASH_ATTN", content)
+        self.assertIn('llamafactory-cli train "$TRAIN_YAML"', content)
+        self.assertIn('N_GPUS="${N_GPUS:-1}"', content)
+        self.assertIn('configure_accelerator_visible_devices', content)
+        self.assertIn('--nproc_per_node="$N_GPUS"', content)
+        self.assertIn('DRY_RUN="${DRY_RUN:-false}"', content)
+        self.assertIn('DRY_RUN=true，仅生成 LLaMA-Factory 数据和配置，不启动训练。', content)
+
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
         self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', lora_content)

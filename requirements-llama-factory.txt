@@ -1,0 +1,22 @@
+# LLaMA-Factory environment for Qwen3 full SFT v3 experiments.
+#
+# Keep this separate from requirements-trl.txt / requirements-verl.txt:
+# LLaMA-Factory 0.9.x depends on the Transformers 4.x stack, while the current
+# TRL environment in this repo may use a newer/incompatible Transformers stack.
+#
+# 0.9.4 requires Python >=3.11. Pin 0.9.3 for Python 3.10 compatibility while
+# still retaining Qwen3 support.
+-r requirements.txt
+llamafactory[deepspeed,metrics]==0.9.3
+
+# Core stack compatible with LLaMA-Factory 0.9.3.
+transformers>=4.51.0,<=4.52.4
+datasets>=2.16.0,<=3.6.0
+accelerate>=0.34.0,<=1.7.0
+peft>=0.14.0,<=0.15.2
+trl>=0.8.6,<=0.9.6
+tokenizers>=0.19.0,<=0.21.1
+
+# Install torch/flash-attn with a wheel matching the training machine CUDA/ROCm
+# stack instead of pinning them here. For A800 CUDA hosts, install the matching
+# PyTorch build first, then install flash-attn if needed by the selected image.
