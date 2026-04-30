@@ -103,22 +103,8 @@ def _best_predict_improvement(messages: list) -> float:
 def _messages_to_sft(messages: list, improvement_pct: float,
                      sample_idx: int, question: str = "") -> dict:
     """将 rollout 的 message 列表转换为 SFT 格式，统一 role 命名。"""
-    import re
-    sft_messages = []
-    for msg in messages:
-        role = msg["role"]
-        content = msg["content"]
-        if role == "user" and "<tool_response>" in content:
-            # 将 rollout 的 tool_response 格式转为 role=tool
-            m = re.search(r"<tool_response>\n?(.*?)\n?</tool_response>",
-                          content, re.DOTALL)
-            obs = m.group(1) if m else content
-            sft_messages.append({"role": "tool", "content": obs})
-        else:
-            sft_messages.append({"role": role, "content": content})
-
     result = {
-        "messages": sft_messages,
+        "messages": _normalize_rollout_messages(messages),
         "reward": round(improvement_pct / 100.0, 4),
         "improvement_pct": round(improvement_pct, 2),
         "env_sample_idx": sample_idx,
@@ -126,6 +112,35 @@ def _messages_to_sft(messages: list, improvement_pct: float,
     if question:
         result["question"] = question
     return result
+
+
+def _normalize_rollout_messages(messages: list) -> list:
+    """将 rollout 的 message 列表转换为持久化格式，统一 role 命名。"""
+    normalized = []
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "user" and "<tool_response>" in content:
+            m = re.search(r"<tool_response>\n?(.*?)\n?</tool_response>",
+                          content, re.DOTALL)
+            obs = m.group(1) if m else content
+            normalized.append({"role": "tool", "content": obs})
+        else:
+            normalized.append({"role": role, "content": content})
+    return normalized
+
+
+def _messages_to_eval_record(messages: list, tracking: dict,
+                             sample_idx: int, question: str) -> dict:
+    """构造 eval JSONL 记录，保留 rollout tracking 以支持报表聚合。"""
+    tracking = tracking or {}
+    return {
+        "messages": _normalize_rollout_messages(messages),
+        "question": question,
+        "env_sample_idx": sample_idx,
+        "termination_reason": tracking.get("termination_reason"),
+        "tracking": tracking,
+    }
 
 
 def sample_one_scenario(
@@ -512,7 +527,7 @@ def _run_eval(args, llm_fn):
         env.scenarios = scenarios
         env.reset(sample_idx=idx)
 
-        messages, _ = rollout(
+        messages, tracking = rollout(
             env=env,
             llm_fn=llm_fn,
             system_prompt=SYSTEM_PROMPT,
@@ -521,24 +536,7 @@ def _run_eval(args, llm_fn):
             temperature=0.3,  # eval 用低温度确保稳定
         )
 
-        # 格式化 messages（tool_response → role=tool）
-        sft_messages = []
-        for msg in messages:
-            role = msg["role"]
-            content = msg["content"]
-            if role == "user" and "<tool_response>" in content:
-                m = re.search(r"<tool_response>\n?(.*?)\n?</tool_response>",
-                              content, re.DOTALL)
-                obs = m.group(1) if m else content
-                sft_messages.append({"role": "tool", "content": obs})
-            else:
-                sft_messages.append({"role": role, "content": content})
-
-        return {
-            "messages": sft_messages,
-            "question": question,
-            "env_sample_idx": idx,
-        }
+        return _messages_to_eval_record(messages, tracking, idx, question)
 
     t0 = time.time()
     total_ok = 0

@@ -65,6 +65,25 @@ class SamplerContractTest(unittest.TestCase):
 
         self.assertEqual(0.0, best)
 
+    def test_messages_to_eval_record_preserves_tracking_termination_reason(self):
+        converted = sampler._messages_to_eval_record(
+            messages=[
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "u"},
+                {"role": "tool", "content": '{"ok": true}'},
+            ],
+            tracking={
+                "termination_reason": "finish_tuning",
+                "steps_taken": 3,
+            },
+            sample_idx=7,
+            question="q",
+        )
+
+        self.assertEqual("finish_tuning", converted["termination_reason"])
+        self.assertEqual({"termination_reason": "finish_tuning", "steps_taken": 3}, converted["tracking"])
+        self.assertEqual("tool", converted["messages"][-1]["role"])
+
 
 if __name__ == "__main__":
     unittest.main()
