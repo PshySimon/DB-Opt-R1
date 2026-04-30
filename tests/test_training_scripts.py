@@ -185,6 +185,7 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn('MASK_HISTORY="${MASK_HISTORY:-true}"', content)
         self.assertIn('ENABLE_THINKING="${ENABLE_THINKING:-true}"', content)
         self.assertIn('FLASH_ATTN="${FLASH_ATTN:-fa2}"', content)
+        self.assertIn('DEEPSPEED_CONFIG="${DEEPSPEED_CONFIG:-$PROJECT_ROOT/configs/deepspeed_zero2_bf16.json}"', content)
         self.assertIn('DATASET_FILE="$LF_DATASET_DIR/${DATASET_NAME}.jsonl"', content)
         self.assertIn('DATASET_INFO="$LF_DATASET_DIR/dataset_info.json"', content)
         self.assertIn('"formatting": "alpaca"', content)
@@ -198,6 +199,13 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn('--nproc_per_node="$N_GPUS"', content)
         self.assertIn('DRY_RUN="${DRY_RUN:-false}"', content)
         self.assertIn('DRY_RUN=true，仅生成 LLaMA-Factory 数据和配置，不启动训练。', content)
+
+    def test_deepspeed_zero2_bf16_config_is_checked_in(self):
+        payload = OmegaConf.load(ROOT / "configs" / "deepspeed_zero2_bf16.json")
+        self.assertEqual(2, payload.zero_optimization.stage)
+        self.assertTrue(payload.bf16.enabled)
+        self.assertFalse(payload.fp16.enabled)
+        self.assertEqual(500000000, payload.zero_optimization.allgather_bucket_size)
 
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
