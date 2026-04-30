@@ -185,6 +185,7 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn('MASK_HISTORY="${MASK_HISTORY:-true}"', content)
         self.assertIn('ENABLE_THINKING="${ENABLE_THINKING:-true}"', content)
         self.assertIn('FLASH_ATTN="${FLASH_ATTN:-fa2}"', content)
+        self.assertIn('LR="${LR:-0.000001}"', content)
         self.assertIn('DEEPSPEED_CONFIG="${DEEPSPEED_CONFIG:-$PROJECT_ROOT/configs/deepspeed_zero2_bf16.json}"', content)
         self.assertIn('DATASET_FILE="$LF_DATASET_DIR/${DATASET_NAME}.jsonl"', content)
         self.assertIn('DATASET_INFO="$LF_DATASET_DIR/dataset_info.json"', content)
