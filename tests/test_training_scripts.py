@@ -207,6 +207,15 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertFalse(payload.fp16.enabled)
         self.assertEqual(500000000, payload.zero_optimization.allgather_bucket_size)
 
+    def test_deepspeed_zero3_bf16_llamafactory_config_is_checked_in(self):
+        payload = OmegaConf.load(ROOT / "configs" / "deepspeed_zero3_bf16_llamafactory.json")
+        self.assertEqual(3, payload.zero_optimization.stage)
+        self.assertTrue(payload.bf16.enabled)
+        self.assertFalse(payload.fp16.enabled)
+        self.assertEqual(500000000, payload.zero_optimization.reduce_bucket_size)
+        self.assertEqual(500000000, payload.zero_optimization.stage3_prefetch_bucket_size)
+        self.assertTrue(payload.zero_optimization.stage3_gather_16bit_weights_on_model_save)
+
     def test_verl_grpo_scripts_use_configurable_attention_impl(self):
         lora_content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
         self.assertIn('VLLM_ATTENTION_BACKEND="${VLLM_ATTENTION_BACKEND:-FLASH_ATTN}"', lora_content)
