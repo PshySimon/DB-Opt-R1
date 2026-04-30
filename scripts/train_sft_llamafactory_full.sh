@@ -204,14 +204,4 @@ if [ "$DRY_RUN" = "true" ]; then
     exit 0
 fi
 
-if [ "$N_GPUS" -gt 1 ]; then
-    exec torchrun \
-        --nnodes=1 \
-        --nproc_per_node="$N_GPUS" \
-        --rdzv-backend=c10d \
-        --rdzv-endpoint="$MASTER_ADDR:$TORCHRUN_PORT" \
-        --rdzv-id="$TORCHRUN_RUN_ID" \
-        "$(command -v llamafactory-cli)" train "$TRAIN_YAML"
-else
-    exec llamafactory-cli train "$TRAIN_YAML"
-fi
+exec llamafactory-cli train "$TRAIN_YAML"

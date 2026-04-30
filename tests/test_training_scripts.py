@@ -196,7 +196,8 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn('llamafactory-cli train "$TRAIN_YAML"', content)
         self.assertIn('N_GPUS="${N_GPUS:-1}"', content)
         self.assertIn('configure_accelerator_visible_devices', content)
-        self.assertIn('--nproc_per_node="$N_GPUS"', content)
+        self.assertNotIn('--nproc_per_node="$N_GPUS"', content)
+        self.assertNotIn('exec torchrun', content)
         self.assertIn('DRY_RUN="${DRY_RUN:-false}"', content)
         self.assertIn('DRY_RUN=true，仅生成 LLaMA-Factory 数据和配置，不启动训练。', content)
 
