@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import subprocess
+import tempfile
 import unittest
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
@@ -201,6 +203,90 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertNotIn('exec torchrun', content)
         self.assertIn('DRY_RUN="${DRY_RUN:-false}"', content)
         self.assertIn('DRY_RUN=true，仅生成 LLaMA-Factory 数据和配置，不启动训练。', content)
+
+    def test_llamafactory_sft_full_dry_run_writes_eval_dataset_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            train_dir = tmp_path / "train"
+            val_dir = tmp_path / "val"
+            output_dir = tmp_path / "out"
+            train_dir.mkdir()
+            val_dir.mkdir()
+            sample = {"instruction": "inst", "input": "", "output": "out", "system": "", "history": []}
+            (train_dir / "train.jsonl").write_text(json.dumps(sample) + "\n", encoding="utf-8")
+            (val_dir / "validation.jsonl").write_text(json.dumps(sample) + "\n", encoding="utf-8")
+
+            subprocess.run(
+                [
+                    "bash",
+                    "-lc",
+                    (
+                        "DRY_RUN=true "
+                        f"PROJECT_ROOT='{ROOT}' "
+                        f"DATA_DIR='{train_dir}' "
+                        f"VAL_DATA_DIR='{val_dir}' "
+                        "DATASET_NAME=db_train "
+                        "VAL_DATASET_NAME=db_val "
+                        f"OUTPUT_DIR='{output_dir}' "
+                        "RESUME_FROM_CHECKPOINT=/tmp/checkpoint-50 "
+                        "EVAL_STEPS=25 "
+                        "LOAD_BEST_MODEL_AT_END=true "
+                        "scripts/train_sft_llamafactory_full.sh"
+                    ),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            yaml_text = (output_dir / "llamafactory_train.yaml").read_text(encoding="utf-8")
+            dataset_info = json.loads(
+                (output_dir / "llamafactory_dataset" / "dataset_info.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("eval_dataset: db_val", yaml_text)
+            self.assertIn("eval_strategy: steps", yaml_text)
+            self.assertIn("eval_steps: 25", yaml_text)
+            self.assertIn("load_best_model_at_end: true", yaml_text)
+            self.assertIn("metric_for_best_model: eval_loss", yaml_text)
+            self.assertIn("greater_is_better: false", yaml_text)
+            self.assertIn("resume_from_checkpoint: /tmp/checkpoint-50", yaml_text)
+            self.assertEqual("db_train.jsonl", dataset_info["db_train"]["file_name"])
+            self.assertEqual("db_val.jsonl", dataset_info["db_val"]["file_name"])
+
+    def test_llamafactory_sft_full_dry_run_writes_val_size_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            train_dir = tmp_path / "train"
+            output_dir = tmp_path / "out"
+            train_dir.mkdir()
+            sample = {"instruction": "inst", "input": "", "output": "out", "system": "", "history": []}
+            (train_dir / "train.jsonl").write_text(json.dumps(sample) + "\n", encoding="utf-8")
+
+            subprocess.run(
+                [
+                    "bash",
+                    "-lc",
+                    (
+                        "DRY_RUN=true "
+                        f"PROJECT_ROOT='{ROOT}' "
+                        f"DATA_DIR='{train_dir}' "
+                        f"OUTPUT_DIR='{output_dir}' "
+                        "VAL_SIZE=0.05 "
+                        "scripts/train_sft_llamafactory_full.sh"
+                    ),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            yaml_text = (output_dir / "llamafactory_train.yaml").read_text(encoding="utf-8")
+            self.assertIn("val_size: 0.05", yaml_text)
+            self.assertIn("eval_strategy: steps", yaml_text)
+            self.assertIn("load_best_model_at_end: true", yaml_text)
+            self.assertNotIn("eval_dataset:", yaml_text)
 
     def test_deepspeed_zero2_bf16_config_is_checked_in(self):
         payload = OmegaConf.load(ROOT / "configs" / "deepspeed_zero2_bf16.json")
