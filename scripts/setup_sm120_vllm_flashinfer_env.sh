@@ -14,6 +14,7 @@ set -euo pipefail
 # Usage:
 #   bash scripts/setup_sm120_vllm_flashinfer_env.sh
 #   RUN_SMOKE=true bash scripts/setup_sm120_vllm_flashinfer_env.sh
+#   SMOKE_ONLY=true RUN_SMOKE=true bash scripts/setup_sm120_vllm_flashinfer_env.sh
 #   RECREATE=true RUN_SMOKE=true bash scripts/setup_sm120_vllm_flashinfer_env.sh
 
 ENV_PREFIX="${ENV_PREFIX:-/root/autodl-tmp/conda_envs/dbopt-vllm-flashinfer-cu130}"
@@ -22,6 +23,7 @@ BASE_MODEL="${BASE_MODEL:-/root/autodl-tmp/models/Qwen3-8B}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 RECREATE="${RECREATE:-false}"
 RUN_SMOKE="${RUN_SMOKE:-false}"
+SMOKE_ONLY="${SMOKE_ONLY:-false}"
 SKIP_GPU_CHECK="${SKIP_GPU_CHECK:-false}"
 
 VLLM_INDEX_URL="${VLLM_INDEX_URL:-https://wheels.vllm.ai/cu130}"
@@ -59,6 +61,7 @@ require_bool() {
 
 require_bool RECREATE "$RECREATE"
 require_bool RUN_SMOKE "$RUN_SMOKE"
+require_bool SMOKE_ONLY "$SMOKE_ONLY"
 require_bool SKIP_GPU_CHECK "$SKIP_GPU_CHECK"
 
 CONDA_SH="${CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}"
@@ -76,11 +79,13 @@ log "FlashInfer arch: $FLASHINFER_CUDA_ARCH_LIST"
 source "$CONDA_SH"
 
 if [ -d "$ENV_PREFIX" ] && [ "$RECREATE" = "true" ]; then
+  [ "$SMOKE_ONLY" = "false" ] || die "RECREATE=true cannot be used with SMOKE_ONLY=true"
   log "Removing existing env because RECREATE=true"
   conda env remove -p "$ENV_PREFIX" -y
 fi
 
 if [ ! -d "$ENV_PREFIX" ]; then
+  [ "$SMOKE_ONLY" = "false" ] || die "SMOKE_ONLY=true requires an existing env: $ENV_PREFIX"
   log "Creating conda env"
   conda create -p "$ENV_PREFIX" "python=$PYTHON_VERSION" -y
 else
@@ -89,31 +94,35 @@ fi
 
 conda activate "$ENV_PREFIX"
 
-log "Upgrading installer basics"
-python -m pip install -U pip setuptools wheel
+if [ "$SMOKE_ONLY" = "false" ]; then
+  log "Upgrading installer basics"
+  python -m pip install -U pip setuptools wheel
 
-log "Installing vLLM from CUDA 13.0 wheel index"
-python -m pip install --no-cache-dir \
-  "vllm==$VLLM_VERSION" \
-  --index-url "$VLLM_INDEX_URL" \
-  --extra-index-url "$PYPI_INDEX_URL"
+  log "Installing vLLM from CUDA 13.0 wheel index"
+  python -m pip install --no-cache-dir \
+    "vllm==$VLLM_VERSION" \
+    --index-url "$VLLM_INDEX_URL" \
+    --extra-index-url "$PYPI_INDEX_URL"
 
-log "Pinning transformers"
-python -m pip install --no-cache-dir \
-  "transformers==$TRANSFORMERS_VERSION" \
-  -i "$PYPI_INDEX_URL"
+  log "Pinning transformers"
+  python -m pip install --no-cache-dir \
+    "transformers==$TRANSFORMERS_VERSION" \
+    -i "$PYPI_INDEX_URL"
 
-log "Installing FlashInfer ${FLASHINFER_VERSION} ${FLASHINFER_CUDA} packages"
-python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true
+  log "Installing FlashInfer ${FLASHINFER_VERSION} ${FLASHINFER_CUDA} packages"
+  python -m pip uninstall -y flashinfer-python flashinfer-cubin flashinfer-jit-cache || true
 
-python -m pip install --no-cache-dir --no-deps --force-reinstall \
-  "flashinfer-python==$FLASHINFER_VERSION" \
-  "flashinfer-cubin==$FLASHINFER_VERSION" \
-  -i "$PYPI_INDEX_URL"
+  python -m pip install --no-cache-dir --no-deps --force-reinstall \
+    "flashinfer-python==$FLASHINFER_VERSION" \
+    "flashinfer-cubin==$FLASHINFER_VERSION" \
+    -i "$PYPI_INDEX_URL"
 
-python -m pip install --no-cache-dir --no-deps --force-reinstall \
-  "flashinfer-jit-cache==${FLASHINFER_VERSION}+${FLASHINFER_CUDA}" \
-  --index-url "$FLASHINFER_INDEX_URL"
+  python -m pip install --no-cache-dir --no-deps --force-reinstall \
+    "flashinfer-jit-cache==${FLASHINFER_VERSION}+${FLASHINFER_CUDA}" \
+    --index-url "$FLASHINFER_INDEX_URL"
+else
+  log "SMOKE_ONLY=true, skipping package installation"
+fi
 
 log "Verifying package versions"
 SKIP_GPU_CHECK="$SKIP_GPU_CHECK" FLASHINFER_CUDA="$FLASHINFER_CUDA" VLLM_VERSION="$VLLM_VERSION" python - <<'PY'

@@ -48,6 +48,27 @@ PY
 
 ## 训练环境：LLaMA-Factory + FlashAttention-2
 
+已固化脚本：
+
+```bash
+cd /root/autodl-tmp/DB-Opt-R1
+
+# 只安装并验证训练包；无 GPU 阶段可加 SKIP_GPU_CHECK=true
+bash scripts/setup_sm120_llamafactory_env.sh
+
+# 已经装好环境后，只跑 LoRA + FA2 1 step smoke，不重复安装包
+SMOKE_ONLY=true RUN_SMOKE=true bash scripts/setup_sm120_llamafactory_env.sh
+
+# 重建环境，并跑 LoRA + FA2 1 step smoke
+RECREATE=true RUN_SMOKE=true bash scripts/setup_sm120_llamafactory_env.sh
+```
+
+脚本路径：
+
+```text
+scripts/setup_sm120_llamafactory_env.sh
+```
+
 训练环境使用 CUDA 12.8 栈即可：
 
 ```text
@@ -102,6 +123,9 @@ cd /root/autodl-tmp/DB-Opt-R1
 
 # 只安装并验证包，不加载模型
 bash scripts/setup_sm120_vllm_flashinfer_env.sh
+
+# 已经装好环境后，只跑 Qwen3-8B vLLM + FlashInfer attention smoke，不重复安装包
+SMOKE_ONLY=true RUN_SMOKE=true bash scripts/setup_sm120_vllm_flashinfer_env.sh
 
 # 重建环境，并跑 Qwen3-8B vLLM + FlashInfer attention smoke
 RECREATE=true RUN_SMOKE=true bash scripts/setup_sm120_vllm_flashinfer_env.sh
