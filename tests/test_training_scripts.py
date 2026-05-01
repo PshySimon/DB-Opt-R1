@@ -179,6 +179,36 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
         self.assertIn("transformers>=4.51.0,<=4.52.4", content)
         self.assertIn("datasets>=2.16.0,<=3.6.0", content)
 
+    def test_sm120_vllm_flashinfer_setup_script_pins_cuda13_stack(self):
+        content = (ROOT / "scripts" / "setup_sm120_vllm_flashinfer_env.sh").read_text()
+        self.assertIn('ENV_PREFIX="${ENV_PREFIX:-/root/autodl-tmp/conda_envs/dbopt-vllm-flashinfer-cu130}"', content)
+        self.assertIn('PROJECT_ROOT="${PROJECT_ROOT:-/root/autodl-tmp/DB-Opt-R1}"', content)
+        self.assertIn('BASE_MODEL="${BASE_MODEL:-/root/autodl-tmp/models/Qwen3-8B}"', content)
+        self.assertIn('FLASHINFER_VERSION="${FLASHINFER_VERSION:-0.6.9}"', content)
+        self.assertIn('FLASHINFER_CUDA="${FLASHINFER_CUDA:-cu130}"', content)
+        self.assertIn('VLLM_VERSION="${VLLM_VERSION:-0.20.0}"', content)
+        self.assertIn('VLLM_INDEX_URL="${VLLM_INDEX_URL:-https://wheels.vllm.ai/cu130}"', content)
+        self.assertIn('"vllm==$VLLM_VERSION"', content)
+        self.assertIn('--index-url "$VLLM_INDEX_URL"', content)
+        self.assertIn('"flashinfer-python==$FLASHINFER_VERSION"', content)
+        self.assertIn('"flashinfer-cubin==$FLASHINFER_VERSION"', content)
+        self.assertIn('"flashinfer-jit-cache==${FLASHINFER_VERSION}+${FLASHINFER_CUDA}"', content)
+        self.assertIn('export FLASHINFER_CUDA_ARCH_LIST="${FLASHINFER_CUDA_ARCH_LIST:-12.0f}"', content)
+        self.assertIn('export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-12.0}"', content)
+        self.assertIn('AttentionBackendEnum.FLASHINFER', content)
+        self.assertIn("Using AttentionBackendEnum.FLASHINFER backend", content)
+        self.assertNotIn("uv pip", content)
+        self.assertNotIn("VLLM_ATTENTION_BACKEND", content)
+
+    def test_sm120_vllm_flashinfer_setup_script_is_safe_by_default(self):
+        content = (ROOT / "scripts" / "setup_sm120_vllm_flashinfer_env.sh").read_text()
+        self.assertIn('RECREATE="${RECREATE:-false}"', content)
+        self.assertIn('if [ -d "$ENV_PREFIX" ] && [ "$RECREATE" = "true" ]; then', content)
+        self.assertIn('conda env remove -p "$ENV_PREFIX" -y', content)
+        self.assertIn('RUN_SMOKE="${RUN_SMOKE:-false}"', content)
+        self.assertIn('cat > "$SMOKE_SCRIPT" <<PY', content)
+        self.assertIn('python "$SMOKE_SCRIPT"', content)
+
     def test_llamafactory_sft_full_script_uses_v3_step_data(self):
         content = (ROOT / "scripts" / "train_sft_llamafactory_full.sh").read_text()
         self.assertIn('DATA_DIR="${DATA_DIR:-$PROJECT_ROOT/data_pipeline/data/train/v3/full_v3_b_step_no_think_history_3k}"', content)
