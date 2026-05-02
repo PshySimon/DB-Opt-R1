@@ -11,11 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TrainingScriptDefaultsTest(unittest.TestCase):
-    def test_configure_accelerator_visible_devices_remaps_physical_ids(self):
+    def test_configure_accelerator_visible_devices_remaps_cuda_without_rocm_vars(self):
         script = """
+unset CUDA_VISIBLE_DEVICES HIP_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES
 source scripts/_train_common.sh
-configure_accelerator_visible_devices "4,5,6,7" "4" "4,5,6,7" "4,5,6,7" ""
-printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEVICES"
+configure_accelerator_visible_devices "4,5,6,7" "4" "4,5,6,7" "" ""
+printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE_DEVICES-}" "${ROCR_VISIBLE_DEVICES-}"
 """
         result = subprocess.run(
             ["bash", "-lc", script],
@@ -25,7 +26,7 @@ printf '%s\\n' "$CUDA_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES" "$ROCR_VISIBLE_DEV
             check=True,
         )
         lines = result.stdout.strip().splitlines()
-        self.assertEqual(lines, ["0,1,2,3", "0,1,2,3", "4,5,6,7"])
+        self.assertEqual(lines, ["cuda=0,1,2,3", "hip=", "rocr="])
 
     def test_trl_sft_scripts_support_multigpu_and_write_config_json(self):
         lora_content = (ROOT / "scripts" / "train_sft_trl_lora.sh").read_text()

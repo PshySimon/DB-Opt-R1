@@ -43,18 +43,26 @@ configure_accelerator_visible_devices() {
     local logical_devices
     logical_devices="$(infer_logical_visible_devices "$n_gpus")"
 
-    export ROCR_VISIBLE_DEVICES="${requested_rocr_visible:-$physical_devices}"
-
     if [ -n "$requested_cuda_visible" ] && [ "$requested_cuda_visible" != "$physical_devices" ]; then
         export CUDA_VISIBLE_DEVICES="$requested_cuda_visible"
     else
         export CUDA_VISIBLE_DEVICES="$logical_devices"
     fi
 
-    if [ -n "$requested_hip_visible" ] && [ "$requested_hip_visible" != "$physical_devices" ]; then
-        export HIP_VISIBLE_DEVICES="$requested_hip_visible"
+    if [ -n "$requested_hip_visible" ]; then
+        if [ "$requested_hip_visible" != "$physical_devices" ]; then
+            export HIP_VISIBLE_DEVICES="$requested_hip_visible"
+        else
+            export HIP_VISIBLE_DEVICES="$logical_devices"
+        fi
     else
-        export HIP_VISIBLE_DEVICES="$logical_devices"
+        unset HIP_VISIBLE_DEVICES
+    fi
+
+    if [ -n "$requested_rocr_visible" ]; then
+        export ROCR_VISIBLE_DEVICES="$requested_rocr_visible"
+    else
+        unset ROCR_VISIBLE_DEVICES
     fi
 }
 
