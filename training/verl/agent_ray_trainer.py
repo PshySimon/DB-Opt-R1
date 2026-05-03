@@ -40,6 +40,27 @@ from training.tool.tool_env import ToolEnv
 WorkerType = Type[Worker]
 
 
+def _clone_env_for_padding(env):
+    if hasattr(env, "copy") and callable(env.copy):
+        return env.copy()
+    return deepcopy(env)
+
+
+def pad_envs_to_match_dataproto(envs, pad_size):
+    if pad_size == 0:
+        return envs
+    if not envs:
+        raise ValueError("cannot pad empty env list")
+
+    padded_envs = list(envs)
+    remaining_pad = pad_size
+    while remaining_pad > 0:
+        take_size = min(remaining_pad, len(envs))
+        padded_envs.extend(_clone_env_for_padding(env) for env in envs[:take_size])
+        remaining_pad -= take_size
+    return padded_envs
+
+
 class Role(Enum):
     """
     To create more roles dynamically, you can subclass Role and add new members
@@ -626,11 +647,12 @@ class RayAgentTrainer(object):
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(
                 test_gen_batch, len(self.async_rollout_manager.agent_loop_workers)
             )
+            envs_padded = pad_envs_to_match_dataproto(envs, pad_size)
 
             first_input_ids = test_gen_batch_padded.batch['input_ids'][:, -gen_config.max_start_length:].clone()
             test_output_gen_batch_padded = generation_manager.run_llm_loop(
                 test_gen_batch_padded,
-                envs=envs,
+                envs=envs_padded,
                 initial_input_ids=first_input_ids,
             )
             self.checkpoint_manager.sleep_replicas()

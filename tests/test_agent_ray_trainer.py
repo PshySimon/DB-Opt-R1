@@ -200,6 +200,33 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         self.assertNotIn("ref", trainer.resource_pool_to_cls["pool"])
         self.assertIs(trainer.ref_policy_wg, fake_actor_wg)
 
+    def test_pad_envs_to_match_dataproto_repeats_copies_of_front_rows(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        class FakeEnv:
+            def __init__(self, name):
+                self.name = name
+                self.copied = False
+
+            def copy(self):
+                clone = FakeEnv(self.name)
+                clone.copied = True
+                return clone
+
+        envs = [FakeEnv("a"), FakeEnv("b"), FakeEnv("c")]
+
+        padded = trainer_module.pad_envs_to_match_dataproto(envs, pad_size=2)
+
+        self.assertEqual(5, len(padded))
+        self.assertIs(padded[0], envs[0])
+        self.assertIs(padded[1], envs[1])
+        self.assertIs(padded[2], envs[2])
+        self.assertEqual(["a", "b"], [padded[3].name, padded[4].name])
+        self.assertTrue(padded[3].copied)
+        self.assertTrue(padded[4].copied)
+        self.assertIsNot(padded[3], envs[0])
+        self.assertIsNot(padded[4], envs[1])
+
     def test_save_checkpoint_uses_max_ckpt_to_keep_for_verl_071(self):
         from training.verl import agent_ray_trainer as trainer_module
 
