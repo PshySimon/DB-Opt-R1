@@ -237,7 +237,7 @@ def run_grpo(config) -> None:
                 'TOKENIZERS_PARALLELISM': 'true',
                 'NCCL_DEBUG': 'WARN',
                 'VLLM_LOGGING_LEVEL': 'WARN',
-                'VLLM_USE_V1': '1',
+                'VLLM_USE_V1': '0',
             }
         })
 
