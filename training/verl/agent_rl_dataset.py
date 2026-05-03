@@ -96,25 +96,39 @@ class ToolRLDataset(RLHFDataset):
             max_samples=max_samples,
         )
 
+    def _copy_chat(self, chat):
+        chat_list = chat.tolist() if hasattr(chat, 'tolist') else list(chat)
+        return [dict(message) for message in chat_list]
+
+    def _format_chat_with_tools(self, chat):
+        chat = self._copy_chat(chat)
+        if not self.use_custom_tool_format_func:
+            return chat
+
+        tools_prompt = self.tool_env.tools_format_func()
+        if chat and chat[0].get('role') == 'system':
+            content = chat[0].get('content', '').rstrip()
+            chat[0]['content'] = f"{content}\n\n{tools_prompt}" if content else tools_prompt
+        else:
+            chat = [{"role": "system", "content": tools_prompt}] + chat
+        return chat
+
+    def _render_chat_template(self, chat):
+        if self.use_custom_tool_format_func:
+            return self.tokenizer.apply_chat_template(chat, add_generation_prompt=True, tokenize=False)
+        return self.tokenizer.apply_chat_template(chat, tools=self.tools, add_generation_prompt=True, tokenize=False)
+
+    def _render_prompt_with_tools(self, chat):
+        return self._render_chat_template(self._format_chat_with_tools(chat))
+
     def __getitem__(self, item):
         """
         Note that we also return the raw_input_ids so that it can be combined with other chat template
         """
         row_dict = self.dataframe.iloc[item].to_dict()
 
-        chat = row_dict.pop(self.prompt_key)
-
-        if self.use_custom_tool_format_func:
-            if chat[0]['role'] == 'system':
-                chat[0]['content'] = chat[0]['content'] + self.tool_env.tools_format_func()
-            else:
-                system_msg = [{"role": "system", "content": self.tool_env.tools_format_func()}]
-                # Convert chat to a list if it's not already one
-                chat_list = chat.tolist() if hasattr(chat, 'tolist') else list(chat)
-                chat = system_msg + chat_list
-            prompt_with_chat_template = self.tokenizer.apply_chat_template(chat, add_generation_prompt=True, tokenize=False)
-        else:
-            prompt_with_chat_template = self.tokenizer.apply_chat_template(chat, tools=self.tools, add_generation_prompt=True, tokenize=False)
+        chat = self._format_chat_with_tools(row_dict.pop(self.prompt_key))
+        prompt_with_chat_template = self._render_chat_template(chat)
 
         is_multi_modal = self.image_key in row_dict
         if is_multi_modal:  # expand image token
@@ -167,7 +181,7 @@ class ToolRLDataset(RLHFDataset):
 
         # encode prompts without chat template
         if self.return_raw_chat:
-            row_dict['raw_prompt'] = chat.tolist()
+            row_dict['raw_prompt'] = chat
 
         # add index for each prompt
         index = row_dict.get("extra_info", {}).get("index", 0)
@@ -192,9 +206,7 @@ class ToolRLDataset(RLHFDataset):
             self.dataframe = self.dataframe[
                 self.dataframe.apply(
                     lambda doc: len(
-                        tokenizer.apply_chat_template(
-                            doc[prompt_key], tools=self.tools, add_generation_prompt=True
-                        )
+                        tokenizer.encode(self._render_prompt_with_tools(doc[prompt_key]), add_special_tokens=False)
                     )
                     <= self.max_prompt_length,
                     axis=1,

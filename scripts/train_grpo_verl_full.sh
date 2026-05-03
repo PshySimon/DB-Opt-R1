@@ -105,6 +105,7 @@ python3 -m training.verl.main_grpo \
   data.max_response_length=$MAX_RESPONSE_LENGTH \
   data.max_start_length=$MAX_START_LENGTH \
   data.max_tool_response_length=$MAX_TOOL_RESPONSE_LENGTH \
+  data.use_custom_tool_format_func=True \
   \
   actor_rollout_ref.model.path=$SFT_CHECKPOINT \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \

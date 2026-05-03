@@ -116,12 +116,33 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', grpo_lora)
         self.assertIn("write_train_config_json", grpo_lora)
         self.assertIn("trainer.default_local_dir=$OUTPUT_DIR", grpo_lora)
+        self.assertIn("data.use_custom_tool_format_func=True", grpo_lora)
 
         grpo_full = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
         self.assertIn('configure_accelerator_visible_devices', grpo_full)
         self.assertIn('TRAIN_CONFIG_JSON="${TRAIN_CONFIG_JSON:-$OUTPUT_DIR/train_config.json}"', grpo_full)
         self.assertIn("write_train_config_json", grpo_full)
         self.assertIn("trainer.default_local_dir=$OUTPUT_DIR", grpo_full)
+        self.assertIn("data.use_custom_tool_format_func=True", grpo_full)
+
+    def test_verl_grpo_defaults_use_sft_tool_protocol(self):
+        config = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
+
+        self.assertTrue(config.data.use_custom_tool_format_func)
+        template = config.tool.tool_custom_response_template
+        self.assertIn("<tool_response>", template)
+        self.assertIn("{tool_response}", template)
+        assistant_suffix = template.split("<|im_start|>assistant", 1)[1]
+        self.assertNotIn("<think>", assistant_suffix)
+        self.assertTrue(template.rstrip().endswith("<|im_start|>assistant"))
+
+    def test_verl_agent_dataset_uses_one_prompt_renderer_for_filtering_and_items(self):
+        content = (ROOT / "training" / "verl" / "agent_rl_dataset.py").read_text()
+
+        self.assertIn("def _render_prompt_with_tools(self, chat):", content)
+        self.assertIn("chat = self._format_chat_with_tools(row_dict.pop(self.prompt_key))", content)
+        self.assertIn("prompt_with_chat_template = self._render_chat_template(chat)", content)
+        self.assertIn("tokenizer.encode(self._render_prompt_with_tools(doc[prompt_key]), add_special_tokens=False)", content)
 
     def test_verl_sft_lora_uses_multiturn_dataset_fields(self):
         content = (ROOT / "scripts" / "train_sft_verl_lora.sh").read_text()

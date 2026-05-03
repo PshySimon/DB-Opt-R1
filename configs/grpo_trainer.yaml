@@ -15,7 +15,7 @@ data:
   filter_overlong_prompts: False # for large-scale dataset, filtering overlong prompts could be timeconsuming. You should disable this and set `truncation='left'
   truncation: error
   image_key: images
-  use_custom_tool_format_func: False
+  use_custom_tool_format_func: True
 
 actor_rollout_ref:
   hybrid_engine: True
@@ -466,11 +466,9 @@ tool:
   tool_response_start: <tool_response>
   tool_response_end: </tool_response>
   tool_custom_response_template: |
-
     <|im_start|>user
     <tool_response>
     {tool_response}
     </tool_response><|im_end|>
     <|im_start|>assistant
-    <think>
   env: search
