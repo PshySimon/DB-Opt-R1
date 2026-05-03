@@ -36,6 +36,7 @@ class ToolGenerationConfig:
     tool_response_end: str = "</tool_response>"
     tool_custom_response_template: str = ""
     strip_think_history: bool = True
+    raw_prompt_history_turns: int = 4
     
 class ToolGenerationManager:
     """Manager for handling LLM tool-based generation and interaction"""
@@ -151,6 +152,29 @@ class ToolGenerationManager:
             f"{self.config.tool_response_end}"
         )
 
+    def _trim_raw_prompt_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        max_history_turns = self.config.raw_prompt_history_turns
+        if max_history_turns is None or max_history_turns < 0:
+            return messages
+
+        system_messages = []
+        rest = messages
+        if messages and messages[0].get("role") == "system":
+            system_messages = [messages[0]]
+            rest = messages[1:]
+
+        current_user = []
+        history = rest
+        if rest and rest[-1].get("role") == "user":
+            current_user = [rest[-1]]
+            history = rest[:-1]
+
+        keep_history = history[-2 * max_history_turns:] if max_history_turns else []
+        if keep_history and keep_history[0].get("role") != "user":
+            keep_history = keep_history[1:]
+
+        return system_messages + keep_history + current_user
+
     def _update_raw_prompts_for_next_turn(
         self,
         rollings: DataProto,
@@ -179,7 +203,7 @@ class ToolGenerationManager:
                     "content": self._tool_response_message_content(raw_tool_responses[i]),
                 }
             )
-            raw_prompts[i] = messages
+            raw_prompts[i] = self._trim_raw_prompt_history(messages)
 
         rollings.non_tensor_batch["raw_prompt"] = np.array(raw_prompts, dtype=object)
     

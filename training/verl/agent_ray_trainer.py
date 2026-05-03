@@ -599,6 +599,7 @@ class RayAgentTrainer(object):
             tool_response_end=self.config.tool.tool_response_end,
             tool_custom_response_template=self.config.tool.tool_custom_response_template,
             strip_think_history=self.config.tool.get("strip_think_history", True),
+            raw_prompt_history_turns=self.config.tool.get("raw_prompt_history_turns", 4),
         )
 
         generation_manager = ToolGenerationManager(
@@ -1099,6 +1100,7 @@ class RayAgentTrainer(object):
             tool_response_end=self.config.tool.tool_response_end,
             tool_custom_response_template=self.config.tool.tool_custom_response_template,
             strip_think_history=self.config.tool.get("strip_think_history", True),
+            raw_prompt_history_turns=self.config.tool.get("raw_prompt_history_turns", 4),
         )
 
         generation_manager = ToolGenerationManager(

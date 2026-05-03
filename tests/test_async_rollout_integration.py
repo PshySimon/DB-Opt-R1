@@ -379,6 +379,59 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
             messages[-1],
         )
 
+    def test_tool_generation_manager_limits_raw_prompt_history_like_sft(self):
+        tokenizer = _FakeTokenizer()
+        manager = ToolGenerationManager(
+            tokenizer=tokenizer,
+            sequence_generator=_FakeSequenceGenerator(),
+            config=ToolGenerationConfig(
+                max_turns=1,
+                max_start_length=8,
+                max_prompt_length=8,
+                max_response_length=8,
+                max_tool_response_length=8,
+                num_gpus=1,
+                raw_prompt_history_turns=4,
+                strip_think_history=True,
+            ),
+        )
+        history = [{"role": "system", "content": "system"}]
+        for i in range(5):
+            history.extend(
+                [
+                    {"role": "user", "content": f"u{i}"},
+                    {"role": "assistant", "content": f"a{i}"},
+                ]
+            )
+        history.append({"role": "user", "content": "current"})
+        batch = DataProto.from_dict(
+            tensors={
+                "input_ids": torch.ones((1, 4), dtype=torch.long),
+                "attention_mask": torch.ones((1, 4), dtype=torch.long),
+                "position_ids": torch.arange(4).repeat(1, 1),
+            },
+            non_tensors={"raw_prompt": [history]},
+        )
+
+        manager._update_raw_prompts_for_next_turn(
+            batch,
+            ['<tool_call>{"name":"get_current_config","arguments":{}}</tool_call><eos>'],
+            ['{"shared_buffers": "2GB"}'],
+            torch.tensor([True]),
+        )
+
+        messages = batch.non_tensor_batch["raw_prompt"][0]
+        self.assertEqual("system", messages[0]["content"])
+        self.assertEqual(
+            ["u2", "a2", "u3", "a3", "u4", "a4", "current"],
+            [message["content"] for message in messages[1:8]],
+        )
+        self.assertEqual(
+            '<tool_call>{"name":"get_current_config","arguments":{}}</tool_call>',
+            messages[-2]["content"],
+        )
+        self.assertEqual('<tool_response>\n{"shared_buffers": "2GB"}\n</tool_response>', messages[-1]["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

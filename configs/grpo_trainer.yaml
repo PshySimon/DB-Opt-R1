@@ -466,6 +466,7 @@ tool:
   tool_response_start: <tool_response>
   tool_response_end: </tool_response>
   strip_think_history: True
+  raw_prompt_history_turns: 4
   tool_custom_response_template: |
     <|im_start|>user
     <tool_response>

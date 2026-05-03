@@ -130,6 +130,7 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
 
         self.assertTrue(config.data.use_custom_tool_format_func)
         self.assertTrue(config.tool.strip_think_history)
+        self.assertEqual(4, config.tool.raw_prompt_history_turns)
         template = config.tool.tool_custom_response_template
         self.assertIn("<tool_response>", template)
         self.assertIn("{tool_response}", template)
