@@ -598,6 +598,7 @@ class RayAgentTrainer(object):
             tool_response_start=self.config.tool.tool_response_start,
             tool_response_end=self.config.tool.tool_response_end,
             tool_custom_response_template=self.config.tool.tool_custom_response_template,
+            strip_think_history=self.config.tool.get("strip_think_history", True),
         )
 
         generation_manager = ToolGenerationManager(
@@ -1097,6 +1098,7 @@ class RayAgentTrainer(object):
             tool_response_start=self.config.tool.tool_response_start,
             tool_response_end=self.config.tool.tool_response_end,
             tool_custom_response_template=self.config.tool.tool_custom_response_template,
+            strip_think_history=self.config.tool.get("strip_think_history", True),
         )
 
         generation_manager = ToolGenerationManager(

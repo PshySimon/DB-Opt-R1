@@ -35,6 +35,7 @@ class ToolGenerationConfig:
     tool_response_start: str = "<tool_response>"
     tool_response_end: str = "</tool_response>"
     tool_custom_response_template: str = ""
+    strip_think_history: bool = True
     
 class ToolGenerationManager:
     """Manager for handling LLM tool-based generation and interaction"""
@@ -127,6 +128,14 @@ class ToolGenerationManager:
             tool_responses_ids = tool_responses_ids[:, :self.config.max_tool_response_length]
             
         return tool_responses_ids
+
+    def _strip_think_history(self, response: str) -> str:
+        return re.sub(r"<think>.*?</think>\s*", "", response or "", flags=re.DOTALL).strip()
+
+    def _responses_for_next_turn(self, responses_str: List[str]) -> torch.Tensor:
+        if self.config.strip_think_history:
+            responses_str = [self._strip_think_history(response) for response in responses_str]
+        return self._batch_tokenize(responses_str)
     
     def _execute_tool_calls(self, response_strs: List[str], 
                           envs: List[ToolEnv], 
@@ -381,11 +390,12 @@ class ToolGenerationManager:
                 f"generate_s={generate_elapsed:.2f} tool_s={tool_elapsed:.2f}"
             )
             tool_responses_ids = self._process_tool_responses(tool_responses)
+            history_response_ids = self._responses_for_next_turn(responses_str)
             
             # Update states
             rollings = self._update_rolling_state(
                 rollings,
-                responses_ids,
+                history_response_ids,
                 tool_responses_ids
             )
             original_right_side = self._update_right_side(

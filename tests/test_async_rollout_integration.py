@@ -29,6 +29,15 @@ class _FakeTokenizer:
         return ["<tool_call>{}</tool_call>".format("{}")] * responses.shape[0]
 
 
+class _CapturingTokenizer(_FakeTokenizer):
+    def __init__(self):
+        self.tokenized_texts = []
+
+    def __call__(self, texts, add_special_tokens=False, return_tensors=None, padding=None):
+        self.tokenized_texts.extend(texts)
+        return super().__call__(texts, add_special_tokens, return_tensors, padding)
+
+
 class _FakeSequenceGenerator:
     def __init__(self):
         self.calls = 0
@@ -295,6 +304,33 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
         self.assertEqual(
             {"shared_buffers": "8GB"},
             output.non_tensor_batch["last_valid_config"][0],
+        )
+
+    def test_tool_generation_manager_strips_think_from_next_turn_history(self):
+        tokenizer = _CapturingTokenizer()
+        manager = ToolGenerationManager(
+            tokenizer=tokenizer,
+            sequence_generator=_FakeSequenceGenerator(),
+            config=ToolGenerationConfig(
+                max_turns=1,
+                max_start_length=8,
+                max_prompt_length=8,
+                max_response_length=8,
+                max_tool_response_length=8,
+                num_gpus=1,
+                strip_think_history=True,
+            ),
+        )
+
+        manager._responses_for_next_turn(
+            [
+                '<think>observe hardware</think>\n<tool_call>{"name":"get_hardware_info","arguments":{}}</tool_call><eos>'
+            ]
+        )
+
+        self.assertEqual(
+            ['<tool_call>{"name":"get_hardware_info","arguments":{}}</tool_call><eos>'],
+            tokenizer.tokenized_texts,
         )
 
 

@@ -129,6 +129,7 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
         config = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
 
         self.assertTrue(config.data.use_custom_tool_format_func)
+        self.assertTrue(config.tool.strip_think_history)
         template = config.tool.tool_custom_response_template
         self.assertIn("<tool_response>", template)
         self.assertIn("{tool_response}", template)
