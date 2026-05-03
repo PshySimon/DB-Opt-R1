@@ -6,7 +6,6 @@ import torch
 import numpy as np
 import re
 import json
-import os
 import time
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple, Optional
@@ -16,18 +15,9 @@ import random
 
 from .tensor_helper import TensorHelper, TensorConfig
 from training.tool.tool_env import ToolEnv, step, step_batch
+from training.progress import progress_heartbeat, progress_log
 from verl import DataProto
 from verl.utils.tracking import Tracking
-
-
-def _progress_enabled() -> bool:
-    value = os.environ.get("GRPO_PROGRESS_LOG", "1").strip().lower()
-    return value not in {"0", "false", "no", "off"}
-
-
-def _progress_log(message: str) -> None:
-    if _progress_enabled():
-        print(f"[progress] {message}", flush=True)
 
 @dataclass
 class ToolGenerationConfig:
@@ -334,7 +324,7 @@ class ToolGenerationManager:
         rollings = gen_batch
         meta_info = {}
 
-        _progress_log(
+        progress_log(
             f"rollout_start batch={batch_size} max_turns={self.config.max_turns} "
             f"max_prompt={self.config.max_prompt_length} max_response={self.config.max_response_length}"
         )
@@ -344,7 +334,7 @@ class ToolGenerationManager:
             active_count = int(active_mask.sum().item())
             if not active_count:
                 break
-            _progress_log(f"rollout_turn_start turn={step + 1}/{self.config.max_turns} active={active_count}")
+            progress_log(f"rollout_turn_start turn={step + 1}/{self.config.max_turns} active={active_count}")
             rollings.batch = self.tensor_fn.cut_to_effective_len(
                 rollings.batch,
                 keys=['input_ids', 'attention_mask', 'position_ids']
@@ -356,7 +346,10 @@ class ToolGenerationManager:
                 non_tensors={k: v[active_mask.cpu().numpy()] for k, v in rollings.non_tensor_batch.items()},
             )
             generate_start = time.perf_counter()
-            gen_output = self._generate_with_gpu_padding(rollings_active)
+            with progress_heartbeat(
+                f"rollout_turn_generate turn={step + 1}/{self.config.max_turns} active={active_count}"
+            ):
+                gen_output = self._generate_with_gpu_padding(rollings_active)
             generate_elapsed = time.perf_counter() - generate_start
 
             meta_info = gen_output.meta_info            
@@ -382,7 +375,7 @@ class ToolGenerationManager:
 
             continue_count = int(active_mask.sum().item())
             active_num_list.append(continue_count)
-            _progress_log(
+            progress_log(
                 f"rollout_turn_done turn={step + 1}/{self.config.max_turns} "
                 f"generated={active_count} tool_calls={tool_call_count} continue={continue_count} "
                 f"generate_s={generate_elapsed:.2f} tool_s={tool_elapsed:.2f}"
@@ -402,7 +395,7 @@ class ToolGenerationManager:
             )
         
         print("ACTIVE_TRAJ_NUM:", active_num_list, flush=True)
-        _progress_log(f"rollout_done active_path={active_num_list}")
+        progress_log(f"rollout_done active_path={active_num_list}")
         
         original_right_side['turns'] = turns
         termination_reason = np.array(
