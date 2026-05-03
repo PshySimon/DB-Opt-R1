@@ -145,18 +145,79 @@ class ToolGenerationManager:
             responses_str = [self._strip_think_history(response) for response in responses_str]
         return self._batch_tokenize(responses_str)
 
+    def _truncate_text_by_tokens(self, text: str, max_tokens: int) -> str:
+        if max_tokens is None or max_tokens < 0:
+            return text
+        if max_tokens == 0:
+            return ""
+
+        if hasattr(self.tokenizer, "encode") and hasattr(self.tokenizer, "decode"):
+            token_ids = self.tokenizer.encode(text, add_special_tokens=False)
+            if len(token_ids) <= max_tokens:
+                return text
+            return self.tokenizer.decode(token_ids[:max_tokens], skip_special_tokens=False)
+
+        tokenized = self.tokenizer(
+            [text],
+            add_special_tokens=False,
+            return_tensors=None,
+            padding=False,
+        )["input_ids"][0]
+        if len(tokenized) <= max_tokens:
+            return text
+        return text[:max_tokens]
+
     def _tool_response_message_content(self, tool_response: str) -> str:
+        tool_response = self._truncate_text_by_tokens(
+            (tool_response or "").strip(),
+            self.config.max_tool_response_length,
+        )
         return (
             f"{self.config.tool_response_start}\n"
-            f"{(tool_response or '').strip()}\n"
+            f"{tool_response}\n"
             f"{self.config.tool_response_end}"
         )
 
+    def _raw_prompt_token_budget(self) -> Optional[int]:
+        if not hasattr(self.tokenizer, "apply_chat_template"):
+            return None
+
+        candidates = [
+            getattr(self.config, "max_start_length", None),
+            getattr(self.config, "max_prompt_length", None),
+        ]
+        positive_candidates = [int(candidate) for candidate in candidates if candidate and int(candidate) > 0]
+        if not positive_candidates:
+            return None
+        return min(positive_candidates)
+
+    def _raw_prompt_token_length(self, messages: List[Dict[str, Any]]) -> int:
+        if not messages:
+            return 0
+
+        if hasattr(self.tokenizer, "apply_chat_template"):
+            try:
+                tokenized = self.tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                )
+                if isinstance(tokenized, torch.Tensor):
+                    return int(tokenized.numel() if tokenized.dim() <= 1 else tokenized.shape[-1])
+                return len(tokenized)
+            except TypeError:
+                rendered = self.tokenizer.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+                return len(self.tokenizer([rendered], add_special_tokens=False)["input_ids"][0])
+
+        rendered = "\n".join(f"{message.get('role', '')}: {message.get('content', '')}" for message in messages)
+        return len(self.tokenizer([rendered], add_special_tokens=False)["input_ids"][0])
+
     def _trim_raw_prompt_history(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         max_history_turns = self.config.raw_prompt_history_turns
-        if max_history_turns is None or max_history_turns < 0:
-            return messages
-
         system_messages = []
         rest = messages
         if messages and messages[0].get("role") == "system":
@@ -169,11 +230,26 @@ class ToolGenerationManager:
             current_user = [rest[-1]]
             history = rest[:-1]
 
-        keep_history = history[-2 * max_history_turns:] if max_history_turns else []
+        if max_history_turns is None or max_history_turns < 0:
+            keep_history = history
+        else:
+            keep_history = history[-2 * max_history_turns:] if max_history_turns else []
         if keep_history and keep_history[0].get("role") != "user":
             keep_history = keep_history[1:]
 
-        return system_messages + keep_history + current_user
+        trimmed = system_messages + keep_history + current_user
+        token_budget = self._raw_prompt_token_budget()
+        if token_budget is None:
+            return trimmed
+
+        while keep_history and self._raw_prompt_token_length(trimmed) > token_budget:
+            drop_count = 2 if len(keep_history) >= 2 else 1
+            keep_history = keep_history[drop_count:]
+            if keep_history and keep_history[0].get("role") != "user":
+                keep_history = keep_history[1:]
+            trimmed = system_messages + keep_history + current_user
+
+        return trimmed
 
     def _update_raw_prompts_for_next_turn(
         self,

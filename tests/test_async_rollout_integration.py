@@ -38,6 +38,16 @@ class _CapturingTokenizer(_FakeTokenizer):
         return super().__call__(texts, add_special_tokens, return_tensors, padding)
 
 
+class _BudgetTokenizer(_FakeTokenizer):
+    def apply_chat_template(self, messages, add_generation_prompt=True, tokenize=False):
+        rendered = "\n".join(f"{message['role']}:{message['content']}" for message in messages)
+        if add_generation_prompt:
+            rendered += "\nassistant:"
+        if tokenize:
+            return [1] * len(rendered)
+        return rendered
+
+
 class _FakeSequenceGenerator:
     def __init__(self):
         self.calls = 0
@@ -316,7 +326,7 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
                 max_start_length=8,
                 max_prompt_length=8,
                 max_response_length=8,
-                max_tool_response_length=8,
+                max_tool_response_length=64,
                 num_gpus=1,
                 strip_think_history=True,
             ),
@@ -343,7 +353,7 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
                 max_start_length=8,
                 max_prompt_length=8,
                 max_response_length=8,
-                max_tool_response_length=8,
+                max_tool_response_length=64,
                 num_gpus=1,
                 strip_think_history=True,
             ),
@@ -389,7 +399,7 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
                 max_start_length=8,
                 max_prompt_length=8,
                 max_response_length=8,
-                max_tool_response_length=8,
+                max_tool_response_length=64,
                 num_gpus=1,
                 raw_prompt_history_turns=4,
                 strip_think_history=True,
@@ -431,6 +441,60 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
             messages[-2]["content"],
         )
         self.assertEqual('<tool_response>\n{"shared_buffers": "2GB"}\n</tool_response>', messages[-1]["content"])
+
+    def test_tool_generation_manager_trims_raw_prompt_history_to_token_budget(self):
+        tokenizer = _BudgetTokenizer()
+        manager = ToolGenerationManager(
+            tokenizer=tokenizer,
+            sequence_generator=_FakeSequenceGenerator(),
+            config=ToolGenerationConfig(
+                max_turns=1,
+                max_start_length=90,
+                max_prompt_length=90,
+                max_response_length=8,
+                max_tool_response_length=8,
+                num_gpus=1,
+                raw_prompt_history_turns=4,
+                strip_think_history=True,
+            ),
+        )
+        messages = [{"role": "system", "content": "system"}]
+        for i in range(4):
+            messages.extend(
+                [
+                    {"role": "user", "content": f"old-user-{i}" * 4},
+                    {"role": "assistant", "content": f"old-assistant-{i}" * 4},
+                ]
+            )
+        messages.append({"role": "user", "content": "current"})
+
+        trimmed = manager._trim_raw_prompt_history(messages)
+
+        rendered_tokens = tokenizer.apply_chat_template(trimmed, add_generation_prompt=True, tokenize=True)
+        self.assertLessEqual(len(rendered_tokens), 90)
+        self.assertEqual("system", trimmed[0]["content"])
+        self.assertEqual("current", trimmed[-1]["content"])
+        self.assertNotIn("old-user-0" * 4, [message["content"] for message in trimmed])
+
+    def test_tool_generation_manager_truncates_raw_tool_response_history(self):
+        tokenizer = _FakeTokenizer()
+        manager = ToolGenerationManager(
+            tokenizer=tokenizer,
+            sequence_generator=_FakeSequenceGenerator(),
+            config=ToolGenerationConfig(
+                max_turns=1,
+                max_start_length=64,
+                max_prompt_length=64,
+                max_response_length=8,
+                max_tool_response_length=8,
+                num_gpus=1,
+                strip_think_history=True,
+            ),
+        )
+
+        content = manager._tool_response_message_content("0123456789abcdef")
+
+        self.assertEqual("<tool_response>\n01234567\n</tool_response>", content)
 
 
 if __name__ == "__main__":
