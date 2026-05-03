@@ -1,5 +1,7 @@
 from pathlib import Path
+import io
 import unittest
+from contextlib import redirect_stdout
 
 import torch
 
@@ -222,6 +224,61 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
             output.batch["response_mask"].tolist(),
             [[1, 1, 0, 0, 0], [1, 1, 0, 0, 0]],
         )
+
+    def test_tool_generation_manager_logs_rollout_timing_profile(self):
+        tokenizer = _FakeTokenizer()
+        sequence_generator = _FakeSequenceGenerator()
+        manager = ToolGenerationManager(
+            tokenizer=tokenizer,
+            sequence_generator=sequence_generator,
+            config=ToolGenerationConfig(
+                max_turns=1,
+                max_start_length=8,
+                max_prompt_length=8,
+                max_response_length=8,
+                max_tool_response_length=8,
+                num_gpus=1,
+            ),
+        )
+        batch = DataProto.from_dict(
+            tensors={
+                "input_ids": torch.ones((1, 4), dtype=torch.long),
+                "attention_mask": torch.ones((1, 4), dtype=torch.long),
+                "position_ids": torch.arange(4).repeat(1, 1),
+            },
+        )
+
+        with unittest.mock.patch.object(
+            manager,
+            "_postprocess_responses",
+            return_value=(
+                torch.tensor([[11, 12]], dtype=torch.long),
+                ["call-a"],
+                torch.tensor([False]),
+            ),
+        ), unittest.mock.patch.object(
+            manager,
+            "_execute_tool_calls",
+            return_value=(["tool-a"], [False]),
+        ), unittest.mock.patch.object(
+            manager,
+            "_process_tool_responses",
+            return_value=torch.tensor([[31, 32]], dtype=torch.long),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                manager.run_llm_loop(
+                    gen_batch=batch,
+                    envs=[_FakeEnv()],
+                    initial_input_ids=batch.batch["input_ids"],
+                )
+
+        logs = stdout.getvalue()
+        self.assertIn("rollout_turn_profile", logs)
+        self.assertIn("postprocess_s=", logs)
+        self.assertIn("tool_tokenize_s=", logs)
+        self.assertIn("other_s=", logs)
+        self.assertIn("rollout_profile_total", logs)
 
     def test_tool_generation_manager_stops_when_env_marks_done(self):
         tokenizer = _FakeTokenizer()

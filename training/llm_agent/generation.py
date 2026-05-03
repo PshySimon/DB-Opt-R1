@@ -464,6 +464,33 @@ class ToolGenerationManager:
             k: v[:-padding_size] for k, v in padded_output.non_tensor_batch.items()
         }
         return padded_output
+
+    @staticmethod
+    def _format_timing_profile(prefix: str, timings: Dict[str, float]) -> str:
+        total = max(timings.get("total", 0.0), 1e-9)
+        parts = [prefix]
+        for key in [
+            "prepare",
+            "generate",
+            "postprocess",
+            "tool",
+            "raw_prompt",
+            "tool_tokenize",
+            "history_tokenize",
+            "update_rolling",
+            "update_right",
+            "other",
+            "total",
+        ]:
+            if key not in timings:
+                continue
+            value = timings[key]
+            if key == "total":
+                parts.append(f"{key}_s={value:.2f}")
+            else:
+                parts.append(f"{key}_s={value:.2f}")
+                parts.append(f"{key}_pct={value / total * 100:.1f}")
+        return " ".join(parts)
     
     def run_llm_loop(self, gen_batch, envs: List[Any] = None,
                     initial_input_ids: torch.Tensor = None) -> Tuple[Dict, Dict]:
@@ -482,6 +509,7 @@ class ToolGenerationManager:
         active_num_list = [active_mask.sum().item()]
         rollings = gen_batch
         meta_info = {}
+        rollout_profile_totals = defaultdict(float)
 
         progress_log(
             f"rollout_start batch={batch_size} max_turns={self.config.max_turns} "
@@ -494,6 +522,8 @@ class ToolGenerationManager:
             if not active_count:
                 break
             progress_log(f"rollout_turn_start turn={step + 1}/{self.config.max_turns} active={active_count}")
+            turn_total_start = time.perf_counter()
+            prepare_start = time.perf_counter()
             rollings.batch = self.tensor_fn.cut_to_effective_len(
                 rollings.batch,
                 keys=['input_ids', 'attention_mask', 'position_ids']
@@ -504,6 +534,7 @@ class ToolGenerationManager:
                 tensors={k: v[active_mask] for k, v in rollings.batch.items()},
                 non_tensors={k: v[active_mask.cpu().numpy()] for k, v in rollings.non_tensor_batch.items()},
             )
+            prepare_elapsed = time.perf_counter() - prepare_start
             generate_start = time.perf_counter()
             with progress_heartbeat(
                 f"rollout_turn_generate turn={step + 1}/{self.config.max_turns} active={active_count}"
@@ -511,9 +542,11 @@ class ToolGenerationManager:
                 gen_output = self._generate_with_gpu_padding(rollings_active)
             generate_elapsed = time.perf_counter() - generate_start
 
-            meta_info = gen_output.meta_info            
+            postprocess_start = time.perf_counter()
+            meta_info = gen_output.meta_info
             responses_ids, responses_str, new_active_masks = self._postprocess_responses(gen_output.batch['responses'])
             responses_ids, responses_str = self.tensor_fn._example_level_pad(responses_ids, responses_str, active_mask)
+            postprocess_elapsed = time.perf_counter() - postprocess_start
 
             active_mask[active_mask.clone()] = new_active_masks
 
@@ -534,34 +567,78 @@ class ToolGenerationManager:
                 tool_responses, env_continue_masks, raw_tool_responses = tool_results
             tool_elapsed = time.perf_counter() - tool_start
 
+            raw_prompt_start = time.perf_counter()
             env_continue_masks = torch.tensor(env_continue_masks, dtype=torch.bool)
             active_mask = active_mask & env_continue_masks
             self._update_raw_prompts_for_next_turn(rollings, responses_str, raw_tool_responses, active_mask)
+            raw_prompt_elapsed = time.perf_counter() - raw_prompt_start
 
             continue_count = int(active_mask.sum().item())
             active_num_list.append(continue_count)
-            progress_log(
-                f"rollout_turn_done turn={step + 1}/{self.config.max_turns} "
-                f"generated={active_count} tool_calls={tool_call_count} continue={continue_count} "
-                f"generate_s={generate_elapsed:.2f} tool_s={tool_elapsed:.2f}"
-            )
+            tool_tokenize_start = time.perf_counter()
             tool_responses_ids = self._process_tool_responses(tool_responses)
+            tool_tokenize_elapsed = time.perf_counter() - tool_tokenize_start
+
+            history_tokenize_start = time.perf_counter()
             history_response_ids = self._responses_for_next_turn(responses_str)
+            history_tokenize_elapsed = time.perf_counter() - history_tokenize_start
             
             # Update states
+            update_rolling_start = time.perf_counter()
             rollings = self._update_rolling_state(
                 rollings,
                 history_response_ids,
                 tool_responses_ids
             )
+            update_rolling_elapsed = time.perf_counter() - update_rolling_start
+
+            update_right_start = time.perf_counter()
             original_right_side = self._update_right_side(
                 original_right_side,
                 responses_ids,
                 tool_responses_ids
             )
+            update_right_elapsed = time.perf_counter() - update_right_start
+            turn_total_elapsed = time.perf_counter() - turn_total_start
+
+            turn_profile = {
+                "prepare": prepare_elapsed,
+                "generate": generate_elapsed,
+                "postprocess": postprocess_elapsed,
+                "tool": tool_elapsed,
+                "raw_prompt": raw_prompt_elapsed,
+                "tool_tokenize": tool_tokenize_elapsed,
+                "history_tokenize": history_tokenize_elapsed,
+                "update_rolling": update_rolling_elapsed,
+                "update_right": update_right_elapsed,
+                "total": turn_total_elapsed,
+            }
+            measured_elapsed = sum(value for key, value in turn_profile.items() if key != "total")
+            turn_profile["other"] = max(0.0, turn_total_elapsed - measured_elapsed)
+            for key, value in turn_profile.items():
+                rollout_profile_totals[key] += value
+
+            progress_log(
+                f"rollout_turn_done turn={step + 1}/{self.config.max_turns} "
+                f"generated={active_count} tool_calls={tool_call_count} continue={continue_count} "
+                f"generate_s={generate_elapsed:.2f} tool_s={tool_elapsed:.2f}"
+            )
+            progress_log(
+                self._format_timing_profile(
+                    f"rollout_turn_profile turn={step + 1}/{self.config.max_turns}",
+                    turn_profile,
+                )
+            )
         
         print("ACTIVE_TRAJ_NUM:", active_num_list, flush=True)
         progress_log(f"rollout_done active_path={active_num_list}")
+        if rollout_profile_totals:
+            progress_log(
+                self._format_timing_profile(
+                    "rollout_profile_total",
+                    dict(rollout_profile_totals),
+                )
+            )
         
         original_right_side['turns'] = turns
         termination_reason = np.array(
