@@ -333,6 +333,52 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
             tokenizer.tokenized_texts,
         )
 
+    def test_tool_generation_manager_updates_raw_prompt_for_async_next_turn(self):
+        tokenizer = _FakeTokenizer()
+        manager = ToolGenerationManager(
+            tokenizer=tokenizer,
+            sequence_generator=_FakeSequenceGenerator(),
+            config=ToolGenerationConfig(
+                max_turns=1,
+                max_start_length=8,
+                max_prompt_length=8,
+                max_response_length=8,
+                max_tool_response_length=8,
+                num_gpus=1,
+                strip_think_history=True,
+            ),
+        )
+        batch = DataProto.from_dict(
+            tensors={
+                "input_ids": torch.ones((1, 4), dtype=torch.long),
+                "attention_mask": torch.ones((1, 4), dtype=torch.long),
+                "position_ids": torch.arange(4).repeat(1, 1),
+            },
+            non_tensors={
+                "raw_prompt": [[
+                    {"role": "system", "content": "system"},
+                    {"role": "user", "content": "slow writes"},
+                ]],
+            },
+        )
+
+        manager._update_raw_prompts_for_next_turn(
+            batch,
+            ['<think>observe</think>\n<tool_call>{"name":"get_hardware_info","arguments":{}}</tool_call><eos>'],
+            ['{"cpu_count": 8}'],
+            torch.tensor([True]),
+        )
+
+        messages = batch.non_tensor_batch["raw_prompt"][0]
+        self.assertEqual(
+            {"role": "assistant", "content": '<tool_call>{"name":"get_hardware_info","arguments":{}}</tool_call>'},
+            messages[-2],
+        )
+        self.assertEqual(
+            {"role": "user", "content": '<tool_response>\n{"cpu_count": 8}\n</tool_response>'},
+            messages[-1],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

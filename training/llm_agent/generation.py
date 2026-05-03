@@ -132,10 +132,56 @@ class ToolGenerationManager:
     def _strip_think_history(self, response: str) -> str:
         return re.sub(r"<think>.*?</think>\s*", "", response or "", flags=re.DOTALL).strip()
 
+    def _response_for_raw_prompt_history(self, response: str) -> str:
+        response = self._strip_think_history(response)
+        eos_token = getattr(self.tokenizer, "eos_token", None)
+        if eos_token:
+            response = response.replace(eos_token, "")
+        return response.strip()
+
     def _responses_for_next_turn(self, responses_str: List[str]) -> torch.Tensor:
         if self.config.strip_think_history:
             responses_str = [self._strip_think_history(response) for response in responses_str]
         return self._batch_tokenize(responses_str)
+
+    def _tool_response_message_content(self, tool_response: str) -> str:
+        return (
+            f"{self.config.tool_response_start}\n"
+            f"{(tool_response or '').strip()}\n"
+            f"{self.config.tool_response_end}"
+        )
+
+    def _update_raw_prompts_for_next_turn(
+        self,
+        rollings: DataProto,
+        responses_str: List[str],
+        raw_tool_responses: List[str],
+        continue_mask: torch.Tensor,
+    ) -> None:
+        if "raw_prompt" not in rollings.non_tensor_batch:
+            return
+
+        continue_list = continue_mask.tolist() if isinstance(continue_mask, torch.Tensor) else list(continue_mask)
+        raw_prompts = list(rollings.non_tensor_batch["raw_prompt"])
+        for i, should_continue in enumerate(continue_list):
+            if not should_continue:
+                continue
+            messages = [dict(message) for message in raw_prompts[i]]
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": self._response_for_raw_prompt_history(responses_str[i]),
+                }
+            )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": self._tool_response_message_content(raw_tool_responses[i]),
+                }
+            )
+            raw_prompts[i] = messages
+
+        rollings.non_tensor_batch["raw_prompt"] = np.array(raw_prompts, dtype=object)
     
     def _execute_tool_calls(self, response_strs: List[str], 
                           envs: List[ToolEnv], 
@@ -146,6 +192,7 @@ class ToolGenerationManager:
         
         # Initialize result list with empty strings
         tool_responses = [""] * len(response_strs)
+        raw_tool_responses = [""] * len(response_strs)
         continue_mask = [False] * len(response_strs)
         # Process each environment sequentially
         for i, (resp, env, active) in enumerate(zip(response_strs, envs, active_list)):
@@ -155,9 +202,10 @@ class ToolGenerationManager:
             # Step the environment using the agent's response
             result = step(env, resp)
             tool_response, _, done, _ = result
+            raw_tool_responses[i] = tool_response
             tool_responses[i] = self.config.tool_custom_response_template.format(tool_response=tool_response)            
             continue_mask[i] = not done
-        return tool_responses, continue_mask
+        return tool_responses, continue_mask, raw_tool_responses
     
     def _execute_tool_calls_batch(self, response_strs: List[str], 
                                  envs: List[ToolEnv], 
@@ -179,10 +227,11 @@ class ToolGenerationManager:
         
         # Initialize result list with empty strings
         tool_responses = [""] * len(response_strs)
+        raw_tool_responses = [""] * len(response_strs)
         continue_mask = [False] * len(response_strs)
         
         if not active_envs:
-            return tool_responses, continue_mask
+            return tool_responses, continue_mask, raw_tool_responses
             
         # Use the independent step_batch function for active environments
         batch_results = step_batch(active_envs, active_responses)
@@ -193,9 +242,10 @@ class ToolGenerationManager:
                 tool_responses[idx] = ""
             else:
                 tool_response, _, done, _ = result
+                raw_tool_responses[idx] = tool_response
                 tool_responses[idx] = self.config.tool_custom_response_template.format(tool_response=tool_response)
                 continue_mask[idx] = not done
-        return tool_responses, continue_mask
+        return tool_responses, continue_mask, raw_tool_responses
     
     def _update_rolling_state(self, rollings, cur_responses: torch.Tensor, 
                             tool_responses_ids: torch.Tensor) -> Dict:
@@ -373,14 +423,20 @@ class ToolGenerationManager:
             tool_start = time.perf_counter()
             if self.config.use_batch_tool_calls:
                 # Use batch execution for tool calls
-                tool_responses, env_continue_masks = self._execute_tool_calls_batch(responses_str, envs, active_mask)
+                tool_results = self._execute_tool_calls_batch(responses_str, envs, active_mask)
             else:
                 # Use sequential execution for tool calls
-                tool_responses, env_continue_masks = self._execute_tool_calls(responses_str, envs, active_mask)
+                tool_results = self._execute_tool_calls(responses_str, envs, active_mask)
+            if len(tool_results) == 2:
+                tool_responses, env_continue_masks = tool_results
+                raw_tool_responses = [""] * len(tool_responses)
+            else:
+                tool_responses, env_continue_masks, raw_tool_responses = tool_results
             tool_elapsed = time.perf_counter() - tool_start
 
             env_continue_masks = torch.tensor(env_continue_masks, dtype=torch.bool)
             active_mask = active_mask & env_continue_masks
+            self._update_raw_prompts_for_next_turn(rollings, responses_str, raw_tool_responses, active_mask)
 
             continue_count = int(active_mask.sum().item())
             active_num_list.append(continue_count)
