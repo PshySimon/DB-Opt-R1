@@ -7,6 +7,7 @@ import numpy as np
 import re
 import json
 import os
+import time
 from collections import defaultdict
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
@@ -17,6 +18,16 @@ from .tensor_helper import TensorHelper, TensorConfig
 from training.tool.tool_env import ToolEnv, step, step_batch
 from verl import DataProto
 from verl.utils.tracking import Tracking
+
+
+def _progress_enabled() -> bool:
+    value = os.environ.get("GRPO_PROGRESS_LOG", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _progress_log(message: str) -> None:
+    if _progress_enabled():
+        print(f"[progress] {message}", flush=True)
 
 @dataclass
 class ToolGenerationConfig:
@@ -323,10 +334,17 @@ class ToolGenerationManager:
         rollings = gen_batch
         meta_info = {}
 
+        _progress_log(
+            f"rollout_start batch={batch_size} max_turns={self.config.max_turns} "
+            f"max_prompt={self.config.max_prompt_length} max_response={self.config.max_response_length}"
+        )
+
         # Main generation loop
         for step in range(self.config.max_turns):
-            if not active_mask.sum():
+            active_count = int(active_mask.sum().item())
+            if not active_count:
                 break
+            _progress_log(f"rollout_turn_start turn={step + 1}/{self.config.max_turns} active={active_count}")
             rollings.batch = self.tensor_fn.cut_to_effective_len(
                 rollings.batch,
                 keys=['input_ids', 'attention_mask', 'position_ids']
@@ -337,7 +355,9 @@ class ToolGenerationManager:
                 tensors={k: v[active_mask] for k, v in rollings.batch.items()},
                 non_tensors={k: v[active_mask.cpu().numpy()] for k, v in rollings.non_tensor_batch.items()},
             )
+            generate_start = time.perf_counter()
             gen_output = self._generate_with_gpu_padding(rollings_active)
+            generate_elapsed = time.perf_counter() - generate_start
 
             meta_info = gen_output.meta_info            
             responses_ids, responses_str, new_active_masks = self._postprocess_responses(gen_output.batch['responses'])
@@ -346,18 +366,27 @@ class ToolGenerationManager:
             active_mask[active_mask.clone()] = new_active_masks
 
             turns[active_mask] += 1
+            tool_call_count = int(new_active_masks.sum().item())
 
+            tool_start = time.perf_counter()
             if self.config.use_batch_tool_calls:
                 # Use batch execution for tool calls
                 tool_responses, env_continue_masks = self._execute_tool_calls_batch(responses_str, envs, active_mask)
             else:
                 # Use sequential execution for tool calls
                 tool_responses, env_continue_masks = self._execute_tool_calls(responses_str, envs, active_mask)
+            tool_elapsed = time.perf_counter() - tool_start
 
             env_continue_masks = torch.tensor(env_continue_masks, dtype=torch.bool)
             active_mask = active_mask & env_continue_masks
 
-            active_num_list.append(active_mask.sum().item())
+            continue_count = int(active_mask.sum().item())
+            active_num_list.append(continue_count)
+            _progress_log(
+                f"rollout_turn_done turn={step + 1}/{self.config.max_turns} "
+                f"generated={active_count} tool_calls={tool_call_count} continue={continue_count} "
+                f"generate_s={generate_elapsed:.2f} tool_s={tool_elapsed:.2f}"
+            )
             tool_responses_ids = self._process_tool_responses(tool_responses)
             
             # Update states
@@ -372,7 +401,8 @@ class ToolGenerationManager:
                 tool_responses_ids
             )
         
-        print("ACTIVE_TRAJ_NUM:", active_num_list)
+        print("ACTIVE_TRAJ_NUM:", active_num_list, flush=True)
+        _progress_log(f"rollout_done active_path={active_num_list}")
         
         original_right_side['turns'] = turns
         termination_reason = np.array(

@@ -4,6 +4,7 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 
 import os
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -249,6 +250,16 @@ def _timer(name: str, timing_raw: Dict[str, float]):
     with Timer(name=name, logger=None) as timer:
         yield
     timing_raw[name] = timer.last
+
+
+def _progress_enabled() -> bool:
+    value = os.environ.get("GRPO_PROGRESS_LOG", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _progress_log(message: str) -> None:
+    if _progress_enabled():
+        print(f"[progress] {message}", flush=True)
 
 
 class RayAgentTrainer(object):
@@ -1059,12 +1070,18 @@ class RayAgentTrainer(object):
 
         # load checkpoint before doing anything
         self._load_checkpoint()
+        _progress_log("step=0 update_weights_start")
+        update_weights_start = time.perf_counter()
         self.checkpoint_manager.update_weights(self.global_steps)
+        _progress_log(f"step=0 update_weights_done elapsed_s={time.perf_counter() - update_weights_start:.2f}")
 
         # perform validation before training
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.get('val_before_train', True):
+            _progress_log("step=0 validation_start")
+            validation_start = time.perf_counter()
             val_metrics = self._validate()
+            _progress_log(f"step=0 validation_done elapsed_s={time.perf_counter() - validation_start:.2f}")
             pprint(f'Initial validation metrics: {val_metrics}')
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get('val_only', False):
@@ -1106,6 +1123,10 @@ class RayAgentTrainer(object):
                 batch.non_tensor_batch['uid'] = np.array([str(uuid.uuid4()) for _ in range(len(batch.batch))],
                                                         dtype=object)
                 batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                _progress_log(
+                    f"step={self.global_steps}/{self.total_training_steps} batch_start "
+                    f"batch={len(batch.batch)} rollout_n={self.config.actor_rollout_ref.rollout.n}"
+                )
 
                 envs = self._build_envs_for_batch(batch, self.env)
                 
@@ -1127,6 +1148,7 @@ class RayAgentTrainer(object):
                     first_input_ids = gen_batch.batch['input_ids'][:, -gen_config.max_start_length:].clone().long()
 
                     # generate a batch
+                    _progress_log(f"step={self.global_steps} gen_start")
                     with _timer('gen', timing_raw):
                         final_gen_batch_output = generation_manager.run_llm_loop(
                             gen_batch=gen_batch,
@@ -1134,6 +1156,7 @@ class RayAgentTrainer(object):
                             initial_input_ids=first_input_ids,
                         )
                         self.checkpoint_manager.sleep_replicas()
+                    _progress_log(f"step={self.global_steps} gen_done elapsed_s={timing_raw['gen']:.2f}")
 
                     for key in final_gen_batch_output.batch.keys():
                         final_gen_batch_output.batch[key] = final_gen_batch_output.batch[key].long()
@@ -1167,9 +1190,11 @@ class RayAgentTrainer(object):
                     batch.meta_info['global_token_num'] = torch.sum(batch.batch['attention_mask'], dim=-1).tolist()
 
                     # recompute old_log_probs
+                    _progress_log(f"step={self.global_steps} old_log_prob_start")
                     with _timer('old_log_prob', timing_raw):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         batch = batch.union(old_log_prob)
+                    _progress_log(f"step={self.global_steps} old_log_prob_done elapsed_s={timing_raw['old_log_prob']:.2f}")
 
                     for key in batch.batch.keys():
                         if key != 'old_log_probs':
@@ -1177,9 +1202,11 @@ class RayAgentTrainer(object):
 
                     if self.use_reference_policy:
                         # compute reference log_prob
+                        _progress_log(f"step={self.global_steps} ref_start")
                         with _timer('ref', timing_raw):
                             ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
                             batch = batch.union(ref_log_prob)
+                        _progress_log(f"step={self.global_steps} ref_done elapsed_s={timing_raw['ref']:.2f}")
 
                     # compute values
                     if self.use_critic:
@@ -1187,6 +1214,7 @@ class RayAgentTrainer(object):
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
 
+                    _progress_log(f"step={self.global_steps} adv_start")
                     with _timer('adv', timing_raw):
                         # compute scores. Support both model and function-based.
                         # We first compute the scores using reward model. Then, we call reward_fn to combine
@@ -1226,6 +1254,7 @@ class RayAgentTrainer(object):
                                                   gamma=self.config.algorithm.gamma,
                                                   lam=self.config.algorithm.lam,
                                                   num_repeat=self.config.actor_rollout_ref.rollout.n)
+                    _progress_log(f"step={self.global_steps} adv_done elapsed_s={timing_raw['adv']:.2f}")
 
                     # update critic
                     if self.use_critic:
@@ -1237,31 +1266,42 @@ class RayAgentTrainer(object):
                     # implement critic warmup
                     if self.config.trainer.critic_warmup <= self.global_steps:
                         # update actor
+                        _progress_log(f"step={self.global_steps} update_actor_start")
                         with _timer('update_actor', timing_raw):
                             batch, metrics = self._create_loss_mask(batch, metrics)
                             actor_output = self.actor_rollout_wg.update_actor(batch)
                         actor_output_metrics = reduce_metrics(actor_output.meta_info['metrics'])
                         metrics.update(actor_output_metrics)
+                        _progress_log(f"step={self.global_steps} update_actor_done elapsed_s={timing_raw['update_actor']:.2f}")
 
                     # validate
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and \
                         (is_last_step or  self.global_steps % self.config.trainer.test_freq == 0):
+                        _progress_log(f"step={self.global_steps} validation_start")
                         with _timer('testing', timing_raw):
                             val_metrics: dict = self._validate()
                             if is_last_step:
                                 last_val_metrics = val_metrics
                             early_stop_triggered = self._update_early_stopping(val_metrics)
                         metrics.update(val_metrics)
+                        _progress_log(f"step={self.global_steps} validation_done elapsed_s={timing_raw['testing']:.2f}")
 
                     if self.config.trainer.save_freq > 0 and ( is_last_step or \
                             self.global_steps % self.config.trainer.save_freq == 0):
+                        _progress_log(f"step={self.global_steps} save_checkpoint_start")
                         with _timer('save_checkpoint', timing_raw):
                             self._save_checkpoint()
+                        _progress_log(f"step={self.global_steps} save_checkpoint_done elapsed_s={timing_raw['save_checkpoint']:.2f}")
                     elif early_stop_triggered:
+                        _progress_log(f"step={self.global_steps} save_checkpoint_start")
                         with _timer('save_checkpoint', timing_raw):
                             self._save_checkpoint()
+                        _progress_log(f"step={self.global_steps} save_checkpoint_done elapsed_s={timing_raw['save_checkpoint']:.2f}")
 
+                    _progress_log(f"step={self.global_steps} update_weights_start")
+                    update_weights_start = time.perf_counter()
                     self.checkpoint_manager.update_weights(self.global_steps)
+                    _progress_log(f"step={self.global_steps} update_weights_done elapsed_s={time.perf_counter() - update_weights_start:.2f}")
 
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
@@ -1274,6 +1314,7 @@ class RayAgentTrainer(object):
                 logger.log(data=metrics, step=self.global_steps)
 
                 if is_last_step or early_stop_triggered:
+                    _progress_log(f"step={self.global_steps} training_done")
                     pprint(f'Final validation metrics: {last_val_metrics}')
                     if early_stop_triggered:
                         print(
