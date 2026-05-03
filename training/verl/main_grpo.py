@@ -238,6 +238,7 @@ def run_grpo(config) -> None:
                 'NCCL_DEBUG': 'WARN',
                 'VLLM_LOGGING_LEVEL': 'WARN',
                 'VLLM_USE_V1': '1',
+                'CUDA_LAUNCH_BLOCKING': '1',
             }
         })
 
