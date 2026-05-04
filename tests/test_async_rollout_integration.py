@@ -279,6 +279,10 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
         self.assertIn("tool_tokenize_s=", logs)
         self.assertIn("other_s=", logs)
         self.assertIn("rollout_profile_total", logs)
+        self.assertIn("rollout_turn_tokens", logs)
+        self.assertIn("gen_tokens_total=", logs)
+        self.assertIn("gen_tok_s=", logs)
+        self.assertIn("rollout_token_profile_total", logs)
 
     def test_tool_generation_manager_stops_when_env_marks_done(self):
         tokenizer = _FakeTokenizer()

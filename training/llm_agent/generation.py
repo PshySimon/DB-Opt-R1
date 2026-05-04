@@ -491,6 +491,60 @@ class ToolGenerationManager:
                 parts.append(f"{key}_s={value:.2f}")
                 parts.append(f"{key}_pct={value / total * 100:.1f}")
         return " ".join(parts)
+
+    def _token_lengths(self, input_ids: torch.Tensor) -> torch.Tensor:
+        return self.tensor_fn.create_attention_mask(input_ids).sum(dim=1).detach().cpu()
+
+    @staticmethod
+    def _token_length_summary(lengths: torch.Tensor, prefix: str) -> Dict[str, float]:
+        if lengths.numel() == 0:
+            return {
+                f"{prefix}_total": 0.0,
+                f"{prefix}_mean": 0.0,
+                f"{prefix}_min": 0.0,
+                f"{prefix}_max": 0.0,
+            }
+
+        lengths = lengths.to(dtype=torch.float32)
+        return {
+            f"{prefix}_total": float(lengths.sum().item()),
+            f"{prefix}_mean": float(lengths.mean().item()),
+            f"{prefix}_min": float(lengths.min().item()),
+            f"{prefix}_max": float(lengths.max().item()),
+        }
+
+    @staticmethod
+    def _format_token_profile(prefix: str, metrics: Dict[str, float]) -> str:
+        parts = [prefix]
+        for key in [
+            "active",
+            "turns",
+            "active_samples",
+            "prompt_tokens_total",
+            "prompt_tokens_mean",
+            "prompt_tokens_min",
+            "prompt_tokens_max",
+            "gen_tokens_total",
+            "gen_tokens_mean",
+            "gen_tokens_min",
+            "gen_tokens_max",
+            "kept_tokens_total",
+            "kept_tokens_mean",
+            "kept_tokens_max",
+            "tool_response_tokens_total",
+            "tool_response_tokens_mean",
+            "tool_response_tokens_max",
+            "generate_s",
+            "gen_tok_s",
+        ]:
+            if key not in metrics:
+                continue
+            value = metrics[key]
+            if key.endswith("_total") or key in {"active", "turns", "active_samples"}:
+                parts.append(f"{key}={int(value)}")
+            else:
+                parts.append(f"{key}={value:.2f}")
+        return " ".join(parts)
     
     def run_llm_loop(self, gen_batch, envs: List[Any] = None,
                     initial_input_ids: torch.Tensor = None) -> Tuple[Dict, Dict]:
@@ -510,6 +564,7 @@ class ToolGenerationManager:
         rollings = gen_batch
         meta_info = {}
         rollout_profile_totals = defaultdict(float)
+        rollout_token_totals = defaultdict(float)
 
         progress_log(
             f"rollout_start batch={batch_size} max_turns={self.config.max_turns} "
@@ -534,6 +589,7 @@ class ToolGenerationManager:
                 tensors={k: v[active_mask] for k, v in rollings.batch.items()},
                 non_tensors={k: v[active_mask.cpu().numpy()] for k, v in rollings.non_tensor_batch.items()},
             )
+            prompt_token_lengths = rollings_active.batch["attention_mask"].sum(dim=1).detach().cpu()
             prepare_elapsed = time.perf_counter() - prepare_start
             generate_start = time.perf_counter()
             with progress_heartbeat(
@@ -541,10 +597,12 @@ class ToolGenerationManager:
             ):
                 gen_output = self._generate_with_gpu_padding(rollings_active)
             generate_elapsed = time.perf_counter() - generate_start
+            generated_token_lengths = self._token_lengths(gen_output.batch["responses"])
 
             postprocess_start = time.perf_counter()
             meta_info = gen_output.meta_info
             responses_ids, responses_str, new_active_masks = self._postprocess_responses(gen_output.batch['responses'])
+            kept_token_lengths = self._token_lengths(responses_ids)
             responses_ids, responses_str = self.tensor_fn._example_level_pad(responses_ids, responses_str, active_mask)
             postprocess_elapsed = time.perf_counter() - postprocess_start
 
@@ -577,6 +635,7 @@ class ToolGenerationManager:
             active_num_list.append(continue_count)
             tool_tokenize_start = time.perf_counter()
             tool_responses_ids = self._process_tool_responses(tool_responses)
+            tool_response_token_lengths = self._token_lengths(tool_responses_ids)
             tool_tokenize_elapsed = time.perf_counter() - tool_tokenize_start
 
             history_tokenize_start = time.perf_counter()
@@ -618,6 +677,49 @@ class ToolGenerationManager:
             for key, value in turn_profile.items():
                 rollout_profile_totals[key] += value
 
+            token_profile = {
+                "active": float(active_count),
+                **self._token_length_summary(prompt_token_lengths, "prompt_tokens"),
+                **self._token_length_summary(generated_token_lengths, "gen_tokens"),
+                **self._token_length_summary(kept_token_lengths, "kept_tokens"),
+                **self._token_length_summary(tool_response_token_lengths, "tool_response_tokens"),
+                "generate_s": generate_elapsed,
+            }
+            token_profile["gen_tok_s"] = token_profile["gen_tokens_total"] / max(generate_elapsed, 1e-9)
+            rollout_token_totals["turns"] += 1
+            rollout_token_totals["active_samples"] += active_count
+            rollout_token_totals["prompt_tokens_total"] += token_profile["prompt_tokens_total"]
+            rollout_token_totals["gen_tokens_total"] += token_profile["gen_tokens_total"]
+            rollout_token_totals["kept_tokens_total"] += token_profile["kept_tokens_total"]
+            rollout_token_totals["tool_response_tokens_total"] += token_profile["tool_response_tokens_total"]
+            rollout_token_totals["generate_s"] += generate_elapsed
+            rollout_token_totals["prompt_tokens_min"] = (
+                min(rollout_token_totals["prompt_tokens_min"], token_profile["prompt_tokens_min"])
+                if "prompt_tokens_min" in rollout_token_totals
+                else token_profile["prompt_tokens_min"]
+            )
+            rollout_token_totals["gen_tokens_min"] = (
+                min(rollout_token_totals["gen_tokens_min"], token_profile["gen_tokens_min"])
+                if "gen_tokens_min" in rollout_token_totals
+                else token_profile["gen_tokens_min"]
+            )
+            rollout_token_totals["prompt_tokens_max"] = max(
+                rollout_token_totals["prompt_tokens_max"],
+                token_profile["prompt_tokens_max"],
+            )
+            rollout_token_totals["gen_tokens_max"] = max(
+                rollout_token_totals["gen_tokens_max"],
+                token_profile["gen_tokens_max"],
+            )
+            rollout_token_totals["kept_tokens_max"] = max(
+                rollout_token_totals["kept_tokens_max"],
+                token_profile["kept_tokens_max"],
+            )
+            rollout_token_totals["tool_response_tokens_max"] = max(
+                rollout_token_totals["tool_response_tokens_max"],
+                token_profile["tool_response_tokens_max"],
+            )
+
             progress_log(
                 f"rollout_turn_done turn={step + 1}/{self.config.max_turns} "
                 f"generated={active_count} tool_calls={tool_call_count} continue={continue_count} "
@@ -629,6 +731,12 @@ class ToolGenerationManager:
                     turn_profile,
                 )
             )
+            progress_log(
+                self._format_token_profile(
+                    f"rollout_turn_tokens turn={step + 1}/{self.config.max_turns}",
+                    token_profile,
+                )
+            )
         
         print("ACTIVE_TRAJ_NUM:", active_num_list, flush=True)
         progress_log(f"rollout_done active_path={active_num_list}")
@@ -637,6 +745,34 @@ class ToolGenerationManager:
                 self._format_timing_profile(
                     "rollout_profile_total",
                     dict(rollout_profile_totals),
+                )
+            )
+        if rollout_token_totals:
+            active_samples = max(rollout_token_totals["active_samples"], 1e-9)
+            token_summary = {
+                "turns": rollout_token_totals["turns"],
+                "active_samples": rollout_token_totals["active_samples"],
+                "prompt_tokens_total": rollout_token_totals["prompt_tokens_total"],
+                "prompt_tokens_mean": rollout_token_totals["prompt_tokens_total"] / active_samples,
+                "prompt_tokens_min": rollout_token_totals["prompt_tokens_min"],
+                "prompt_tokens_max": rollout_token_totals["prompt_tokens_max"],
+                "gen_tokens_total": rollout_token_totals["gen_tokens_total"],
+                "gen_tokens_mean": rollout_token_totals["gen_tokens_total"] / active_samples,
+                "gen_tokens_min": rollout_token_totals["gen_tokens_min"],
+                "gen_tokens_max": rollout_token_totals["gen_tokens_max"],
+                "kept_tokens_total": rollout_token_totals["kept_tokens_total"],
+                "kept_tokens_mean": rollout_token_totals["kept_tokens_total"] / active_samples,
+                "kept_tokens_max": rollout_token_totals["kept_tokens_max"],
+                "tool_response_tokens_total": rollout_token_totals["tool_response_tokens_total"],
+                "tool_response_tokens_mean": rollout_token_totals["tool_response_tokens_total"] / active_samples,
+                "tool_response_tokens_max": rollout_token_totals["tool_response_tokens_max"],
+                "generate_s": rollout_token_totals["generate_s"],
+            }
+            token_summary["gen_tok_s"] = token_summary["gen_tokens_total"] / max(token_summary["generate_s"], 1e-9)
+            progress_log(
+                self._format_token_profile(
+                    "rollout_token_profile_total",
+                    token_summary,
                 )
             )
         
