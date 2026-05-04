@@ -224,6 +224,33 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
         self.assertNotIn("uv pip", content)
         self.assertNotIn("VLLM_ATTENTION_BACKEND", content)
 
+    def test_gpu_efficiency_summary_reports_memory_occupancy_and_gpu_util(self):
+        sample_csv = (
+            "timestamp,index,gpu_util_pct,mem_util_pct,mem_used_mib,mem_total_mib,power_w\n"
+            "2026/05/04 10:00:00,0,20,15,40960,81920,120\n"
+            "2026/05/04 10:00:01,0,80,35,61440,81920,250\n"
+            "2026/05/04 10:00:00,1,50,25,51200,81920,200\n"
+            "2026/05/04 10:00:01,1,70,30,57344,81920,230\n"
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "gpu_efficiency.csv"
+            path.write_text(sample_csv)
+
+            result = subprocess.run(
+                ["python", "scripts/gpu_efficiency.py", "summary", "--input", str(path)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        self.assertIn("GPU0", result.stdout)
+        self.assertIn("gpu_util", result.stdout)
+        self.assertIn("mem_used_pct", result.stdout)
+        self.assertIn("avg=62.5%", result.stdout)
+        self.assertIn("avg=66.2%", result.stdout)
+
     def test_sm120_vllm_flashinfer_setup_script_is_safe_by_default(self):
         content = (ROOT / "scripts" / "setup_sm120_vllm_flashinfer_env.sh").read_text()
         self.assertIn('RECREATE="${RECREATE:-false}"', content)
