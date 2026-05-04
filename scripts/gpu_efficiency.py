@@ -100,13 +100,21 @@ def summary(args) -> int:
             )
 
     print(f"GPU_EFFICIENCY_CSV={input_path}")
+    if not by_gpu:
+        print("GPU_EFFICIENCY_SUMMARY=no_samples")
+        return 0
+
     for gpu in sorted(by_gpu, key=lambda item: int(item) if item.isdigit() else item):
         rows = by_gpu[gpu]
         pieces = [f"GPU{gpu}", f"n={len(rows)}"]
         for metric in ["gpu_util", "mem_used_pct", "mem_used_gb", "mem_util", "power_w"]:
             values = [row[metric] for row in rows]
             avg = sum(values) / len(values) if values else 0.0
-            suffix = "%" if metric in {"gpu_util", "mem_used_pct", "mem_util"} else ("GB" if metric == "mem_used_gb" else "W")
+            suffix = (
+                "%"
+                if metric in {"gpu_util", "mem_used_pct", "mem_util"}
+                else ("GB" if metric == "mem_used_gb" else "W")
+            )
             pieces.append(
                 f"{metric}:avg={avg:.1f}{suffix},"
                 f"p10={_percentile(values, 0.1):.1f}{suffix},"
@@ -122,12 +130,18 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    sample_parser = subparsers.add_parser("sample", help="sample nvidia-smi once per interval until interrupted")
+    sample_parser = subparsers.add_parser(
+        "sample", help="sample nvidia-smi once per interval until interrupted"
+    )
     sample_parser.add_argument("--output", required=True, help="CSV output path")
-    sample_parser.add_argument("--interval", type=float, default=1.0, help="sampling interval in seconds")
+    sample_parser.add_argument(
+        "--interval", type=float, default=1.0, help="sampling interval in seconds"
+    )
     sample_parser.set_defaults(func=sample)
 
-    summary_parser = subparsers.add_parser("summary", help="summarize a CSV produced by sample")
+    summary_parser = subparsers.add_parser(
+        "summary", help="summarize a CSV produced by sample"
+    )
     summary_parser.add_argument("--input", required=True, help="CSV input path")
     summary_parser.set_defaults(func=summary)
 

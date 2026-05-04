@@ -251,6 +251,18 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
         self.assertIn("avg=62.5%", result.stdout)
         self.assertIn("avg=66.2%", result.stdout)
 
+    def test_verl_grpo_lora_auto_summarizes_gpu_efficiency(self):
+        content = (ROOT / "scripts" / "train_grpo_verl_lora.sh").read_text()
+
+        self.assertIn('GPU_EFFICIENCY_MONITOR="${GPU_EFFICIENCY_MONITOR:-1}"', content)
+        self.assertIn('GPU_EFFICIENCY_LOG="${GPU_EFFICIENCY_LOG:-$OUTPUT_DIR/gpu_efficiency.csv}"', content)
+        self.assertIn("start_gpu_efficiency_monitor()", content)
+        self.assertIn("finish_gpu_efficiency_monitor()", content)
+        self.assertIn("trap finish_gpu_efficiency_monitor EXIT", content)
+        self.assertIn('python3 "$SCRIPT_DIR/gpu_efficiency.py" sample', content)
+        self.assertIn('python3 "$SCRIPT_DIR/gpu_efficiency.py" summary --input "$GPU_EFFICIENCY_LOG"', content)
+        self.assertIn("GPU_EFFICIENCY_MONITOR GPU_EFFICIENCY_INTERVAL GPU_EFFICIENCY_LOG", content)
+
     def test_sm120_vllm_flashinfer_setup_script_is_safe_by_default(self):
         content = (ROOT / "scripts" / "setup_sm120_vllm_flashinfer_env.sh").read_text()
         self.assertIn('RECREATE="${RECREATE:-false}"', content)
