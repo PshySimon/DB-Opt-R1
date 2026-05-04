@@ -44,9 +44,9 @@ DEBUG_ROLLOUT_DIR="${DEBUG_ROLLOUT_DIR:-debug/rollout}"
 GRPO_PROGRESS_LOG="${GRPO_PROGRESS_LOG:-1}"
 GRPO_PROGRESS_LOG_FILE="${GRPO_PROGRESS_LOG_FILE:-$OUTPUT_DIR/progress.log}"
 GRPO_PROGRESS_HEARTBEAT_INTERVAL="${GRPO_PROGRESS_HEARTBEAT_INTERVAL:-5}"
-GPU_EFFICIENCY_MONITOR="${GPU_EFFICIENCY_MONITOR:-1}"
+GPU_EFFICIENCY_MONITOR="${GPU_EFFICIENCY_MONITOR:-0}"
 GPU_EFFICIENCY_INTERVAL="${GPU_EFFICIENCY_INTERVAL:-1}"
-GPU_EFFICIENCY_LOG="${GPU_EFFICIENCY_LOG:-$OUTPUT_DIR/gpu_efficiency.csv}"
+GPU_EFFICIENCY_LOG_FILE="${GPU_EFFICIENCY_LOG_FILE:-$OUTPUT_DIR/gpu_efficiency.log}"
 REWARD_DEBUG_NUM_EXAMINE="${REWARD_DEBUG_NUM_EXAMINE:-0}"
 VAL_REWARD_DEBUG_NUM_EXAMINE="${VAL_REWARD_DEBUG_NUM_EXAMINE:-1}"
 EARLY_STOPPING_ENABLED="${EARLY_STOPPING_ENABLED:-False}"
@@ -62,26 +62,143 @@ REQUESTED_HIP_VISIBLE_DEVICES="${HIP_VISIBLE_DEVICES:-}"
 REQUESTED_ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-}"
 GPU_EFFICIENCY_PID=""
 
-start_gpu_efficiency_monitor() {
+gpu_efficiency_enabled() {
   case "$GPU_EFFICIENCY_MONITOR" in
-    1|true|TRUE|True|yes|YES|Yes) ;;
-    *)
-      echo "[gpu_efficiency] disabled"
-      return 0
-      ;;
+    1|true|TRUE|True|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
   esac
+}
 
-  if ! command -v nvidia-smi >/dev/null 2>&1; then
-    echo "[gpu_efficiency] nvidia-smi not found, skipping sampler"
+gpu_efficiency_sample_loop() {
+  local query="timestamp,index,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw"
+
+  while true; do
+    if ! nvidia-smi --query-gpu="$query" --format=csv,noheader,nounits 2>> "$GPU_EFFICIENCY_LOG_FILE" | awk -F',' '
+      function trim(value) {
+        gsub(/^[ \t]+|[ \t]+$/, "", value)
+        return value
+      }
+
+      NF >= 7 {
+        timestamp = trim($1)
+        gpu_index = trim($2)
+        gpu_util = trim($3) + 0
+        mem_util = trim($4) + 0
+        mem_used = trim($5) + 0
+        mem_total = trim($6) + 0
+        power_w = trim($7) + 0
+        mem_used_pct = mem_total > 0 ? mem_used / mem_total * 100 : 0
+
+        printf "%s,%s,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n", \
+          timestamp, gpu_index, gpu_util, mem_util, mem_used, mem_total, power_w, mem_used_pct
+      }
+    ' >> "$GPU_EFFICIENCY_LOG_FILE"; then
+      echo "$(date '+%F %T') GPU_EFFICIENCY_SAMPLE_ERROR" >> "$GPU_EFFICIENCY_LOG_FILE"
+    fi
+
+    sleep "$GPU_EFFICIENCY_INTERVAL"
+  done
+}
+
+append_gpu_efficiency_summary() {
+  local summary_file="${GPU_EFFICIENCY_LOG_FILE}.summary.$$"
+
+  {
+    echo
+    echo "=== GPU_EFFICIENCY_SUMMARY ==="
+    echo "fields: gpu_util=nvidia-smi GPU-Util; mem_used_pct=memory.used/memory.total; mem_util=nvidia-smi utilization.memory"
+    awk -F',' '
+      function trim(value) {
+        gsub(/^[ \t]+|[ \t]+$/, "", value)
+        return value
+      }
+
+      /^#/ || /^===/ || /^timestamp/ || NF < 8 {
+        next
+      }
+
+      {
+        gpu_index = trim($2)
+        gpu_util = trim($3) + 0
+        mem_util = trim($4) + 0
+        mem_used_gb = (trim($5) + 0) / 1024
+        power_w = trim($7) + 0
+        mem_used_pct = trim($8) + 0
+
+        count[gpu_index] += 1
+        gpu_util_sum[gpu_index] += gpu_util
+        mem_util_sum[gpu_index] += mem_util
+        mem_used_gb_sum[gpu_index] += mem_used_gb
+        mem_used_pct_sum[gpu_index] += mem_used_pct
+        power_w_sum[gpu_index] += power_w
+
+        if (!(gpu_index in seen)) {
+          seen[gpu_index] = 1
+          gpu_util_min[gpu_index] = gpu_util
+          gpu_util_max[gpu_index] = gpu_util
+          mem_used_pct_min[gpu_index] = mem_used_pct
+          mem_used_pct_max[gpu_index] = mem_used_pct
+          mem_used_gb_min[gpu_index] = mem_used_gb
+          mem_used_gb_max[gpu_index] = mem_used_gb
+        }
+
+        if (gpu_util < gpu_util_min[gpu_index]) gpu_util_min[gpu_index] = gpu_util
+        if (gpu_util > gpu_util_max[gpu_index]) gpu_util_max[gpu_index] = gpu_util
+        if (mem_used_pct < mem_used_pct_min[gpu_index]) mem_used_pct_min[gpu_index] = mem_used_pct
+        if (mem_used_pct > mem_used_pct_max[gpu_index]) mem_used_pct_max[gpu_index] = mem_used_pct
+        if (mem_used_gb < mem_used_gb_min[gpu_index]) mem_used_gb_min[gpu_index] = mem_used_gb
+        if (mem_used_gb > mem_used_gb_max[gpu_index]) mem_used_gb_max[gpu_index] = mem_used_gb
+      }
+
+      END {
+        gpu_count = 0
+        for (gpu_index in count) {
+          gpu_count += 1
+          printf "GPU%s n=%d gpu_util:avg=%.1f%%,min=%.1f%%,max=%.1f%% mem_used_pct:avg=%.1f%%,min=%.1f%%,max=%.1f%% mem_used_gb:avg=%.1fGB,min=%.1fGB,max=%.1fGB mem_util:avg=%.1f%% power_w:avg=%.1fW\n", \
+            gpu_index, count[gpu_index], \
+            gpu_util_sum[gpu_index] / count[gpu_index], gpu_util_min[gpu_index], gpu_util_max[gpu_index], \
+            mem_used_pct_sum[gpu_index] / count[gpu_index], mem_used_pct_min[gpu_index], mem_used_pct_max[gpu_index], \
+            mem_used_gb_sum[gpu_index] / count[gpu_index], mem_used_gb_min[gpu_index], mem_used_gb_max[gpu_index], \
+            mem_util_sum[gpu_index] / count[gpu_index], \
+            power_w_sum[gpu_index] / count[gpu_index]
+        }
+
+        if (gpu_count == 0) {
+          print "GPU_EFFICIENCY_SUMMARY=no_samples"
+        }
+      }
+    ' "$GPU_EFFICIENCY_LOG_FILE"
+  } > "$summary_file"
+
+  cat "$summary_file" >> "$GPU_EFFICIENCY_LOG_FILE"
+  rm -f "$summary_file"
+}
+
+start_gpu_efficiency_monitor() {
+  if ! gpu_efficiency_enabled; then
+    echo "[gpu_efficiency] disabled"
     return 0
   fi
 
-  mkdir -p "$(dirname "$GPU_EFFICIENCY_LOG")"
-  python3 "$SCRIPT_DIR/gpu_efficiency.py" sample \
-    --output "$GPU_EFFICIENCY_LOG" \
-    --interval "$GPU_EFFICIENCY_INTERVAL" &
+  mkdir -p "$(dirname "$GPU_EFFICIENCY_LOG_FILE")"
+  {
+    echo "# GPU_EFFICIENCY_LOG_FILE=$GPU_EFFICIENCY_LOG_FILE"
+    echo "# gpu_util = nvidia-smi GPU-Util"
+    echo "# mem_used_pct = memory.used / memory.total"
+    echo "# mem_util = nvidia-smi utilization.memory, i.e. memory bandwidth utilization"
+    echo "=== GPU_EFFICIENCY_RAW_SAMPLES ==="
+    echo "timestamp,index,gpu_util,mem_util,mem_used_mib,mem_total_mib,power_w,mem_used_pct"
+  } > "$GPU_EFFICIENCY_LOG_FILE"
+
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "GPU_EFFICIENCY_SUMMARY=no_nvidia_smi" >> "$GPU_EFFICIENCY_LOG_FILE"
+    echo "[gpu_efficiency] nvidia-smi not found, log_file=$GPU_EFFICIENCY_LOG_FILE"
+    return 0
+  fi
+
+  gpu_efficiency_sample_loop &
   GPU_EFFICIENCY_PID="$!"
-  echo "[gpu_efficiency] sampling pid=$GPU_EFFICIENCY_PID log=$GPU_EFFICIENCY_LOG interval_s=$GPU_EFFICIENCY_INTERVAL"
+  echo "[gpu_efficiency] sampling pid=$GPU_EFFICIENCY_PID log_file=$GPU_EFFICIENCY_LOG_FILE interval_s=$GPU_EFFICIENCY_INTERVAL"
 }
 
 finish_gpu_efficiency_monitor() {
@@ -89,16 +206,18 @@ finish_gpu_efficiency_monitor() {
   trap - EXIT
   set +e
 
-  if [ -n "$GPU_EFFICIENCY_PID" ]; then
-    kill "$GPU_EFFICIENCY_PID" >/dev/null 2>&1
-    wait "$GPU_EFFICIENCY_PID" >/dev/null 2>&1
-    echo "[gpu_efficiency] summary_start log=$GPU_EFFICIENCY_LOG"
-    if [ -f "$GPU_EFFICIENCY_LOG" ]; then
-      python3 "$SCRIPT_DIR/gpu_efficiency.py" summary --input "$GPU_EFFICIENCY_LOG"
-    else
-      echo "GPU_EFFICIENCY_SUMMARY=no_log"
+  if gpu_efficiency_enabled; then
+    if [ -n "$GPU_EFFICIENCY_PID" ]; then
+      kill "$GPU_EFFICIENCY_PID" >/dev/null 2>&1
+      wait "$GPU_EFFICIENCY_PID" >/dev/null 2>&1
     fi
-    echo "[gpu_efficiency] summary_done"
+
+    if [ -f "$GPU_EFFICIENCY_LOG_FILE" ]; then
+      append_gpu_efficiency_summary
+      echo "[gpu_efficiency] summary_file=$GPU_EFFICIENCY_LOG_FILE"
+    else
+      echo "[gpu_efficiency] no_log_file=$GPU_EFFICIENCY_LOG_FILE"
+    fi
   fi
 
   exit "$exit_code"
@@ -121,7 +240,7 @@ write_train_config_json "$TRAIN_CONFIG_JSON" \
   REF_LOG_PROB_MICRO_BATCH_SIZE ROLLOUT_LOG_PROB_MICRO_BATCH_SIZE \
   GPU_MEMORY_UTILIZATION UPDATE_WEIGHTS_BUCKET_MEGABYTES FREE_CACHE_ENGINE ATTN_IMPL DEBUG_ROLLOUT_DIR \
   GRPO_PROGRESS_LOG GRPO_PROGRESS_LOG_FILE GRPO_PROGRESS_HEARTBEAT_INTERVAL \
-  GPU_EFFICIENCY_MONITOR GPU_EFFICIENCY_INTERVAL GPU_EFFICIENCY_LOG \
+  GPU_EFFICIENCY_MONITOR GPU_EFFICIENCY_INTERVAL GPU_EFFICIENCY_LOG_FILE \
   REWARD_DEBUG_NUM_EXAMINE VAL_REWARD_DEBUG_NUM_EXAMINE \
   EARLY_STOPPING_ENABLED EARLY_STOPPING_METRIC EARLY_STOPPING_MODE \
   EARLY_STOPPING_PATIENCE EARLY_STOPPING_MIN_DELTA PROJECT_NAME \
@@ -144,7 +263,7 @@ echo "update bucket MB: $UPDATE_WEIGHTS_BUCKET_MEGABYTES"
 echo "attn_impl: $ATTN_IMPL"
 echo "progress log: $GRPO_PROGRESS_LOG_FILE"
 echo "gpu efficiency monitor: $GPU_EFFICIENCY_MONITOR"
-echo "gpu efficiency log: $GPU_EFFICIENCY_LOG"
+echo "gpu efficiency log: $GPU_EFFICIENCY_LOG_FILE"
 echo "配置: $TRAIN_CONFIG_JSON"
 echo "============================================"
 
