@@ -3,17 +3,18 @@ data_pipeline.synthesis.scenarios.loader
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 场景数据加载与清洗的公共逻辑。
 
-因为去重以 knob 配置为 key，属于业务逻辑，放在 scenarios 子包里。
+因为去重以最终生效配置和运行环境为 key，属于业务逻辑，放在 scenarios 子包里。
 cost_model、environment 等模块统一从这里加载数据，避免散弹式修改。
 
 公共接口
 --------
-knob_fingerprint(knobs, wl_type) -> str
-    计算 (knob配置, workload类型) 的 MD5 指纹，用作去重 key。
+knob_fingerprint(knobs, wl_type, hardware=None) -> str
+    计算 (knob配置, workload类型, 硬件/IO性能画像) 的 MD5 指纹，
+    用作去重 key。
 
 dedup_scenarios(items, fname='', logger=None) -> list[dict]
     对 raw JSON dict list 去重：
-    同文件内 knob + workload 完全相同，但 TPS 差异 >20% 的条目，
+    同文件内 knob + workload + 硬件/IO性能画像相同，但 TPS 差异 >20% 的条目，
     只保留 TPS 最高的那条。
 
 load_scenario_files(source, logger=None) -> list[dict]
@@ -31,17 +32,67 @@ from collections import defaultdict
 _logger = logging.getLogger(__name__)
 
 
-def knob_fingerprint(knobs: dict, wl_type: str) -> str:
-    """(knob配置, workload类型) → MD5 字符串，用作去重 key。"""
-    payload = json.dumps(dict(sorted(knobs.items())), sort_keys=True) + "|" + wl_type
+_IO_BUCKETS = {
+    # Dedup bucketing only: keep different machines / IO states separate while
+    # absorbing tiny fio jitter from one collection run.
+    "seq_write_bw_fio_mbps": 0.1,
+    "seq_write_p99_lat_us": 25,
+    "rand_read_iops": 1000,
+    "rand_read_mbps": 5,
+    "seq_write_mbps": 25,
+    "seq_read_mbps": 25,
+    "mem_bw_gbps": 1,
+}
+
+_EXACT_HARDWARE_KEYS = (
+    "cpu_count",
+    "cpu_model",
+    "total_memory_gb",
+    "disk_type",
+    "disk_capacity_gb",
+)
+
+
+def _bucket_number(value, step):
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return value
+
+    bucketed = round(value / step) * step
+    if float(step).is_integer():
+        return int(bucketed)
+    return round(bucketed, 4)
+
+
+def hardware_io_fingerprint_payload(hardware: dict | None) -> dict:
+    """Stable hardware/IO payload used to decide whether two rows are comparable."""
+    hardware = hardware or {}
+    payload = {key: hardware.get(key) for key in _EXACT_HARDWARE_KEYS}
+    payload.update(
+        {key: _bucket_number(hardware.get(key), step) for key, step in _IO_BUCKETS.items()}
+    )
+    return payload
+
+
+def knob_fingerprint(knobs: dict, wl_type: str, hardware: dict | None = None) -> str:
+    """(knob配置, workload类型, 硬件/IO性能画像) → MD5 字符串，用作去重 key。"""
+    payload_obj = {
+        "knobs": dict(sorted((knobs or {}).items())),
+        "workload": wl_type,
+        "hardware_io": hardware_io_fingerprint_payload(hardware),
+    }
+    payload = json.dumps(payload_obj, sort_keys=True)
     return hashlib.md5(payload.encode()).hexdigest()
 
 
 def dedup_scenarios(items: list, fname: str = "",
                     logger: logging.Logger = None) -> list:
     """
-    去重：同文件内 knob + workload 相同但 TPS 差 >20% 的重复条目，
-    保留 TPS 最高的那条。
+    去重：同文件内 knob + workload + 硬件/IO性能画像相同但 TPS 差 >20%
+    的重复条目，保留 TPS 最高的那条。
 
     Parameters
     ----------
@@ -65,7 +116,7 @@ def dedup_scenarios(items: list, fname: str = "",
         knobs = item.get("knobs", {}) or {}
         wl = item.get("workload", {}) or {}
         wl_type = wl.get("type", "") if isinstance(wl, dict) else str(wl)
-        key = knob_fingerprint(knobs, wl_type)
+        key = knob_fingerprint(knobs, wl_type, item.get("hardware"))
         groups[key].append(item)
 
     result, n_removed = [], 0
