@@ -236,10 +236,15 @@ class KnobPreprocessor:
                 row["workload"] = wl.get("type", "mixed")
                 row["tps"] = wl.get("tps_current", 0)
                 row["latency_avg"] = wl.get("latency_avg_ms", 0)
+                try:
+                    tps_value = float(row["tps"] or 0)
+                except (TypeError, ValueError):
+                    tps_value = 0.0
+                row["status"] = "fail" if wl.get("error") or tps_value <= 0 else "success"
             else:
                 row["workload"] = str(wl)
                 row["tps"] = 0
-            row["status"] = "success"
+                row["status"] = "fail"
             row["source"] = item.get("source", "unknown")
             rows.append(row)
         df = pd.DataFrame(rows)

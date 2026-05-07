@@ -337,7 +337,7 @@ def collect_scenarios(input_path: str, output_path: str,
     logger.info("开始 IO 基准测试（约 2 分钟）...")
     io_benchmarks = _run_io_benchmark()
 
-    # 获取物理内存上限（用于拦截会搞挂 PG 的内存配置）
+    # 获取物理内存上限（用于拦截真实占用内存、可能搞挂 PG 的配置）
     try:
         import os as _os
         _total_mem_kb = _os.sysconf("SC_PHYS_PAGES") * _os.sysconf("SC_PAGE_SIZE") // 1024
@@ -346,8 +346,13 @@ def collect_scenarios(input_path: str, output_path: str,
         _total_mem_kb, _mem_limit_kb = 0, 0
 
     from core.db.knob_space import parse_memory
-    _MEM_KNOBS = {"shared_buffers", "work_mem", "effective_cache_size",
-                  "maintenance_work_mem", "wal_buffers", "temp_buffers"}
+    _REAL_MEMORY_KNOBS = {
+        "shared_buffers",
+        "work_mem",
+        "maintenance_work_mem",
+        "wal_buffers",
+        "temp_buffers",
+    }
 
     for i, config in enumerate(pending):
         knobs = config["knobs"]
@@ -355,11 +360,12 @@ def collect_scenarios(input_path: str, output_path: str,
         label = f"{config['name']}_v{config.get('variant', 0)}"
         logger.info(f"[{i+1}/{len(pending)}] 采集 {label} (workload={workload}) ...")
 
-        # 预校验：内存类 knob 不能超物理内存 80%
+        # 预校验：真实分配内存的 knob 不能超物理内存 80%。
+        # effective_cache_size 只是 planner hint，不实际分配内存，不能在这里拦。
         mem_violation = None
         if _mem_limit_kb > 0:
             for kname, kval in knobs.items():
-                if kname in _MEM_KNOBS:
+                if kname in _REAL_MEMORY_KNOBS:
                     try:
                         if parse_memory(str(kval)) > _mem_limit_kb:
                             mem_violation = f"{kname}={kval} 超过物理内存 80%"
@@ -438,6 +444,15 @@ def collect_scenarios(input_path: str, output_path: str,
             hw_with_io.update(io_benchmarks)
 
             from dataclasses import asdict
+            workload_result = {
+                "type": workload,
+                "tps_current": perf.get("tps", 0),
+                "latency_avg_ms": perf.get("latency_avg", 0),
+                "benchmark": "pgbench",
+            }
+            if perf.get("error"):
+                workload_result["error"] = perf["error"]
+
             state = ScenarioState(
                 name=config["name"],
                 variant=config.get("variant", 0),
@@ -451,12 +466,7 @@ def collect_scenarios(input_path: str, output_path: str,
                 wait_events=scenario_data.get("wait_events", []),
                 slow_queries=scenario_data.get("slow_queries", []),
                 logs=scenario_data.get("logs", []),
-                workload={
-                    "type": workload,
-                    "tps_current": perf.get("tps", 0),
-                    "latency_avg_ms": perf.get("latency_avg", 0),
-                    "benchmark": "pgbench",
-                },
+                workload=workload_result,
                 solution={},
             )
             results.append(asdict(state))
@@ -1201,4 +1211,3 @@ if __name__ == "__main__":
 
     else:
         parser.print_help()
-

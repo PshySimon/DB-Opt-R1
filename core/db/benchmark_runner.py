@@ -131,8 +131,14 @@ class BenchmarkRunner:
         logger.info(f"运行 pgbench [{self.workload}]: {cmd}")
         result = self._run_subprocess(cmd, timeout=self.duration + 60)
         if result.returncode != 0:
-            logger.error(f"pgbench 运行失败:\n{result.stderr}")
-            return {"tps": 0, "latency_avg": 0, "latency_p95": None}
+            error = (result.stderr or result.stdout or "").strip()
+            logger.error(f"pgbench 运行失败:\n{error}")
+            return {
+                "tps": 0,
+                "latency_avg": 0,
+                "latency_p95": None,
+                "error": error,
+            }
 
         output = result.stdout + result.stderr
         return self._parse_pgbench_output(output)
@@ -190,8 +196,14 @@ class BenchmarkRunner:
         logger.info(f"运行 sysbench: {cmd}")
         result = self._run_subprocess(cmd, timeout=self.duration + 60)
         if result.returncode != 0:
-            logger.error(f"sysbench 运行失败:\n{result.stderr}")
-            return {"tps": 0, "latency_avg": 0, "latency_p95": None}
+            error = (result.stderr or result.stdout or "").strip()
+            logger.error(f"sysbench 运行失败:\n{error}")
+            return {
+                "tps": 0,
+                "latency_avg": 0,
+                "latency_p95": None,
+                "error": error,
+            }
 
         return self._parse_sysbench_output(result.stdout)
 
