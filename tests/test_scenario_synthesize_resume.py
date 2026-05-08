@@ -89,6 +89,15 @@ class ScenarioSynthesizeResumeTest(unittest.TestCase):
             warning_calls = [call.args[0] for call in fake_logger.warning.call_args_list]
             self.assertTrue(any("回退到备份文件" in message for message in warning_calls))
 
+    def test_collect_dedup_key_keeps_same_knobs_for_different_workloads(self):
+        knobs = {"shared_buffers": "4GB", "synchronous_commit": "off"}
+        write_key = pipeline._collect_dedup_key({"knobs": knobs, "workload": "write_heavy"})
+        mixed_key = pipeline._collect_dedup_key({"knobs": knobs, "workload": "mixed"})
+        duplicate_write_key = pipeline._collect_dedup_key({"knobs": dict(reversed(knobs.items())), "workload": "write_heavy"})
+
+        self.assertNotEqual(write_key, mixed_key)
+        self.assertEqual(write_key, duplicate_write_key)
+
 
 if __name__ == "__main__":
     unittest.main()

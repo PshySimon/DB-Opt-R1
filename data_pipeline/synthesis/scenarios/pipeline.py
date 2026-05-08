@@ -77,6 +77,18 @@ def _safe_load_json_list(path: str):
         return data
 
 
+def _collect_dedup_key(config: dict) -> str:
+    """Deduplicate collect inputs by both knob values and workload."""
+    return json.dumps(
+        {
+            "knobs": config.get("knobs", {}),
+            "workload": config.get("workload", "mixed"),
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
 def generate_questions_for_state(state, n: int, llm_fn) -> list:
     """一次 LLM 调用为场景生成 n 条风格各异的 question。
 
@@ -296,19 +308,22 @@ def collect_scenarios(input_path: str, output_path: str,
         configs.extend(data)
     logger.info(f"合计加载 {len(configs)} 条配置")
 
-    # 按 knobs 内容去重
+    # 按 knobs + workload 去重；同一配置在不同 workload 下 TPS 含义不同，不能合并。
     seen_knobs = set()
     unique_configs = []
     dup_count = 0
     for c in configs:
-        knob_key = json.dumps(c["knobs"], sort_keys=True)
+        knob_key = _collect_dedup_key(c)
         if knob_key not in seen_knobs:
             seen_knobs.add(knob_key)
             unique_configs.append(c)
         else:
             dup_count += 1
     if dup_count > 0:
-        logger.info(f"去重: {len(configs)} → {len(unique_configs)} 条（移除 {dup_count} 条重复配置，{dup_count*100/len(configs):.1f}%）")
+        logger.info(
+            f"去重: {len(configs)} → {len(unique_configs)} 条"
+            f"（按 knobs+workload 移除 {dup_count} 条重复配置，{dup_count*100/len(configs):.1f}%）"
+        )
     configs = unique_configs
 
     # 分片：--start/--end 截取范围（1-indexed）
