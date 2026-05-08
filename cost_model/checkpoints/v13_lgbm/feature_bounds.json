@@ -1,0 +1,740 @@
+{
+  "shared_buffers": {
+    "min": 5.0,
+    "p01": 5.169925001442312,
+    "p99": 13.0,
+    "max": 15.169925001442312
+  },
+  "work_mem": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 9.411510988012072,
+    "max": 10.0
+  },
+  "effective_cache_size": {
+    "min": 7.0,
+    "p01": 7.515699838284043,
+    "p99": 14.523561956057012,
+    "max": 15.584962500721156
+  },
+  "maintenance_work_mem": {
+    "min": 4.0,
+    "p01": 4.0,
+    "p99": 10.0,
+    "max": 12.0
+  },
+  "wal_buffers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 7.622051819456376,
+    "max": 10.0
+  },
+  "temp_buffers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 7.475733430966398,
+    "max": 8.0
+  },
+  "max_wal_size": {
+    "min": 7.0,
+    "p01": 7.169925001442312,
+    "p99": 13.0,
+    "max": 15.0
+  },
+  "min_wal_size": {
+    "min": 5.0,
+    "p01": 5.087462841250339,
+    "p99": 10.0,
+    "max": 13.0
+  },
+  "max_stack_depth": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 6.0,
+    "max": 7.0
+  },
+  "autovacuum_naptime": {
+    "min": 0.0,
+    "p01": 3.0,
+    "p99": 5.747411807886423,
+    "max": 5.778151250383644
+  },
+  "bgwriter_delay": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 3.2801228963023075,
+    "max": 3.3010299956639813
+  },
+  "checkpoint_timeout": {
+    "min": 1.4771212547196624,
+    "p01": 4.477121254719663,
+    "p99": 6.526597709103452,
+    "max": 6.857332496431268
+  },
+  "lock_timeout": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 4.751158191448274,
+    "max": 4.778151250383644
+  },
+  "deadlock_timeout": {
+    "min": 2.0,
+    "p01": 2.0,
+    "p99": 3.9756551001621174,
+    "max": 4.778151250383644
+  },
+  "idle_in_transaction_session_timeout": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 5.75331814196523,
+    "max": 6.556302500767287
+  },
+  "commit_delay": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 4.972700135121844,
+    "max": 5.0
+  },
+  "autovacuum_analyze_threshold": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 3.683085778333837,
+    "max": 3.6989700043360187
+  },
+  "autovacuum_vacuum_threshold": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 3.6791034150809905,
+    "max": 3.6989700043360187
+  },
+  "max_connections": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 2.9698816437465,
+    "max": 3.0
+  },
+  "effective_io_concurrency": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 5.267858159063328,
+    "max": 6.90875477931522
+  },
+  "bgwriter_lru_maxpages": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 6.88653164253051,
+    "max": 8.517393171418904
+  },
+  "random_page_cost": {
+    "min": 0.5,
+    "p01": 0.92457,
+    "p99": 9.41743,
+    "max": 200.0
+  },
+  "seq_page_cost": {
+    "min": 0.2,
+    "p01": 0.5,
+    "p99": 4.69343,
+    "max": 5.0
+  },
+  "cpu_tuple_cost": {
+    "min": 0.001,
+    "p01": 0.001,
+    "p99": 0.094,
+    "max": 0.1
+  },
+  "cpu_index_tuple_cost": {
+    "min": 0.0005,
+    "p01": 0.001,
+    "p99": 0.047,
+    "max": 0.05
+  },
+  "cpu_operator_cost": {
+    "min": 0.0005,
+    "p01": 0.001,
+    "p99": 0.04643000000000029,
+    "max": 0.05
+  },
+  "checkpoint_completion_target": {
+    "min": 0.1,
+    "p01": 0.146,
+    "p99": 0.9,
+    "max": 0.95
+  },
+  "bgwriter_lru_multiplier": {
+    "min": 0.5,
+    "p01": 0.5,
+    "p99": 9.42943,
+    "max": 10.0
+  },
+  "autovacuum_vacuum_scale_factor": {
+    "min": 0.01,
+    "p01": 0.015,
+    "p99": 0.479,
+    "max": 0.5
+  },
+  "autovacuum_analyze_scale_factor": {
+    "min": 0.01,
+    "p01": 0.01,
+    "p99": 0.474,
+    "max": 0.5
+  },
+  "default_statistics_target": {
+    "min": 10.0,
+    "p01": 10.0,
+    "p99": 936.0,
+    "max": 1000.0
+  },
+  "from_collapse_limit": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 19.0,
+    "max": 20.0
+  },
+  "join_collapse_limit": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 19.0,
+    "max": 20.0
+  },
+  "geqo_threshold": {
+    "min": 2.0,
+    "p01": 3.0,
+    "p99": 19.0,
+    "max": 20.0
+  },
+  "autovacuum_max_workers": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 9.0,
+    "max": 10.0
+  },
+  "max_parallel_workers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 15.0,
+    "max": 16.0
+  },
+  "max_parallel_workers_per_gather": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 7.0,
+    "max": 12.0
+  },
+  "max_parallel_maintenance_workers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 7.0,
+    "max": 8.0
+  },
+  "superuser_reserved_connections": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 9.0,
+    "max": 12.0
+  },
+  "max_wal_senders": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 0.0,
+    "max": 8.0
+  },
+  "autovacuum": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "track_activities": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "track_counts": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "synchronous_commit": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 3.0,
+    "max": 4.0
+  },
+  "wal_compression": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 2.0,
+    "max": 4.0
+  },
+  "hw_cpu_count": {
+    "min": 0.0,
+    "p01": 8.0,
+    "p99": 8.0,
+    "max": 8.0
+  },
+  "hw_cpu_freq_mhz": {
+    "min": 0.0,
+    "p01": 1995.1,
+    "p99": 2799.8,
+    "max": 3200.1
+  },
+  "hw_total_memory_gb": {
+    "min": 0.0,
+    "p01": 14.5,
+    "p99": 15.6,
+    "max": 15.6
+  },
+  "hw_available_memory_gb": {
+    "min": 0.0,
+    "p01": 12.7,
+    "p99": 14.4,
+    "max": 14.6
+  },
+  "hw_disk_capacity_gb": {
+    "min": 0.0,
+    "p01": 196.0,
+    "p99": 776.0,
+    "max": 776.0
+  },
+  "hw_seq_write_mbps": {
+    "min": 41.7,
+    "p01": 41.7,
+    "p99": 810.8,
+    "max": 814.2
+  },
+  "hw_seq_read_mbps": {
+    "min": 207.0,
+    "p01": 207.0,
+    "p99": 3817.6,
+    "max": 7998.9
+  },
+  "hw_rand_read_iops": {
+    "min": 7457.0,
+    "p01": 7457.0,
+    "p99": 146000.0,
+    "max": 146000.0
+  },
+  "hw_rand_read_mbps": {
+    "min": 29.1,
+    "p01": 29.1,
+    "p99": 572.0,
+    "max": 572.0
+  },
+  "hw_mem_bw_gbps": {
+    "min": 0.49,
+    "p01": 0.527,
+    "p99": 35.16,
+    "max": 35.16
+  },
+  "hw_seq_write_bw_fio_mbps": {
+    "min": 0.1,
+    "p01": 0.1,
+    "p99": 399.0,
+    "max": 399.0
+  },
+  "hw_seq_write_p99_lat_us": {
+    "min": 302.0,
+    "p01": 302.0,
+    "p99": 8586.0,
+    "max": 8586.0
+  },
+  "hw_disk_type": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 0.0,
+    "max": 0.0
+  },
+  "workload_mixed": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "workload_read_only": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "workload_high_concurrency": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "workload_write_heavy": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "ratio_shared_buffers_mem": {
+    "min": 0.0021551724137931034,
+    "p01": 0.0024245689655172415,
+    "p99": 0.5128205128205129,
+    "max": 2.25
+  },
+  "ratio_cache_mem": {
+    "min": 0.008620689655172414,
+    "p01": 0.012324892241379311,
+    "p99": 1.5862068965517242,
+    "max": 3.0
+  },
+  "ratio_cache_sb": {
+    "min": 0.015625,
+    "p01": 0.1291845703125,
+    "p99": 205.51019354838758,
+    "max": 1024.0
+  },
+  "mem_pressure": {
+    "min": 0.00062580574529461,
+    "p01": 0.001251220102678414,
+    "p99": 3.1490333822243133,
+    "max": 4.231248382325152
+  },
+  "ratio_parallel_cpu": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 0.875,
+    "max": 1.5
+  },
+  "ratio_wal_sb": {
+    "min": 0.015625,
+    "p01": 0.0625,
+    "p99": 33.75824175824176,
+    "max": 128.0
+  },
+  "cross_read_only_synchronous_commit": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 3.0,
+    "max": 4.0
+  },
+  "cross_write_heavy_synchronous_commit": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 3.0,
+    "max": 3.0
+  },
+  "cross_read_only_commit_delay": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 4.884757555968895,
+    "max": 5.0
+  },
+  "cross_write_heavy_commit_delay": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 4.8750612633917,
+    "max": 5.0
+  },
+  "cross_read_only_shared_buffers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 12.584962500721156,
+    "max": 15.169925001442312
+  },
+  "cross_write_heavy_shared_buffers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 12.584962500721156,
+    "max": 14.0
+  },
+  "cliff_cd_high_write": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "cliff_cd_vhigh_write": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "cliff_cd_high_read": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "cliff_sync_off_write": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 1.0,
+    "max": 1.0
+  },
+  "x_commit_delay_x_synchronous_commit": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 14.577026309620592,
+    "max": 15.0
+  },
+  "x_commit_delay_x_max_connections": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 14.310284141683569,
+    "max": 15.0
+  },
+  "x_commit_delay_x_lock_timeout": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 22.999482287050373,
+    "max": 23.89075625191822
+  },
+  "x_commit_delay_x_checkpoint_completion_target": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 4.312237144566487,
+    "max": 4.5
+  },
+  "x_commit_delay_x_shared_buffers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 58.5007351607004,
+    "max": 63.966865691558546
+  },
+  "x_commit_delay_x_effective_io_concurrency": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 25.134609377883574,
+    "max": 26.51652454029538
+  },
+  "x_commit_delay_x_seq_page_cost": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 21.89259620839961,
+    "max": 25.0
+  },
+  "x_commit_delay_x_autovacuum_vacuum_threshold": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 17.760292032064665,
+    "max": 18.494850021680094
+  },
+  "x_commit_delay_x_random_page_cost": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 43.404928981294255,
+    "max": 50.0
+  },
+  "x_synchronous_commit_x_max_connections": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 8.599623730329347,
+    "max": 8.998696464677947
+  },
+  "x_synchronous_commit_x_lock_timeout": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 13.889435842329666,
+    "max": 14.334453751150932
+  },
+  "x_synchronous_commit_x_checkpoint_completion_target": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 2.362290000000001,
+    "max": 3.6
+  },
+  "x_synchronous_commit_x_shared_buffers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 34.75488750216347,
+    "max": 47.43192398051029
+  },
+  "x_synchronous_commit_x_effective_io_concurrency": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 14.888533890779721,
+    "max": 15.909914724177227
+  },
+  "x_synchronous_commit_x_seq_page_cost": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 11.253870000000003,
+    "max": 15.0
+  },
+  "x_synchronous_commit_x_autovacuum_vacuum_threshold": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 10.68738892617635,
+    "max": 11.096910013008056
+  },
+  "x_synchronous_commit_x_random_page_cost": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 22.486320000000006,
+    "max": 400.0
+  },
+  "x_max_connections_x_lock_timeout": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 13.665340171391977,
+    "max": 14.334453751150932
+  },
+  "x_max_connections_x_checkpoint_completion_target": {
+    "min": 0.1,
+    "p01": 0.29723011441774344,
+    "p99": 2.363448370066621,
+    "max": 2.7
+  },
+  "x_max_connections_x_shared_buffers": {
+    "min": 5.0,
+    "p01": 6.547953934232707,
+    "p99": 34.243675291914734,
+    "max": 40.75488750216347
+  },
+  "x_max_connections_x_effective_io_concurrency": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 14.8771261626481,
+    "max": 15.909914724177227
+  },
+  "x_max_connections_x_seq_page_cost": {
+    "min": 0.4795880017344075,
+    "p01": 0.7235790156711096,
+    "p99": 12.811051571679455,
+    "max": 15.0
+  },
+  "x_max_connections_x_autovacuum_vacuum_threshold": {
+    "min": 1.0,
+    "p01": 1.0,
+    "p99": 10.496584179043689,
+    "max": 11.096910013008056
+  },
+  "x_max_connections_x_random_page_cost": {
+    "min": 0.5,
+    "p01": 1.3010299956639813,
+    "p99": 25.01270787690912,
+    "max": 400.0
+  },
+  "x_lock_timeout_x_checkpoint_completion_target": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 3.8251470576552777,
+    "max": 4.30033612534528
+  },
+  "x_lock_timeout_x_shared_buffers": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 55.35470305846842,
+    "max": 61.18183491342954
+  },
+  "x_lock_timeout_x_effective_io_concurrency": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 23.90788891948197,
+    "max": 25.339992977608187
+  },
+  "x_lock_timeout_x_seq_page_cost": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 20.868419242923416,
+    "max": 23.89075625191822
+  },
+  "x_lock_timeout_x_autovacuum_vacuum_threshold": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 16.903662268333967,
+    "max": 17.67423815134974
+  },
+  "x_lock_timeout_x_random_page_cost": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 41.14042993681497,
+    "max": 47.78151250383644
+  },
+  "x_checkpoint_completion_target_x_shared_buffers": {
+    "min": 0.5,
+    "p01": 1.2000000000000002,
+    "p99": 11.700000000000001,
+    "max": 13.652932501298082
+  },
+  "x_checkpoint_completion_target_x_effective_io_concurrency": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 4.6534355955343365,
+    "max": 6.217879301383698
+  },
+  "x_checkpoint_completion_target_x_seq_page_cost": {
+    "min": 0.05,
+    "p01": 0.1845,
+    "p99": 3.1099234,
+    "max": 4.5
+  },
+  "x_checkpoint_completion_target_x_autovacuum_vacuum_threshold": {
+    "min": 0.1,
+    "p01": 0.3397940008672038,
+    "p99": 3.2268423072531243,
+    "max": 3.329073003902417
+  },
+  "x_checkpoint_completion_target_x_random_page_cost": {
+    "min": 0.05,
+    "p01": 0.36661888000000004,
+    "p99": 8.1,
+    "max": 180.0
+  },
+  "x_shared_buffers_x_effective_io_concurrency": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 62.38196437518991,
+    "max": 81.85382368152743
+  },
+  "x_shared_buffers_x_seq_page_cost": {
+    "min": 2.5,
+    "p01": 3.3291057413758973,
+    "p99": 46.93939478234636,
+    "max": 63.92150841598949
+  },
+  "x_shared_buffers_x_autovacuum_vacuum_threshold": {
+    "min": 5.0,
+    "p01": 6.129283016944966,
+    "p99": 43.22471989593555,
+    "max": 47.31587228667495
+  },
+  "x_shared_buffers_x_random_page_cost": {
+    "min": 2.5,
+    "p01": 7.199999999999999,
+    "p99": 102.63033978930652,
+    "max": 2516.992500144231
+  },
+  "x_effective_io_concurrency_x_seq_page_cost": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 22.015368253105326,
+    "max": 26.51652454029538
+  },
+  "x_effective_io_concurrency_x_autovacuum_vacuum_threshold": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 18.370548153773683,
+    "max": 19.61676577875851
+  },
+  "x_effective_io_concurrency_x_random_page_cost": {
+    "min": 0.0,
+    "p01": 0.0,
+    "p99": 43.28776741265788,
+    "max": 138.62943611198907
+  },
+  "x_seq_page_cost_x_autovacuum_vacuum_threshold": {
+    "min": 0.3397940008672038,
+    "p01": 0.513,
+    "p99": 15.938643388734144,
+    "max": 18.494850021680094
+  },
+  "x_seq_page_cost_x_random_page_cost": {
+    "min": 0.22000000000000003,
+    "p01": 1.0,
+    "p99": 33.58768045,
+    "max": 200.0
+  },
+  "x_autovacuum_vacuum_threshold_x_random_page_cost": {
+    "min": 0.5,
+    "p01": 1.6989700043360187,
+    "p99": 31.421250776778074,
+    "max": 339.79400086720375
+  }
+}
