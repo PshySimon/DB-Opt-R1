@@ -6,10 +6,12 @@ import os
 import json
 import random
 import logging
+from pathlib import Path
 from collections.abc import Sequence
 
 import pandas as pd
 
+from core.db.knob_validator import KnobValidator
 from core.tool.tool_env import ToolEnv
 from .db_tools import (
     FinishTuningTool,
@@ -71,6 +73,7 @@ class DBToolEnv(ToolEnv):
         tunable_knobs = []
         knob_defaults = {}
         restart_knobs = set()
+        knob_validator = None
         if knob_space_path:
             import yaml
             with open(knob_space_path) as f:
@@ -79,6 +82,12 @@ class DBToolEnv(ToolEnv):
             tunable_knobs = list(knob_defs.keys())
             knob_defaults = {name: info.get("default") for name, info in knob_defs.items()}
             restart_knobs = {name for name, info in knob_defs.items() if info.get("restart", False)}
+            catalog_candidates = [
+                Path(knob_space_path).with_name("pg_settings_pg16_catalog.json"),
+                Path("configs/pg_settings_pg16_catalog.json"),
+            ]
+            catalog_path = next((str(p) for p in catalog_candidates if p.exists()), None)
+            knob_validator = KnobValidator(knob_space_path, catalog_path)
 
         common = {"mode": mode, "config": config, "env_state": self.env_state}
 
@@ -105,6 +114,7 @@ class DBToolEnv(ToolEnv):
         for tool in self.tools:
             tool.knob_defaults = knob_defaults
             tool.restart_knobs = restart_knobs
+            tool.knob_validator = knob_validator
         # training.verl.agent_rl_dataset expects the training ToolEnv interface.
         self.tool_desc = [tool.get_description() for tool in self.tools]
 

@@ -110,10 +110,11 @@ class KnobPreprocessor:
     ]
 
     BOOL_KNOBS = [
-        "autovacuum", "track_activities", "track_counts", "wal_compression",
+        "autovacuum", "track_activities", "track_counts",
     ]
     ENUM_KNOBS = {
-        "synchronous_commit": ["off", "local", "on", "remote_write"],
+        "synchronous_commit": ["off", "local", "on", "remote_write", "remote_apply"],
+        "wal_compression": ["off", "on", "pglz", "lz4", "zstd"],
     }
 
     # 直接使用原值的数值 knob
@@ -154,6 +155,7 @@ class KnobPreprocessor:
         self.knob_defaults = {}
         self.feature_names = []
         self.varying_knobs = []
+        self.feature_bounds = {}
         self._fitted = False
 
         if knob_space_path:
@@ -199,12 +201,29 @@ class KnobPreprocessor:
         y = np.log1p(pd.to_numeric(df["tps"], errors="coerce").fillna(0))
 
         self.feature_names = list(X.columns)
+        self.feature_bounds = self._compute_feature_bounds(X)
         self._fitted = True
 
         logger.info(f"  最终特征: {X.shape[1]} 个")
         logger.info(f"  样本: {X.shape[0]} (成功 {success_mask.sum()}, 失败 {(~success_mask).sum()})")
 
         return X, y, meta
+
+    def _compute_feature_bounds(self, X: pd.DataFrame) -> dict:
+        """保存训练集特征覆盖范围，供推理时识别明显外推。"""
+        bounds = {}
+        for col in X.columns:
+            vals = pd.to_numeric(X[col], errors="coerce")
+            vals = vals.replace([np.inf, -np.inf], np.nan).dropna()
+            if vals.empty:
+                continue
+            bounds[col] = {
+                "min": float(vals.min()),
+                "p01": float(vals.quantile(0.01)),
+                "p99": float(vals.quantile(0.99)),
+                "max": float(vals.max()),
+            }
+        return bounds
 
     def _load_data(self, data_path: str) -> pd.DataFrame:
         """加载数据：自动检测 CSV、单 JSON 或目录（collected_*.json）"""
@@ -485,6 +504,50 @@ class KnobPreprocessor:
 
         return X.values[0]
 
+    def check_input_coverage(self, knob_config: dict, hw_info: dict = None) -> dict:
+        """
+        检查单条推理输入是否落在训练特征覆盖范围内。
+
+        返回值只表达可信度，不暴露训练细节给工具调用方。
+        """
+        assert self._fitted, "预处理器未拟合，请先 fit_transform 或 load"
+        if not self.feature_bounds:
+            return {"confidence": "unknown", "hard_ood": False, "near_boundary": False, "features": []}
+
+        values = self.transform(knob_config, hw_info)
+        feature_map = dict(zip(self.feature_names, values))
+        hard = []
+        near = []
+        eps = 1e-9
+        for name, value in feature_map.items():
+            bound = self.feature_bounds.get(name)
+            if not bound:
+                continue
+            v = float(value)
+            lo = float(bound["min"])
+            hi = float(bound["max"])
+            p01 = float(bound["p01"])
+            p99 = float(bound["p99"])
+            if hi - lo <= eps:
+                continue
+            if v < lo - eps or v > hi + eps:
+                hard.append(name)
+            elif not (lo >= 0 and hi <= 1) and (v < p01 - eps or v > p99 + eps):
+                near.append(name)
+
+        confidence = "high"
+        if hard:
+            confidence = "invalid"
+        elif near:
+            confidence = "low"
+
+        return {
+            "confidence": confidence,
+            "hard_ood": bool(hard),
+            "near_boundary": bool(near),
+            "features": hard or near,
+        }
+
     def save(self, output_dir: str):
         """保存预处理器状态"""
         output_path = Path(output_dir)
@@ -494,12 +557,16 @@ class KnobPreprocessor:
             "knob_defaults": self.knob_defaults,
             "feature_names": self.feature_names,
             "varying_knobs": self.varying_knobs,
+            "feature_bounds": self.feature_bounds,
         }
         with open(output_path / "preprocessor.pkl", "wb") as f:
             pickle.dump(state, f)
 
         with open(output_path / "feature_names.json", "w") as f:
             json.dump(self.feature_names, f, indent=2)
+
+        with open(output_path / "feature_bounds.json", "w") as f:
+            json.dump(self.feature_bounds, f, indent=2, ensure_ascii=False)
 
         logger.info(f"预处理器已保存到 {output_path}")
 
@@ -514,6 +581,7 @@ class KnobPreprocessor:
         prep.knob_defaults = state["knob_defaults"]
         prep.feature_names = state["feature_names"]
         prep.varying_knobs = state["varying_knobs"]
+        prep.feature_bounds = state.get("feature_bounds", {})
         prep._fitted = True
         return prep
 

@@ -127,6 +127,18 @@ class CostModel:
         mean, std = self._infer(x.reshape(1, -1))
         return float(np.expm1(mean[0])), float(std[0])
 
+    def check_input_coverage(self, knob_config: dict, hw_info: dict = None) -> dict:
+        """Return whether an input is covered by the training feature range."""
+        coverage = self.preprocessor.check_input_coverage(knob_config, hw_info)
+        if not hw_info:
+            return {
+                "confidence": "invalid",
+                "hard_ood": True,
+                "near_boundary": coverage.get("near_boundary", False),
+                "features": ["hardware"],
+            }
+        return coverage
+
     def predict_batch(self, configs: list, hw_info: dict = None) -> list:
         """批量预测"""
         X = np.array([

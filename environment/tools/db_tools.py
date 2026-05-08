@@ -459,21 +459,56 @@ class SetKnobTool(DBTool):
             accepted[name] = value
         return accepted, rejected
 
+    def _show_knob_value(self, cursor, name: str):
+        try:
+            cursor.execute(f"SHOW {name}")
+            return cursor.fetchone()[0]
+        except Exception:
+            return None
+
     def execute_real(self, args):
         knobs = json.loads(args["knobs"])
 
+        ignored = []
+        failed = []
+        validator = getattr(self, "knob_validator", None)
+        if validator:
+            knobs, validation_failed, ignored = validator.validate(knobs)
+            failed.extend(validation_failed)
+
         # 校验内存类 knob
         knobs, mem_rejected = self._validate_memory_knobs(knobs)
+        failed.extend(mem_rejected)
+
+        if not knobs:
+            return json.dumps(
+                {
+                    "success": [],
+                    "pending_restart": [],
+                    "failed": failed,
+                    "ignored": ignored,
+                    "applied": {},
+                    "pending_restart_values": {},
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
 
         conn = self._get_conn()
         cursor = conn.cursor()
-        success, pending_restart, failed = [], [], list(mem_rejected)
+        success, pending_restart = [], []
+        applied = {}
+        pending_restart_values = {}
         for name, value in knobs.items():
             try:
                 cursor.execute(f"ALTER SYSTEM SET {name} = %s", (str(value),))
                 cursor.execute("SELECT context FROM pg_settings WHERE name = %s", (name,))
                 row = cursor.fetchone()
-                (pending_restart if row and row[0] == "postmaster" else success).append(name)
+                if row and row[0] == "postmaster":
+                    pending_restart.append(name)
+                    pending_restart_values[name] = str(value)
+                else:
+                    success.append(name)
             except Exception as e:
                 failed.append({"name": name, "error": str(e)})
                 conn.rollback()
@@ -482,15 +517,40 @@ class SetKnobTool(DBTool):
                 cursor.execute("SELECT pg_reload_conf()")
             except Exception:
                 pass
+            for name in success:
+                applied[name] = self._show_knob_value(cursor, name) or str(knobs[name])
+                self.env_state[f"knob_{name}"] = applied[name]
+
+        if pending_restart_values:
+            _get_pending_restart_knobs(self.env_state).update(pending_restart_values)
         cursor.close()
         conn.close()
-        return json.dumps({"success": success, "pending_restart": pending_restart, "failed": failed}, indent=2)
+        return json.dumps(
+            {
+                "success": success,
+                "pending_restart": pending_restart,
+                "failed": failed,
+                "ignored": ignored,
+                "applied": applied,
+                "pending_restart_values": pending_restart_values,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     def execute_simulated(self, args):
         knobs = json.loads(args["knobs"])
 
+        ignored = []
+        failed = []
+        validator = getattr(self, "knob_validator", None)
+        if validator:
+            knobs, validation_failed, ignored = validator.validate(knobs)
+            failed.extend(validation_failed)
+
         # 校验内存类 knob
         knobs, mem_rejected = self._validate_memory_knobs(knobs)
+        failed.extend(mem_rejected)
 
         restart_knobs = set(getattr(self, "restart_knobs", set()))
         active_knobs = {}
@@ -511,13 +571,16 @@ class SetKnobTool(DBTool):
         pending_state = _get_pending_restart_knobs(self.env_state)
         pending_state.update(pending_restart)
 
-        failed = list(mem_rejected)
         return json.dumps(
             {
                 "success": list(active_knobs.keys()),
                 "pending_restart": list(pending_restart.keys()),
                 "failed": failed,
+                "ignored": ignored,
+                "applied": active_knobs,
+                "pending_restart_values": pending_restart,
             },
+            ensure_ascii=False,
             indent=2,
         )
 
@@ -534,12 +597,33 @@ class RestartPGTool(DBTool):
     def execute_real(self, args):
         data_dir = self.config.get("tools.database.data_dir")
         timeout = self.config.get("tools.pg_control.restart_timeout", 30)
+        pending_knobs = dict(_get_pending_restart_knobs(self.env_state))
         try:
             start = time.time()
             prefix = "sudo " if _SUDO_AVAILABLE else ""
             cmd = f"pg_ctl -D {data_dir} restart -w -t {timeout}" if data_dir else f"{prefix}systemctl restart postgresql"
             subprocess.run(cmd, shell=True, capture_output=True, timeout=timeout)
-            return json.dumps({"success": True, "duration_seconds": round(time.time() - start, 1)})
+            applied = {}
+            if pending_knobs:
+                try:
+                    conn = self._get_conn()
+                    cursor = conn.cursor()
+                    for name in pending_knobs:
+                        try:
+                            cursor.execute(f"SHOW {name}")
+                            applied[name] = cursor.fetchone()[0]
+                            self.env_state[f"knob_{name}"] = applied[name]
+                        except Exception:
+                            applied[name] = pending_knobs[name]
+                    cursor.close()
+                    conn.close()
+                except Exception:
+                    applied = dict(pending_knobs)
+                _get_pending_restart_knobs(self.env_state).clear()
+            return json.dumps(
+                {"success": True, "duration_seconds": round(time.time() - start, 1), "applied": applied},
+                ensure_ascii=False,
+            )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
@@ -550,7 +634,7 @@ class RestartPGTool(DBTool):
         for k, v in pending_knobs.items():
             self.env_state[f"knob_{k}"] = v
         _get_pending_restart_knobs(self.env_state).clear()
-        return json.dumps({"success": True, "duration_seconds": 0})
+        return json.dumps({"success": True, "duration_seconds": 0, "applied": pending_knobs}, ensure_ascii=False)
 
 
 class ReloadPGTool(DBTool):
@@ -616,6 +700,9 @@ class ResetConfigTool(DBTool):
 # ==================== 验证类 ====================
 
 class PredictPerformanceTool(DBTool):
+    LOW_CONFIDENCE_IMPROVEMENT_CAP = 25.0
+    IMPROVEMENT_CAP = 200.0
+
     def __init__(self, cost_model=None, **kwargs):
         super().__init__(
             name="predict_performance",
@@ -625,6 +712,40 @@ class PredictPerformanceTool(DBTool):
         )
         self.cost_model = cost_model
         self._original_knobs_snapshot = {}  # reset 时由 DBToolEnv 注入，保存未修改的原始 knob
+
+    def _check_prediction_coverage(self, current_knobs: dict, baseline_knobs: dict, hw_info: dict) -> dict:
+        checker = getattr(self.cost_model, "check_input_coverage", None)
+        if not checker:
+            return {"confidence": "unknown", "hard_ood": False, "near_boundary": False}
+
+        current = checker(current_knobs, hw_info)
+        baseline = checker(baseline_knobs, hw_info)
+        hard = bool(current.get("hard_ood") or baseline.get("hard_ood"))
+        near = bool(current.get("near_boundary") or baseline.get("near_boundary"))
+        confidence = "high"
+        if hard:
+            confidence = "invalid"
+        elif near:
+            confidence = "low"
+        elif current.get("confidence") == "unknown" or baseline.get("confidence") == "unknown":
+            confidence = "unknown"
+        return {"confidence": confidence, "hard_ood": hard, "near_boundary": near}
+
+    def _prediction_warnings(self, confidence: str) -> list[str]:
+        if confidence == "invalid":
+            return ["当前配置超出已观测基准覆盖范围，预测不可靠，请选择更保守的参数或使用真实 benchmark 验证"]
+        if confidence == "low":
+            return ["当前配置接近已观测基准覆盖边界，预测结果已按保守方式处理"]
+        if confidence == "unknown":
+            return ["当前 checkpoint 缺少覆盖范围信息，预测置信度未知"]
+        return []
+
+    def _pending_restart_warning(self) -> str | None:
+        pending_knobs = _get_pending_restart_knobs(self.env_state)
+        if not pending_knobs:
+            return None
+        names = ", ".join(sorted(pending_knobs))
+        return f"以下参数需要重启 PostgreSQL 后才会生效，本次预测未使用这些待生效值: {names}"
 
     def execute_real(self, args):
         return json.dumps({"error": "predict_performance only available in train mode"})
@@ -658,16 +779,27 @@ class PredictPerformanceTool(DBTool):
         except Exception as e:
             return json.dumps({"error": f"prediction failed: {str(e)}"})
 
-        IMPROVEMENT_CAP = 200.0  # 超过 200% 视为模型幻觉，截断
-
         raw_improvement = (pred_tps - pred_baseline) / max(pred_baseline, 1) * 100
-        capped_improvement = min(IMPROVEMENT_CAP, max(0, raw_improvement))
+        capped_improvement = min(self.IMPROVEMENT_CAP, max(0, raw_improvement))
+
+        coverage = self._check_prediction_coverage(current_knobs, baseline_knobs, hw_info)
+        confidence = coverage["confidence"]
+        if confidence == "invalid":
+            capped_improvement = 0.0
+        elif confidence == "low":
+            capped_improvement = min(capped_improvement, self.LOW_CONFIDENCE_IMPROVEMENT_CAP)
+        warnings = self._prediction_warnings(confidence)
+        pending_warning = self._pending_restart_warning()
+        if pending_warning:
+            warnings.append(pending_warning)
 
         return json.dumps({
             "predicted_tps":     round(pred_tps, 1),
             "baseline_tps":      round(pred_baseline, 1),
             "actual_tps":        round(float(self.scenario.workload.get("tps_current", 0) or 0) if self.scenario else 0, 1),
             "improvement_pct":   round(capped_improvement, 2),
+            "confidence":        confidence,
+            "warnings":          warnings,
         }, indent=2)
 
     def calculate_reward(self, args, result):

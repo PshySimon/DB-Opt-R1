@@ -184,13 +184,13 @@ knobs:
 
   wal_compression:
     type: enum
-    values: ["off", "on"]
+    values: ["off", "on", "pglz", "lz4", "zstd"]
     default: "off"
     restart: false
 
   synchronous_commit:
     type: enum
-    values: ["on", "off", "local", "remote_write"]
+    values: ["on", "off", "local", "remote_write", "remote_apply"]
     default: "on"
     restart: false
 
