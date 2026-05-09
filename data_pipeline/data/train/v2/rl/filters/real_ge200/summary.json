@@ -1,0 +1,46 @@
+{
+  "criterion": "remove rows whose env_sample_idx appears in RLVR real-measured improvement >= 200% set",
+  "bad_env_count": 562,
+  "valid_env_count": 992,
+  "real_valid_pairs": 5322,
+  "real_ge200_pairs": 2420,
+  "versions": {
+    "frontier_1q": {
+      "path": "data_pipeline/data/train/v2/rl/rl_frontier_1q.jsonl",
+      "rows": 4156,
+      "bucket_counts": {
+        "frontier": 4156
+      },
+      "remove_rows": 562,
+      "remain_rows": 3594,
+      "removed_rate": 0.13522617901828682,
+      "bad_indices_path": "eval_results/rlvr_filter/rtx3k_filter_train_full_x24_4gpu_20260506_161329/frontier_1q_bad_row_indices_real_ge200.txt",
+      "clean_indices_path": "eval_results/rlvr_filter/rtx3k_filter_train_full_x24_4gpu_20260506_161329/frontier_1q_clean_row_indices_no_real_ge200.txt"
+    },
+    "hard_1q": {
+      "path": "data_pipeline/data/train/v2/rl/rl_hard_1q.jsonl",
+      "rows": 4557,
+      "bucket_counts": {
+        "hard_but_learnable": 4557
+      },
+      "remove_rows": 0,
+      "remain_rows": 4557,
+      "removed_rate": 0.0,
+      "bad_indices_path": "eval_results/rlvr_filter/rtx3k_filter_train_full_x24_4gpu_20260506_161329/hard_1q_bad_row_indices_real_ge200.txt",
+      "clean_indices_path": "eval_results/rlvr_filter/rtx3k_filter_train_full_x24_4gpu_20260506_161329/hard_1q_clean_row_indices_no_real_ge200.txt"
+    },
+    "frontier_plus_hard_1q": {
+      "path": "data_pipeline/data/train/v2/rl/rl_frontier_plus_hard_1q.jsonl",
+      "rows": 8713,
+      "bucket_counts": {
+        "hard_but_learnable": 4557,
+        "frontier": 4156
+      },
+      "remove_rows": 562,
+      "remain_rows": 8151,
+      "removed_rate": 0.06450131986686561,
+      "bad_indices_path": "eval_results/rlvr_filter/rtx3k_filter_train_full_x24_4gpu_20260506_161329/frontier_plus_hard_1q_bad_row_indices_real_ge200.txt",
+      "clean_indices_path": "eval_results/rlvr_filter/rtx3k_filter_train_full_x24_4gpu_20260506_161329/frontier_plus_hard_1q_clean_row_indices_no_real_ge200.txt"
+    }
+  }
+}

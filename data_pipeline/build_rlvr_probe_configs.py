@@ -19,6 +19,7 @@ from typing import Any
 import ijson
 
 from core.db.knob_validator import KnobValidator
+from training.reward_score import extract_best_predict_from_messages
 
 
 DEFAULT_TRAJECTORIES = (
@@ -83,16 +84,11 @@ def _load_cap_records(path: Path, threshold: float, validator: KnobValidator) ->
             if improvement < threshold:
                 continue
 
-            final_knobs = _normalise_knobs(row.get("final_knobs") or {}, validator)
-            if not final_knobs:
-                # Fallback for older rows whose top-level final_knobs is absent.
-                attempted = {}
-                for item in (row.get("tracking") or {}).get("tool_history") or []:
-                    if item.get("tool") == "set_knob":
-                        attempted.update(_parse_set_knobs(item.get("args") or {}))
-                final_knobs = _normalise_knobs(attempted, validator)
-            if not final_knobs:
+            best_predict = extract_best_predict_from_messages(row.get("messages") or [])
+            best_knobs = _normalise_knobs((best_predict or {}).get("knobs") or {}, validator)
+            if not best_knobs:
                 continue
+            best_payload = (best_predict or {}).get("payload") or {}
 
             records.append(
                 {
@@ -101,10 +97,10 @@ def _load_cap_records(path: Path, threshold: float, validator: KnobValidator) ->
                     "orig_env_sample_idx": row.get("orig_env_sample_idx"),
                     "rollout_idx": row.get("rollout_idx"),
                     "improvement_pct": improvement,
-                    "predicted_tps": row.get("predicted_tps"),
-                    "baseline_tps": row.get("baseline_tps"),
-                    "actual_tps": row.get("actual_tps"),
-                    "knobs": final_knobs,
+                    "predicted_tps": best_payload.get("predicted_tps", row.get("predicted_tps")),
+                    "baseline_tps": best_payload.get("baseline_tps", row.get("baseline_tps")),
+                    "actual_tps": best_payload.get("actual_tps", row.get("actual_tps")),
+                    "knobs": best_knobs,
                 }
             )
     return records

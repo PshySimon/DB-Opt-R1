@@ -22,7 +22,7 @@ from training.reward_score import (
     compute_score_format,
     compute_score_answer,
     compute_score_format_answer,
-    extract_final_knobs,
+    extract_best_predict_knobs,
 )
 
 
@@ -188,7 +188,7 @@ class DBRewardManager:
 
             if already_print_data_sources[data_source] < self.num_examine:
                 already_print_data_sources[data_source] += 1
-                extracted_knobs = extract_final_knobs(sequences_str)
+                extracted_knobs = extract_best_predict_knobs(sequences_str)
                 tool_calls = re.findall(r'<tool_call>(.*?)</tool_call>', response_str, re.DOTALL)
                 print("[extracted_knobs]", extracted_knobs)
                 print("[answer_score]", answer_score)

@@ -110,13 +110,44 @@ def iter_candidate_knob_configs(
             yield candidate
 
 
-def build_solution(knobs: dict[str, object]) -> str:
-    return (
+def build_solution(knobs: dict[str, object], prediction: dict[str, object] | None = None) -> str:
+    solution = (
         "<|im_start|>assistant\n"
         "<think>Apply a candidate PostgreSQL configuration and verify the expected performance uplift.</think>\n"
         f'<tool_call>{{"name":"set_knob","arguments":{{"knobs":"{json.dumps(knobs).replace(chr(34), chr(92) + chr(34))}"}}}}</tool_call>\n'
         "<|im_end|>"
     )
+    if prediction is None:
+        return solution
+    return (
+        solution
+        + "<|im_start|>user\n"
+        + '<tool_response>{"success":[],"pending_restart":[],"failed":[]}</tool_response>'
+        + "<|im_end|>"
+        + "<|im_start|>assistant\n"
+        + "<think>Verify the candidate configuration.</think>\n"
+        + '<tool_call>{"name":"predict_performance","arguments":{}}</tool_call>\n'
+        + "<|im_end|>"
+        + "<|im_start|>user\n"
+        + f"<tool_response>{json.dumps(prediction)}</tool_response>"
+        + "<|im_end|>"
+    )
+
+
+def predict_payload_for_knobs(knobs: dict[str, object], ground_truth: dict, cost_model, knob_space_path: str) -> dict:
+    knob_space = KnobSpace(knob_space_path)
+    hardware = ground_truth.get("hardware", {})
+    baseline_knobs = knob_space.get_default_config()
+    baseline_tps = cost_model.predict(baseline_knobs, hardware)
+    predicted_tps = cost_model.predict(knobs, hardware)
+    raw_improvement = (predicted_tps - baseline_tps) / max(baseline_tps, 1) * 100
+    improvement_pct = min(200.0, max(0.0, raw_improvement))
+    return {
+        "predicted_tps": round(predicted_tps, 1),
+        "baseline_tps": round(baseline_tps, 1),
+        "actual_tps": 0.0,
+        "improvement_pct": round(improvement_pct, 2),
+    }
 
 
 def find_positive_knob_config(
@@ -134,8 +165,9 @@ def find_positive_knob_config(
         max_random_candidates=max_random_candidates,
         seed=seed,
     ):
+        prediction = predict_payload_for_knobs(knobs, ground_truth, cost_model, knob_space_path)
         score = compute_score_answer(
-            solution_str=build_solution(knobs),
+            solution_str=build_solution(knobs, prediction),
             ground_truth=ground_truth,
             cost_model=cost_model,
         )

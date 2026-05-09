@@ -11,11 +11,7 @@ DB 调优 Reward 计算
 
 import re
 import json
-import math
-import logging
 from typing import Optional, Dict, Any, List
-
-logger = logging.getLogger(__name__)
 
 
 TERMINATION_REASON_ADJUSTMENTS = {
@@ -217,6 +213,154 @@ def extract_final_knobs(solution_str: str) -> Optional[Dict[str, str]]:
     return knobs if knobs else None
 
 
+def _parse_set_knobs(args: Any) -> Dict[str, str]:
+    if not isinstance(args, dict):
+        return {}
+    knob_blob = args.get("knobs")
+    if knob_blob:
+        if isinstance(knob_blob, str):
+            try:
+                parsed_knobs = json.loads(knob_blob)
+            except json.JSONDecodeError:
+                parsed_knobs = {}
+        elif isinstance(knob_blob, dict):
+            parsed_knobs = knob_blob
+        else:
+            parsed_knobs = {}
+        return {
+            str(knob_name): str(value)
+            for knob_name, value in parsed_knobs.items()
+            if knob_name and value is not None
+        }
+
+    knob_name = args.get("knob_name")
+    value = args.get("value")
+    if knob_name and value is not None:
+        return {str(knob_name): str(value)}
+    return {}
+
+
+def _payload_from_tool_response(content: str) -> Optional[dict]:
+    try:
+        parsed = json.loads(content)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+
+    match = re.search(
+        r"<tool_response>\n?(.*?)\n?</tool_response>",
+        content,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(1))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _iter_tool_events_from_messages(messages: List[dict]):
+    for msg in messages or []:
+        role = msg.get("role")
+        content = msg.get("content") or ""
+        if role == "assistant":
+            for match in re.finditer(r"<tool_call>(.*?)</tool_call>", content, re.DOTALL):
+                try:
+                    data = json.loads(match.group(1).strip())
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict):
+                    yield "call", data
+        elif role in {"tool", "user"}:
+            payload = _payload_from_tool_response(content)
+            if payload is not None:
+                yield "response", payload
+
+
+def _iter_tool_events_from_solution(solution_str: str):
+    if not solution_str:
+        return
+    pattern = re.compile(
+        r"<tool_call>(.*?)</tool_call>|<tool_response>\n?(.*?)\n?</tool_response>",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(solution_str):
+        if match.group(1) is not None:
+            try:
+                data = json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                yield "call", data
+        else:
+            try:
+                payload = json.loads(match.group(2))
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                yield "response", payload
+
+
+def _is_predict_payload(payload: dict) -> bool:
+    return {"predicted_tps", "baseline_tps", "improvement_pct"} <= payload.keys()
+
+
+def _best_predict_key(payload: dict) -> tuple[float, float]:
+    try:
+        predicted_tps = float(payload.get("predicted_tps") or 0.0)
+    except Exception:
+        predicted_tps = 0.0
+    try:
+        improvement_pct = float(payload.get("improvement_pct") or 0.0)
+    except Exception:
+        improvement_pct = 0.0
+    return predicted_tps, improvement_pct
+
+
+def _extract_best_predict_from_events(events) -> Optional[Dict[str, Any]]:
+    current_knobs: Dict[str, str] = {}
+    best: Optional[Dict[str, Any]] = None
+    best_key: Optional[tuple[float, float]] = None
+
+    for event_type, data in events:
+        if event_type == "call" and data.get("name") == "set_knob":
+            current_knobs.update(_parse_set_knobs(data.get("arguments", {})))
+            continue
+
+        if event_type != "response" or not _is_predict_payload(data):
+            continue
+
+        key = _best_predict_key(data)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = {
+                "knobs": dict(current_knobs),
+                "payload": dict(data),
+            }
+
+    return best
+
+
+def extract_best_predict_from_messages(messages: List[dict]) -> Optional[Dict[str, Any]]:
+    """Return the knob snapshot paired with the best predict_performance result."""
+    return _extract_best_predict_from_events(_iter_tool_events_from_messages(messages))
+
+
+def extract_best_predict_from_solution(solution_str: str) -> Optional[Dict[str, Any]]:
+    """Return the knob snapshot paired with the best predict_performance result."""
+    return _extract_best_predict_from_events(_iter_tool_events_from_solution(solution_str))
+
+
+def extract_best_predict_knobs(solution_str: str) -> Optional[Dict[str, str]]:
+    best = extract_best_predict_from_solution(solution_str)
+    if not best:
+        return None
+    knobs = best.get("knobs") or {}
+    return knobs if knobs else None
+
+
 def compute_score_answer(
     solution_str: str,
     ground_truth: dict,
@@ -228,48 +372,25 @@ def compute_score_answer(
     Args:
         solution_str: 模型输出的完整轨迹
         ground_truth: 包含 baseline_tps、hardware 等场景信息
-        cost_model: CostModel 实例（predict 接口）
+        cost_model: 保留为兼容旧调用；当前 reward 直接复用轨迹里的 predict_performance 结果
 
     Returns:
         float: -2.5 ~ 10.0
         - 正值：TPS 有改善（线性放大 ×5）
-        - 负值：TPS 劣化（clip 到 -0.5 后 ×5 = -2.5）
-        - 0：无法提取 knob 或无 cost_model
+        - 0：无法提取 best predict 结果，或没有对应 knob
     """
-    if cost_model is None:
+    best = extract_best_predict_from_solution(solution_str)
+    if not best or not (best.get("knobs") or {}):
         return 0.0
 
-    # 提取最终 knob 配置
-    knobs = extract_final_knobs(solution_str)
-    if not knobs:
-        return 0.0
-
-    # Cost Model 预测
+    payload = best.get("payload") or {}
     try:
-        hardware = ground_truth.get("hardware", {})
-        
-        from core.db.knob_space import KnobSpace
-        ks = KnobSpace("configs/knob_space.yaml")
-        default_knobs = ks.get_default_config()
-        baseline_tps = cost_model.predict(default_knobs, hardware)
-
-        if baseline_tps <= 0:
-            return 0.0
-
-        predicted_tps = cost_model.predict(knobs, hardware)
-
-        # 计算改善比例，允许负值以惩罚劣化
-        improvement = (predicted_tps - baseline_tps) / baseline_tps
-        improvement = min(2.0, max(-0.5, improvement))
-
-        # 线性放大，让 answer 信号主导 GRPO 组内方差
-        score = improvement * 5
-
-        return score
-
-    except Exception as e:
-        logger.warning(f"Cost Model 预测失败: {e}")
+        improvement_pct = float(payload.get("improvement_pct") or 0.0)
+    except Exception:
         return 0.0
+
+    improvement = min(200.0, max(0.0, improvement_pct)) / 100.0
+    return improvement * 5
 
 
 def compute_termination_adjustment(termination_reason: Optional[str]) -> float:
