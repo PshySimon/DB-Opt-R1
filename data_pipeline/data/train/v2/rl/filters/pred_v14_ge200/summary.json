@@ -1,0 +1,58 @@
+{
+  "inputs": {
+    "trajectories": "eval_results/rlvr_filter/rtx3k_filter_train_full_x24_4gpu_20260506_161329/all_sampled_trajectories.jsonl",
+    "scenarios": "data_pipeline/data/scenarios/collected/collected_8c16g_hdd_20k.json",
+    "checkpoint": "cost_model/checkpoints/v14_lgbm",
+    "threshold": 200.0,
+    "threshold_op": "ge"
+  },
+  "counts": {
+    "records": 89783,
+    "validator_failed_entries": 1126,
+    "validator_ignored_entries": 91,
+    "no_best_predict": 935,
+    "old_threshold_trajectories": 3762,
+    "no_best_knobs": 156,
+    "records_with_best_knobs": 88692,
+    "unique_envs": 3741,
+    "unique_current_env_knob_pairs": 57281,
+    "old_train_rows_at_threshold": 712,
+    "pred_threshold_trajectories": 3718,
+    "pred_train_rows_at_threshold": 705,
+    "pred_gt25_trajectories": 4168,
+    "pred_gt50_trajectories": 4108,
+    "pred_ge200_trajectories": 3718,
+    "pred_le0_trajectories": 43601,
+    "by_workload_at_threshold": {
+      "write_heavy": 1757,
+      "mixed": 1370,
+      "high_concurrency": 591
+    }
+  },
+  "filtered_outputs": {
+    "rl_frontier_1q": {
+      "src": "data_pipeline/data/train/v2/rl/rl_frontier_1q.jsonl",
+      "dst": "data_pipeline/data/train/v2/rl/rl_frontier_1q_no_pred_v14_ge200.jsonl",
+      "total": 4156,
+      "removed": 705,
+      "kept": 3451
+    },
+    "rl_hard_1q": {
+      "src": "data_pipeline/data/train/v2/rl/rl_hard_1q.jsonl",
+      "dst": "data_pipeline/data/train/v2/rl/rl_hard_1q_no_pred_v14_ge200.jsonl",
+      "total": 4557,
+      "removed": 0,
+      "kept": 4557
+    },
+    "rl_frontier_plus_hard_1q": {
+      "src": "data_pipeline/data/train/v2/rl/rl_frontier_plus_hard_1q.jsonl",
+      "dst": "data_pipeline/data/train/v2/rl/rl_frontier_plus_hard_1q_no_pred_v14_ge200.jsonl",
+      "total": 8713,
+      "removed": 705,
+      "kept": 8008
+    }
+  },
+  "artifacts": {
+    "predicted_rollout_records": null
+  }
+}
