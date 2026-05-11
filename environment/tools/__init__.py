@@ -5,6 +5,7 @@ DB 工具环境
 import os
 import json
 import random
+import copy
 import logging
 from pathlib import Path
 from collections.abc import Sequence
@@ -130,6 +131,41 @@ class DBToolEnv(ToolEnv):
         )
         env.scenarios = self.scenarios
         env.dataset = self.dataset
+        env.env_state = copy.deepcopy(self.env_state)
+        env._original_knobs = copy.deepcopy(self._original_knobs)
+        env.last_valid_config = copy.deepcopy(self.last_valid_config)
+
+        env.tool_history = copy.deepcopy(self.tool_history)
+        env.rewards = copy.deepcopy(self.rewards)
+        env.steps_taken = self.steps_taken
+        env._actions = copy.deepcopy(self._actions)
+        env._actions_valid = copy.deepcopy(self._actions_valid)
+        env._actions_effective = copy.deepcopy(self._actions_effective)
+        env.termination_reason = self.termination_reason
+        env.invalid_tool_call_streak = self.invalid_tool_call_streak
+        env.max_invalid_tool_call_streak = self.max_invalid_tool_call_streak
+        env.tool_execution_error_streak = self.tool_execution_error_streak
+        env.max_tool_execution_error_streak = self.max_tool_execution_error_streak
+        env.predict_calls_used = self.predict_calls_used
+        env.max_predict_calls = self.max_predict_calls
+        env.same_tool_same_args_streak = self.same_tool_same_args_streak
+        env.max_same_tool_same_args_streak = self.max_same_tool_same_args_streak
+        env.last_tool_fingerprint = self.last_tool_fingerprint
+        env.last_valid_tool_call = copy.deepcopy(self.last_valid_tool_call)
+
+        current_scenario = None
+        for tool in self.tools:
+            if getattr(tool, "scenario", None) is not None:
+                current_scenario = copy.deepcopy(tool.scenario)
+                break
+
+        for tool in env.tools:
+            tool.env_state = env.env_state
+            tool.scenario = current_scenario
+            if isinstance(tool, ResetConfigTool):
+                tool._original_knobs = dict(env._original_knobs)
+            if hasattr(tool, "_original_knobs_snapshot"):
+                tool._original_knobs_snapshot = dict(env._original_knobs)
         return env
 
     @staticmethod

@@ -74,6 +74,30 @@ class DBToolEnvCompatibilityTest(unittest.TestCase):
         self.assertEqual(copied.scenarios, env.scenarios)
         self.assertEqual(copied.max_turns, env.max_turns)
 
+    def test_db_tool_env_copy_preserves_current_episode_state_for_padding(self):
+        env = self._make_train_env()
+        env.step(
+            '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"work_mem\\": \\"32MB\\"}"}}</tool_call>'
+        )
+
+        copied = env.copy()
+        predict_result, _, _, _ = copied.step(
+            '<tool_call>{"name":"predict_performance","arguments":{}}</tool_call>'
+        )
+        payload = json.loads(predict_result)
+
+        self.assertNotIn("error", payload)
+        self.assertEqual(copied.env_state["hw_total_memory_gb"], 16)
+        self.assertEqual(copied.env_state["knob_work_mem"], "32MB")
+        self.assertEqual(copied.tool_map["predict_performance"].scenario.hardware["cpu_count"], 8)
+
+        baseline_knobs, baseline_hw = copied.cost_model.calls[-2]
+        current_knobs, current_hw = copied.cost_model.calls[-1]
+        self.assertEqual(baseline_hw["total_memory_gb"], 16)
+        self.assertEqual(current_hw["cpu_count"], 8)
+        self.assertEqual(baseline_knobs["work_mem"], "4MB")
+        self.assertEqual(current_knobs["work_mem"], "32MB")
+
     def test_load_scenarios_accepts_hydra_listconfig(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
