@@ -6,8 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
 SFT_CHECKPOINT="${SFT_CHECKPOINT:-/root/workspace/DB-Opt-R1/model_save/experiments/v3/sft/llamafactory/full/full_v3_b_step_no_think_history_3k_match_a800_batch_noeval/checkpoint-633}"
-TRAIN_DATA="${TRAIN_DATA:-/root/workspace/DB-Opt-R1/datasets/rl_v2/frontier_1q_no_pred_v14_ge200/train.parquet}"
-VAL_DATA="${VAL_DATA:-/root/workspace/DB-Opt-R1/datasets/rl_v2/frontier_1q_no_pred_v14_ge200/validation.parquet}"
+TRAIN_JSONL="${TRAIN_JSONL:-/root/workspace/DB-Opt-R1/data_pipeline/data/train/v2/rl/rl_frontier_1q_no_pred_v10_ge200.jsonl}"
+DATA_DIR="${DATA_DIR:-/root/workspace/DB-Opt-R1/datasets/rl_v2/frontier_1q_no_pred_v10_ge200}"
+TRAIN_DATA="${TRAIN_DATA:-$DATA_DIR/train.parquet}"
+VAL_DATA="${VAL_DATA:-$DATA_DIR/validation.parquet}"
 SCENARIO_FILES="${SCENARIO_FILES:-/root/workspace/DB-Opt-R1/data_pipeline/data/scenarios/collected/collected_8c16g_hdd_20k.json}"
 SCENARIO_SOURCE_FILTER="${SCENARIO_SOURCE_FILTER:-llm_generated}"
 COST_MODEL_PATH="${COST_MODEL_PATH:-/root/workspace/DB-Opt-R1/cost_model/checkpoints/v10_lgbm}"
@@ -35,6 +37,9 @@ TP_SERVE="${TP_SERVE:-1}"
 KEEP_MERGED="${KEEP_MERGED:-0}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
 EVAL_PYTHON="${EVAL_PYTHON:-/root/private_data/workspace/conda_envs/dbopt-eval/bin/python}"
+RL_VAL_RATIO="${RL_VAL_RATIO:-0.1}"
+RL_DATA_SEED="${RL_DATA_SEED:-42}"
+FORCE_REBUILD_DATA="${FORCE_REBUILD_DATA:-false}"
 
 N_GPUS="${N_GPUS:-4}"
 CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3}"
@@ -70,6 +75,22 @@ cleanup() {
   stop_vllm
 }
 trap cleanup EXIT
+
+prepare_training_data() {
+  if [ "$FORCE_REBUILD_DATA" = "true" ] || [ ! -f "$TRAIN_DATA" ] || [ ! -f "$VAL_DATA" ]; then
+    echo "[segment] build GRPO parquet: $DATA_DIR"
+    test -f "$TRAIN_JSONL"
+    mkdir -p "$DATA_DIR"
+    PYTHONPATH="$PROJECT_ROOT" \
+    python -m data_pipeline.preprocess_grpo \
+      --input-files "$TRAIN_JSONL" \
+      --scenarios "$SCENARIO_FILES" \
+      --output-dir "$DATA_DIR" \
+      --val-ratio "$RL_VAL_RATIO" \
+      --seed "$RL_DATA_SEED" \
+      --questions-per-scene 1
+  fi
+}
 
 wait_for_vllm() {
   local port="$1"
@@ -227,10 +248,14 @@ echo " segmented GRPO LoRA train + eval"
 echo " RUN_ID=$RUN_ID"
 echo " OUTPUT_DIR=$OUTPUT_DIR"
 echo " EVAL_ROOT=$EVAL_ROOT"
+echo " TRAIN_JSONL=$TRAIN_JSONL"
+echo " TRAIN_DATA=$TRAIN_DATA"
 echo " COST_MODEL_PATH=$COST_MODEL_PATH"
 echo " DBOPT_BLOCK_SYNC_COMMIT=1"
 echo " steps: $START_STEP..$END_STEP / $STEP_INTERVAL"
 echo "============================================"
+
+prepare_training_data
 
 step="$START_STEP"
 while [ "$step" -le "$END_STEP" ]; do
