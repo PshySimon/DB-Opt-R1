@@ -2,6 +2,7 @@ import unittest
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from omegaconf import OmegaConf
 
@@ -263,6 +264,22 @@ class DBToolEnvCompatibilityTest(unittest.TestCase):
         self.assertEqual(payload["success"], [])
         self.assertEqual(payload["failed"][0]["name"], "synchronous_commit")
         self.assertNotIn("knob_synchronous_commit", env.env_state)
+
+    def test_synchronous_commit_can_be_blocked_for_simulated_eval(self):
+        env = self._make_train_env()
+
+        with patch.dict("os.environ", {"DBOPT_BLOCK_SYNC_COMMIT": "1"}):
+            result, _, _, _ = env.step(
+                '<tool_call>{"name":"set_knob","arguments":{"knobs":"{\\"synchronous_commit\\": \\"off\\", \\"work_mem\\": \\"32MB\\"}"}}</tool_call>'
+            )
+        payload = json.loads(result)
+
+        self.assertEqual(payload["success"], ["work_mem"])
+        self.assertEqual(payload["applied"], {"work_mem": "32MB"})
+        self.assertEqual(payload["ignored"][0]["name"], "synchronous_commit")
+        self.assertIn("事务提交持久性", payload["ignored"][0]["warning"])
+        self.assertNotIn("knob_synchronous_commit", env.env_state)
+        self.assertNotIn("synchronous_commit", env.tools[0].scenario.knobs)
 
     def test_time_value_is_validated_against_pg_range(self):
         env = self._make_train_env()

@@ -459,6 +459,27 @@ class SetKnobTool(DBTool):
             accepted[name] = value
         return accepted, rejected
 
+    def _filter_blocked_semantic_knobs(self, knobs: dict) -> tuple[dict, list[dict]]:
+        """Optionally block knobs whose semantics change durability, not just performance."""
+        if os.environ.get("DBOPT_BLOCK_SYNC_COMMIT", "").lower() not in {"1", "true", "yes", "on"}:
+            return knobs, []
+
+        if "synchronous_commit" not in knobs:
+            return knobs, []
+
+        filtered = dict(knobs)
+        value = filtered.pop("synchronous_commit")
+        return filtered, [
+            {
+                "name": "synchronous_commit",
+                "value": str(value),
+                "warning": (
+                    "该参数会改变事务提交持久性语义；当前评估/模拟环境禁用该修改，"
+                    "保持原配置不变"
+                ),
+            }
+        ]
+
     def _show_knob_value(self, cursor, name: str):
         try:
             cursor.execute(f"SHOW {name}")
@@ -475,6 +496,9 @@ class SetKnobTool(DBTool):
         if validator:
             knobs, validation_failed, ignored = validator.validate(knobs)
             failed.extend(validation_failed)
+
+        knobs, blocked = self._filter_blocked_semantic_knobs(knobs)
+        ignored.extend(blocked)
 
         # 校验内存类 knob
         knobs, mem_rejected = self._validate_memory_knobs(knobs)
@@ -547,6 +571,9 @@ class SetKnobTool(DBTool):
         if validator:
             knobs, validation_failed, ignored = validator.validate(knobs)
             failed.extend(validation_failed)
+
+        knobs, blocked = self._filter_blocked_semantic_knobs(knobs)
+        ignored.extend(blocked)
 
         # 校验内存类 knob
         knobs, mem_rejected = self._validate_memory_knobs(knobs)
