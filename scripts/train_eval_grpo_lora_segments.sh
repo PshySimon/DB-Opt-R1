@@ -36,6 +36,7 @@ MAX_MODEL_LEN_SERVE="${MAX_MODEL_LEN_SERVE:-16384}"
 KEEP_MERGED="${KEEP_MERGED:-0}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
 EVAL_PYTHON="${EVAL_PYTHON:-/root/private_data/workspace/conda_envs/dbopt-eval/bin/python}"
+VLLM_READY_TIMEOUT="${VLLM_READY_TIMEOUT:-900}"
 RL_VAL_RATIO="${RL_VAL_RATIO:-0.1}"
 RL_DATA_SEED="${RL_DATA_SEED:-42}"
 FORCE_REBUILD_DATA="${FORCE_REBUILD_DATA:-false}"
@@ -114,15 +115,17 @@ check_inputs() {
 
 wait_for_vllm() {
   local port="$1"
-  "$EVAL_PYTHON" - "$port" <<'PY'
+  local timeout_s="$2"
+  "$EVAL_PYTHON" - "$port" "$timeout_s" <<'PY'
 import sys
 import time
 import urllib.request
 
 port = sys.argv[1]
+timeout_s = int(sys.argv[2])
 url = f"http://127.0.0.1:{port}/v1/models"
 last_error = None
-for i in range(180):
+for i in range(timeout_s):
     try:
         with urllib.request.urlopen(url, timeout=2) as resp:
             print(f"vLLM ready: {resp.status}")
@@ -237,7 +240,7 @@ eval_checkpoint() {
   SERVED_MODEL_NAME="$model_name" \
   bash "$PROJECT_ROOT/scripts/serve_vllm.sh" &
   VLLM_PID="$!"
-  wait_for_vllm "$PORT"
+  wait_for_vllm "$PORT" "$VLLM_READY_TIMEOUT"
 
   echo "[segment] eval global_step_${step}"
   NO_PROXY=127.0.0.1,localhost,::1,0.0.0.0 \
@@ -286,6 +289,7 @@ echo " TRAIN_MAX_MODEL_LEN=$MAX_MODEL_LEN"
 echo " TRAIN_MAX_RESPONSE_LENGTH=$MAX_RESPONSE_LENGTH"
 echo " SERVE_GPU_UTIL=$GPU_UTIL_SERVE"
 echo " TP_SERVE=$TP_SERVE"
+echo " VLLM_READY_TIMEOUT=$VLLM_READY_TIMEOUT"
 echo " DBOPT_BLOCK_SYNC_COMMIT=1"
 echo " steps: $START_STEP..$END_STEP / $STEP_INTERVAL"
 echo "============================================"
