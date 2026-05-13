@@ -33,7 +33,6 @@ API_MAX_CONCURRENT="${API_MAX_CONCURRENT:-64}"
 PORT="${PORT:-8010}"
 GPU_UTIL_SERVE="${GPU_UTIL_SERVE:-0.85}"
 MAX_MODEL_LEN_SERVE="${MAX_MODEL_LEN_SERVE:-16384}"
-TP_SERVE="${TP_SERVE:-$N_GPUS}"
 KEEP_MERGED="${KEEP_MERGED:-0}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
 EVAL_PYTHON="${EVAL_PYTHON:-/root/private_data/workspace/conda_envs/dbopt-eval/bin/python}"
@@ -43,6 +42,7 @@ FORCE_REBUILD_DATA="${FORCE_REBUILD_DATA:-false}"
 
 N_GPUS="${N_GPUS:-4}"
 CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3}"
+TP_SERVE="${TP_SERVE:-$N_GPUS}"
 LR="${LR:-1e-6}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 N_REPEAT="${N_REPEAT:-8}"
@@ -81,15 +81,27 @@ prepare_training_data() {
     echo "[segment] build GRPO parquet: $DATA_DIR"
     test -f "$TRAIN_JSONL"
     mkdir -p "$DATA_DIR"
+    IFS=',' read -r -a scenario_args <<< "$SCENARIO_FILES"
     PYTHONPATH="$PROJECT_ROOT" \
     python -m data_pipeline.preprocess_grpo \
       --input-files "$TRAIN_JSONL" \
-      --scenarios "$SCENARIO_FILES" \
+      --scenarios "${scenario_args[@]}" \
+      --source-filter "$SCENARIO_SOURCE_FILTER" \
       --output-dir "$DATA_DIR" \
       --val-ratio "$RL_VAL_RATIO" \
       --seed "$RL_DATA_SEED" \
       --questions-per-scene 1
   fi
+}
+
+check_inputs() {
+  test -x "$EVAL_PYTHON"
+  test -d "$SFT_CHECKPOINT"
+  test -f "$TRAIN_JSONL"
+  test -d "$COST_MODEL_PATH"
+  test -f "$KNOB_SPACE"
+  test -f "$EVAL_QUESTIONS"
+  test -f "$EVAL_SCENARIOS"
 }
 
 wait_for_vllm() {
@@ -255,6 +267,7 @@ echo " DBOPT_BLOCK_SYNC_COMMIT=1"
 echo " steps: $START_STEP..$END_STEP / $STEP_INTERVAL"
 echo "============================================"
 
+check_inputs
 prepare_training_data
 
 step="$START_STEP"
