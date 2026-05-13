@@ -99,6 +99,10 @@ class ExperimentScriptsV2Test(unittest.TestCase):
         self.assertIn('LOCAL_LOG_INTERVAL', eval_common)
         self.assertIn('ensure_loopback_no_proxy', eval_common)
         self.assertIn('127.0.0.1,localhost,::1', eval_common)
+        self.assertIn('DBOPT_BLOCK_SYNC_COMMIT=1', eval_common)
+        self.assertIn('verify_sync_commit_blocked', eval_common)
+        self.assertIn('synchronous_commit block check failed', eval_common)
+        self.assertIn('--api-max-concurrent', eval_common)
 
     def test_rl_train_script_references_v2_rl_assets(self):
         wrapper = (TRAIN_RL_DIR / "verl" / "lora" / "train_frontier_1q.sh").read_text(encoding="utf-8")

@@ -17,6 +17,92 @@ ensure_loopback_no_proxy() {
     esac
 }
 
+verify_sync_commit_blocked() {
+    local rollout_file="$1"
+
+    if [ "${BLOCK_SYNC_COMMIT:-true}" != "true" ]; then
+        return 0
+    fi
+
+    python - "$rollout_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+rows = 0
+tried = 0
+ignored = 0
+changed = 0
+examples = []
+
+
+def loads(value):
+    if isinstance(value, dict):
+        return value
+    try:
+        return json.loads(value or "{}")
+    except Exception:
+        return {}
+
+
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        if not line.strip():
+            continue
+        rows += 1
+        row = json.loads(line)
+        history = row.get("tracking", {}).get("tool_history", [])
+
+        initial = {}
+        for item in history:
+            if item.get("tool") == "get_current_config":
+                initial = loads(item.get("result"))
+                break
+        final = row.get("tracking", {}).get("last_valid_config") or {}
+        final_changed = initial.get("synchronous_commit") != final.get("synchronous_commit")
+
+        row_tried = False
+        row_ignored = False
+        for item in history:
+            if item.get("tool") != "set_knob":
+                continue
+            args = item.get("args") or {}
+            knobs = loads(args.get("knobs"))
+            if "synchronous_commit" in knobs:
+                row_tried = True
+            result = loads(item.get("result"))
+            ignored_items = result.get("ignored") or []
+            if any(isinstance(x, dict) and x.get("name") == "synchronous_commit" for x in ignored_items):
+                row_ignored = True
+
+        tried += int(row_tried)
+        ignored += int(row_ignored)
+        changed += int(final_changed)
+        if (row_tried or row_ignored or final_changed) and len(examples) < 5:
+            examples.append(
+                {
+                    "env_sample_idx": row.get("env_sample_idx"),
+                    "initial": initial.get("synchronous_commit"),
+                    "final": final.get("synchronous_commit"),
+                    "tried": row_tried,
+                    "ignored": row_ignored,
+                }
+            )
+
+print(
+    "[sync-commit-check] "
+    f"rows={rows} tried={tried} ignored={ignored} final_changed={changed} "
+    f"examples={examples}"
+)
+
+if tried != ignored or changed:
+    raise SystemExit(
+        "synchronous_commit block check failed: every attempted change must be ignored "
+        "and final synchronous_commit must stay unchanged"
+    )
+PY
+}
+
 run_eval_experiment() {
     local exp_id="$1"
     local run_name="${RUN_NAME:-$(date +%Y%m%d_%H%M%S)}"
@@ -37,7 +123,12 @@ run_eval_experiment() {
     echo "rollouts:   $rollout_dir"
     echo "report:     $report_dir"
     echo "cost model: $cost_model"
+    echo "block sync: ${BLOCK_SYNC_COMMIT:-true}"
     echo "============================================"
+
+    if [ "${BLOCK_SYNC_COMMIT:-true}" = "true" ]; then
+        export DBOPT_BLOCK_SYNC_COMMIT=1
+    fi
 
     if [ -n "${LOCAL_MODEL_PATH:-}" ]; then
         echo "本地模型:   $LOCAL_MODEL_PATH"
@@ -96,6 +187,7 @@ run_eval_experiment() {
             --output-file "sft_trajectories.jsonl"
             --model "$MODEL"
             --parallel "${PARALLEL:-8}"
+            --api-max-concurrent "${API_MAX_CONCURRENT:-${PARALLEL:-8}}"
             --max-turns "${MAX_TURNS:-10}"
         )
 
@@ -112,6 +204,8 @@ run_eval_experiment() {
 
         python "${sampler_args[@]}"
     fi
+
+    verify_sync_commit_blocked "$rollout_dir/sft_trajectories.jsonl"
 
     local report_args=(
         -m evaluate.run
