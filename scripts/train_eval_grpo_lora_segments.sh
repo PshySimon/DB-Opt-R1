@@ -37,6 +37,8 @@ KEEP_MERGED="${KEEP_MERGED:-0}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
 EVAL_PYTHON="${EVAL_PYTHON:-/root/private_data/workspace/conda_envs/dbopt-eval/bin/python}"
 VLLM_READY_TIMEOUT="${VLLM_READY_TIMEOUT:-900}"
+VLLM_SHUTDOWN_TIMEOUT="${VLLM_SHUTDOWN_TIMEOUT:-180}"
+VLLM_MAX_REMAINING_GPU_MEM_MB="${VLLM_MAX_REMAINING_GPU_MEM_MB:-2048}"
 RL_VAL_RATIO="${RL_VAL_RATIO:-0.1}"
 RL_DATA_SEED="${RL_DATA_SEED:-42}"
 FORCE_REBUILD_DATA="${FORCE_REBUILD_DATA:-false}"
@@ -78,6 +80,20 @@ stop_vllm() {
     wait "$VLLM_PID" >/dev/null 2>&1 || true
   fi
   VLLM_PID=""
+
+  pkill -TERM -f "vllm.entrypoints.openai.api_server" >/dev/null 2>&1 || true
+  pkill -TERM -f "vllm.entrypoints.openai" >/dev/null 2>&1 || true
+  pkill -TERM -f "vLLMHttpServer" >/dev/null 2>&1 || true
+  pkill -TERM -f "EngineCore" >/dev/null 2>&1 || true
+  pkill -TERM -f "VllmWorker" >/dev/null 2>&1 || true
+  pkill -TERM -f "Worker_TP" >/dev/null 2>&1 || true
+  sleep 5
+  pkill -KILL -f "vllm.entrypoints.openai.api_server" >/dev/null 2>&1 || true
+  pkill -KILL -f "vllm.entrypoints.openai" >/dev/null 2>&1 || true
+  pkill -KILL -f "vLLMHttpServer" >/dev/null 2>&1 || true
+  pkill -KILL -f "EngineCore" >/dev/null 2>&1 || true
+  pkill -KILL -f "VllmWorker" >/dev/null 2>&1 || true
+  pkill -KILL -f "Worker_TP" >/dev/null 2>&1 || true
 }
 
 cleanup() {
@@ -136,6 +152,59 @@ for i in range(timeout_s):
             print(f"waiting {i}: {type(exc).__name__}: {exc}", flush=True)
         time.sleep(1)
 print(f"vLLM did not become ready: {last_error}", file=sys.stderr)
+raise SystemExit(1)
+PY
+}
+
+wait_for_gpu_release() {
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    return 0
+  fi
+
+  "$EVAL_PYTHON" - "$VLLM_SHUTDOWN_TIMEOUT" "$VLLM_MAX_REMAINING_GPU_MEM_MB" <<'PY'
+import subprocess
+import sys
+import time
+
+timeout_s = int(sys.argv[1])
+threshold_mb = int(sys.argv[2])
+
+def used_memory():
+    try:
+        out = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return []
+    rows = []
+    for line in out.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) >= 2:
+            try:
+                rows.append((parts[0], int(parts[1])))
+            except ValueError:
+                pass
+    return rows
+
+last = []
+for _ in range(timeout_s):
+    rows = used_memory()
+    last = rows
+    if not rows or max(mem for _, mem in rows) <= threshold_mb:
+        if rows:
+            print(f"GPU residual processes below threshold: {rows}")
+        else:
+            print("GPU compute processes cleared")
+        raise SystemExit(0)
+    time.sleep(1)
+
+print(f"GPU memory did not clear within timeout: {last}", file=sys.stderr)
 raise SystemExit(1)
 PY
 }
@@ -230,6 +299,7 @@ eval_checkpoint() {
 
   echo "[segment] serve vLLM for global_step_${step}"
   stop_vllm
+  wait_for_gpu_release
   NO_PROXY=127.0.0.1,localhost,::1,0.0.0.0 \
   PATH="$(dirname "$EVAL_PYTHON"):$PATH" \
   MODEL_PATH="$merged" \
@@ -271,6 +341,7 @@ eval_checkpoint() {
     --skip-bo
 
   stop_vllm
+  wait_for_gpu_release
   echo "[segment] report: $report"
 }
 
@@ -290,6 +361,7 @@ echo " TRAIN_MAX_RESPONSE_LENGTH=$MAX_RESPONSE_LENGTH"
 echo " SERVE_GPU_UTIL=$GPU_UTIL_SERVE"
 echo " TP_SERVE=$TP_SERVE"
 echo " VLLM_READY_TIMEOUT=$VLLM_READY_TIMEOUT"
+echo " VLLM_SHUTDOWN_TIMEOUT=$VLLM_SHUTDOWN_TIMEOUT"
 echo " DBOPT_BLOCK_SYNC_COMMIT=1"
 echo " steps: $START_STEP..$END_STEP / $STEP_INTERVAL"
 echo "============================================"
