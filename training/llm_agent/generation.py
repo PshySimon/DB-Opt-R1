@@ -111,6 +111,22 @@ class ToolGenerationManager:
             yield value
 
     @classmethod
+    def _iter_preview_values(cls, value: Any):
+        if isinstance(value, np.ndarray):
+            for item in value.reshape(-1):
+                yield from cls._iter_preview_values(item)
+            return
+        if isinstance(value, torch.Tensor) and value.numel() != 1:
+            for item in value.detach().cpu().reshape(-1):
+                yield from cls._iter_preview_values(item)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                yield from cls._iter_preview_values(item)
+            return
+        yield value
+
+    @classmethod
     def _collect_rollout_weight_versions(cls, gen_output: DataProto) -> Dict[str, List[int]]:
         """Collect rollout weight-version fields returned by async vLLM servers."""
         non_tensor_batch = getattr(gen_output, "non_tensor_batch", {}) or {}
@@ -120,9 +136,14 @@ class ToolGenerationManager:
             values = []
             if key in non_tensor_batch:
                 for item in cls._iter_flat_values(non_tensor_batch[key]):
-                    coerced = cls._coerce_optional_int(item)
-                    if coerced is not None:
-                        values.append(coerced)
+                    if isinstance(item, dict):
+                        coerced = cls._coerce_optional_int(item.get(key))
+                        if coerced is not None:
+                            values.append(coerced)
+                    else:
+                        coerced = cls._coerce_optional_int(item)
+                        if coerced is not None:
+                            values.append(coerced)
             for container_key in ("extras", "extra_fields"):
                 for item in cls._iter_dict_values(non_tensor_batch.get(container_key)):
                     coerced = cls._coerce_optional_int(item.get(key))
@@ -131,6 +152,22 @@ class ToolGenerationManager:
             if values:
                 versions[key] = values
         return versions
+
+    @classmethod
+    def _format_rollout_weight_version_preview(cls, gen_output: DataProto) -> str:
+        non_tensor_batch = getattr(gen_output, "non_tensor_batch", {}) or {}
+        parts = []
+        for key in ("global_steps", "min_global_steps", "max_global_steps", "extras", "extra_fields"):
+            if key not in non_tensor_batch:
+                continue
+            raw_values = []
+            for item in cls._iter_preview_values(non_tensor_batch[key]):
+                raw_values.append(repr(item))
+                if len(raw_values) >= 3:
+                    break
+            type_name = type(non_tensor_batch[key]).__name__
+            parts.append(f"{key}:{type_name}=[{';'.join(raw_values)}]")
+        return " ".join(parts) if parts else "no_version_fields"
 
     @staticmethod
     def _format_int_values(values: List[int]) -> str:
@@ -712,6 +749,10 @@ class ToolGenerationManager:
                 progress_log(
                     f"rollout_weight_version turn={step + 1}/{self.config.max_turns} "
                     f"active={active_count} missing=1 non_tensor_keys={non_tensor_keys}"
+                )
+                progress_log(
+                    f"rollout_weight_version_raw turn={step + 1}/{self.config.max_turns} "
+                    f"{self._format_rollout_weight_version_preview(gen_output)}"
                 )
 
             postprocess_start = time.perf_counter()
