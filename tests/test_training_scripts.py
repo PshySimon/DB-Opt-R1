@@ -494,9 +494,11 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
         bench_content = (ROOT / "scripts" / "bench_grpo_trl_lora_16.sh").read_text()
         self.assertIn('COST_MODEL="${COST_MODEL:-./cost_model/checkpoints/v10_lgbm}"', bench_content)
 
-    def test_verl_grpo_main_sets_vllm_v1_runtime_env(self):
+    def test_verl_grpo_main_allows_runtime_env_overrides(self):
         content = (ROOT / "training" / "verl" / "main_grpo.py").read_text()
-        self.assertIn("'VLLM_USE_V1': '1'", content)
+        self.assertIn("'VLLM_USE_V1': os.environ.get('VLLM_USE_V1', '1')", content)
+        self.assertIn("'GRPO_DIAGNOSTICS': os.environ.get('GRPO_DIAGNOSTICS', 'False')", content)
+        self.assertIn("env_vars['VLLM_ATTENTION_BACKEND'] = os.environ['VLLM_ATTENTION_BACKEND']", content)
 
     def test_grpo_trainer_config_has_verl_071_targets(self):
         content = (ROOT / "configs" / "grpo_trainer.yaml").read_text()

@@ -232,15 +232,17 @@ def main(config):
 
 def run_grpo(config) -> None:
     if not ray.is_initialized():
-        ray.init(runtime_env={
-            'env_vars': {
-                'TOKENIZERS_PARALLELISM': 'true',
-                'NCCL_DEBUG': 'WARN',
-                'VLLM_LOGGING_LEVEL': 'WARN',
-                'VLLM_USE_V1': '1',
-                'CUDA_LAUNCH_BLOCKING': '1',
-            }
-        })
+        env_vars = {
+            'TOKENIZERS_PARALLELISM': os.environ.get('TOKENIZERS_PARALLELISM', 'true'),
+            'NCCL_DEBUG': os.environ.get('NCCL_DEBUG', 'WARN'),
+            'VLLM_LOGGING_LEVEL': os.environ.get('VLLM_LOGGING_LEVEL', 'WARN'),
+            'VLLM_USE_V1': os.environ.get('VLLM_USE_V1', '1'),
+            'CUDA_LAUNCH_BLOCKING': os.environ.get('CUDA_LAUNCH_BLOCKING', '1'),
+            'GRPO_DIAGNOSTICS': os.environ.get('GRPO_DIAGNOSTICS', 'False'),
+        }
+        if 'VLLM_ATTENTION_BACKEND' in os.environ:
+            env_vars['VLLM_ATTENTION_BACKEND'] = os.environ['VLLM_ATTENTION_BACKEND']
+        ray.init(runtime_env={'env_vars': env_vars})
 
     ray.get(main_task.remote(config))
 
