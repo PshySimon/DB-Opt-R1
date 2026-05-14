@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+import asyncio
 from unittest import mock
 import importlib.util
 import io
@@ -24,7 +25,11 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
             }
         )
 
-        fake_async_worker = type("AsyncActorRolloutRefWorker", (), {})
+        class fake_async_worker:
+            async def update_weights(self, global_steps=None):
+                await self.rollout.update_weights([], base_sync_done=True)
+                return True
+
         fake_critic_worker = type("CriticWorker", (), {})
         fake_worker_group = type("RayWorkerGroup", (), {})
 
@@ -43,10 +48,24 @@ class MainGrpoWorkerSelectionTest(unittest.TestCase):
         ), mock.patch.object(main_grpo.ray, "remote", side_effect=lambda cls: cls):
             role_worker_mapping, ray_worker_group_cls = main_grpo._build_worker_components(config)
 
-        self.assertIs(fake_async_worker, role_worker_mapping[main_grpo.Role.ActorRollout])
-        self.assertIs(fake_async_worker, role_worker_mapping[main_grpo.Role.RefPolicy])
+        self.assertTrue(issubclass(role_worker_mapping[main_grpo.Role.ActorRollout], fake_async_worker))
+        self.assertTrue(issubclass(role_worker_mapping[main_grpo.Role.RefPolicy], fake_async_worker))
+        self.assertNotEqual(fake_async_worker, role_worker_mapping[main_grpo.Role.ActorRollout])
         self.assertIs(fake_critic_worker, role_worker_mapping[main_grpo.Role.Critic])
         self.assertIs(fake_worker_group, ray_worker_group_cls)
+
+        class FakeRollout:
+            def __init__(self):
+                self.forwarded_kwargs = None
+
+            async def update_weights(self, weights, *args, **kwargs):
+                self.forwarded_kwargs = kwargs
+                return True
+
+        worker = role_worker_mapping[main_grpo.Role.ActorRollout]()
+        worker.rollout = FakeRollout()
+        self.assertTrue(asyncio.run(worker.update_weights(global_steps=7)))
+        self.assertEqual(7, worker.rollout.forwarded_kwargs["global_steps"])
 
     def test_db_reward_manager_returns_nonzero_answer_score_for_valid_set_knob_trajectory(self):
         solution = (

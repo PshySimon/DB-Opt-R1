@@ -24,6 +24,7 @@ from training.reward_score import (
     compute_score_format_answer,
     extract_best_predict_knobs,
 )
+from training.progress import progress_log
 
 
 # ============================================================
@@ -252,11 +253,38 @@ def _build_worker_components(config):
         assert config.actor_rollout_ref.actor.strategy == config.critic.strategy
         from verl.workers.fsdp_workers import AsyncActorRolloutRefWorker, CriticWorker
         from verl.single_controller.ray import RayWorkerGroup
+        from verl.single_controller.base.decorator import Dispatch, register
+
+        class DBOptAsyncActorRolloutRefWorker(AsyncActorRolloutRefWorker):
+            @register(dispatch_mode=Dispatch.ONE_TO_ALL, blocking=False)
+            async def update_weights(self, global_steps: int = None):
+                rollout = getattr(self, "rollout", None)
+                original_update_weights = getattr(rollout, "update_weights", None)
+                if rollout is None or original_update_weights is None:
+                    return await super().update_weights(global_steps=global_steps)
+
+                async def update_weights_with_global_steps(weights, *args, **kwargs):
+                    if global_steps is not None and kwargs.get("global_steps") is None:
+                        kwargs["global_steps"] = global_steps
+                    progress_log(
+                        "rollout_update_weights_forward "
+                        f"global_steps={global_steps} "
+                        f"forwarded_global_steps={kwargs.get('global_steps')} "
+                        f"base_sync_done={kwargs.get('base_sync_done')} "
+                        f"has_peft_config={kwargs.get('peft_config') is not None}"
+                    )
+                    return await original_update_weights(weights, *args, **kwargs)
+
+                rollout.update_weights = update_weights_with_global_steps
+                try:
+                    return await super().update_weights(global_steps=global_steps)
+                finally:
+                    rollout.update_weights = original_update_weights
 
         role_worker_mapping = {
-            Role.ActorRollout: ray.remote(AsyncActorRolloutRefWorker),
+            Role.ActorRollout: ray.remote(DBOptAsyncActorRolloutRefWorker),
             Role.Critic: ray.remote(CriticWorker),
-            Role.RefPolicy: ray.remote(AsyncActorRolloutRefWorker),
+            Role.RefPolicy: ray.remote(DBOptAsyncActorRolloutRefWorker),
         }
         return role_worker_mapping, RayWorkerGroup
 
