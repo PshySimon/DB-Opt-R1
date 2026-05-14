@@ -77,7 +77,6 @@ actor_rollout_ref:
     clip_ratio: 0.2
     entropy_coeff: 0.001
     calculate_entropy: False
-    diagnostics_enabled: ${oc.select:diagnostics.enabled,False}
     use_kl_loss: False # True for GRPO
     use_prefix_grouper: False
     use_torch_compile: True # False to disable torch compile

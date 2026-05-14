@@ -270,7 +270,7 @@ echo "gpu efficiency log: $GPU_EFFICIENCY_LOG_FILE"
 echo "配置: $TRAIN_CONFIG_JSON"
 echo "============================================"
 
-export GRPO_PROGRESS_LOG GRPO_PROGRESS_LOG_FILE GRPO_PROGRESS_HEARTBEAT_INTERVAL
+export GRPO_PROGRESS_LOG GRPO_PROGRESS_LOG_FILE GRPO_PROGRESS_HEARTBEAT_INTERVAL GRPO_DIAGNOSTICS
 
 trap finish_gpu_efficiency_monitor EXIT
 start_gpu_efficiency_monitor
@@ -297,7 +297,6 @@ python3 -m training.verl.main_grpo \
   actor_rollout_ref.actor.optim.lr=$LR \
   actor_rollout_ref.actor.ppo_mini_batch_size=$PPO_MINI_BATCH_SIZE \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=$PPO_MICRO_BATCH_SIZE \
-  actor_rollout_ref.actor.diagnostics_enabled=$GRPO_DIAGNOSTICS \
   actor_rollout_ref.actor.use_kl_loss=True \
   actor_rollout_ref.actor.kl_loss_coef=0.001 \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$REF_LOG_PROB_MICRO_BATCH_SIZE \

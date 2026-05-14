@@ -3,6 +3,7 @@ Single Process Actor
 """
 
 import itertools
+import os
 from typing import Iterable, Tuple
 
 import torch
@@ -59,6 +60,7 @@ class DataParallelPPOActor(BasePPOActor):
         print(f'Actor use_remove_padding={self.use_remove_padding}')
         self.ulysses_sequence_parallel_size = self.config.ulysses_sequence_parallel_size
         self.use_ulysses_sp = self.ulysses_sequence_parallel_size > 1
+        self.diagnostics_enabled = _config_bool(os.environ.get('GRPO_DIAGNOSTICS', False))
 
         self.compute_entropy_from_logits = (
             torch.compile(verl_F.entropy_from_logits, dynamic=True)
@@ -328,7 +330,7 @@ class DataParallelPPOActor(BasePPOActor):
                         'actor/pg_clipfrac': pg_clipfrac.detach().item(),
                         'actor/ppo_kl': ppo_kl.detach().item(),
                     }
-                    if _config_bool(self.config.get('diagnostics_enabled', False)):
+                    if self.diagnostics_enabled:
                         with torch.no_grad():
                             log_ratio = torch.clamp(log_prob.detach() - old_log_prob.detach(), min=-20.0, max=20.0)
                             ratio = torch.exp(log_ratio)
