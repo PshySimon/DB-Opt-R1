@@ -3,6 +3,7 @@ Single Process Actor
 """
 
 import itertools
+import inspect
 import os
 from typing import Iterable, Tuple
 
@@ -24,6 +25,12 @@ from flash_attn.bert_padding import pad_input, unpad_input, rearrange, index_fir
 __all__ = ['DataParallelPPOActor']
 
 
+try:
+    _POLICY_LOSS_PARAMS = set(inspect.signature(core_algos.compute_policy_loss).parameters)
+except (TypeError, ValueError):
+    _POLICY_LOSS_PARAMS = set()
+
+
 def _config_bool(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -42,6 +49,22 @@ def _masked_stats(prefix: str, values: torch.Tensor, mask: torch.Tensor) -> dict
         f'{prefix}/min': valid.min().item(),
         f'{prefix}/max': valid.max().item(),
     }
+
+
+def _compute_policy_loss(old_log_prob, log_prob, advantages, response_mask, clip_ratio, loss_agg_mode):
+    kwargs = {
+        'old_log_prob': old_log_prob,
+        'log_prob': log_prob,
+        'advantages': advantages,
+        'cliprange': clip_ratio,
+    }
+    mask_key = 'response_mask' if 'response_mask' in _POLICY_LOSS_PARAMS else 'eos_mask'
+    kwargs[mask_key] = response_mask
+    if 'loss_agg_mode' in _POLICY_LOSS_PARAMS:
+        kwargs['loss_agg_mode'] = loss_agg_mode
+
+    loss_outputs = core_algos.compute_policy_loss(**kwargs)
+    return loss_outputs[:3] if isinstance(loss_outputs, (tuple, list)) else loss_outputs
 
 
 class DataParallelPPOActor(BasePPOActor):
@@ -294,11 +317,14 @@ class DataParallelPPOActor(BasePPOActor):
                     # all return: (bsz, response_length)
                     entropy, log_prob = self._forward_micro_batch(micro_batch=data, temperature=temperature)
 
-                    pg_loss, pg_clipfrac, ppo_kl = core_algos.compute_policy_loss(old_log_prob=old_log_prob,
-                                                                                  log_prob=log_prob,
-                                                                                  advantages=advantages,
-                                                                                  eos_mask=response_mask,
-                                                                                  cliprange=clip_ratio)
+                    pg_loss, pg_clipfrac, ppo_kl = _compute_policy_loss(
+                        old_log_prob=old_log_prob,
+                        log_prob=log_prob,
+                        advantages=advantages,
+                        response_mask=response_mask,
+                        clip_ratio=clip_ratio,
+                        loss_agg_mode=self.config.get('loss_agg_mode', 'token-mean'),
+                    )
                     # compute entropy loss from entropy
                     entropy_loss = verl_F.masked_mean(entropy, response_mask)
 

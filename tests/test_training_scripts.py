@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 import json
 import subprocess
 import tempfile
@@ -132,6 +133,23 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
         self.assertIn("diagnostics.enabled=$GRPO_DIAGNOSTICS", grpo_full)
         self.assertIn("export GRPO_PROGRESS_LOG GRPO_PROGRESS_LOG_FILE GRPO_PROGRESS_HEARTBEAT_INTERVAL GRPO_DIAGNOSTICS", grpo_full)
         self.assertNotIn("actor_rollout_ref.actor.diagnostics_enabled", grpo_full)
+
+    def test_verl_actor_forwards_loss_agg_mode_to_policy_loss(self):
+        source = (ROOT / "training" / "verl" / "agent_dp_actor.py").read_text()
+        tree = ast.parse(source)
+
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_compute_policy_loss"
+        ]
+
+        self.assertTrue(calls)
+        keyword_names = {keyword.arg for call in calls for keyword in call.keywords}
+        self.assertIn("loss_agg_mode", keyword_names)
+        self.assertIn("'loss_agg_mode' in _POLICY_LOSS_PARAMS", source)
 
     def test_verl_grpo_defaults_use_sft_tool_protocol(self):
         config = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
