@@ -160,6 +160,85 @@ def _get_response_mask(data: DataProto) -> torch.Tensor:
     return attention_mask[:, -response_length:]
 
 
+def _config_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _tensor_stats(prefix: str, values: torch.Tensor) -> dict:
+    values = values.detach().float()
+    if values.numel() == 0:
+        return {}
+    return {
+        f'{prefix}/mean': values.mean().item(),
+        f'{prefix}/std': values.std(unbiased=False).item(),
+        f'{prefix}/min': values.min().item(),
+        f'{prefix}/max': values.max().item(),
+    }
+
+
+def compute_grpo_diagnostics(data: DataProto) -> dict:
+    metrics = {}
+    response_mask = _get_response_mask(data).bool()
+    token_level_rewards = data.batch['token_level_rewards']
+    sequence_rewards = token_level_rewards.sum(dim=-1).detach().float().cpu()
+
+    metrics.update(_tensor_stats('diagnostics/reward/sequence', sequence_rewards))
+
+    advantages = data.batch['advantages'] if 'advantages' in data.batch.keys() else None
+    if advantages is not None:
+        valid_advantages = torch.masked_select(advantages.detach().float(), response_mask)
+        if valid_advantages.numel() > 0:
+            metrics.update(_tensor_stats('diagnostics/advantage', valid_advantages))
+            metrics['diagnostics/advantage/abs_mean'] = valid_advantages.abs().mean().item()
+            metrics['diagnostics/advantage/abs_max'] = valid_advantages.abs().max().item()
+
+    index = data.non_tensor_batch.get('uid')
+    if index is None:
+        return metrics
+
+    id2scores = {}
+    for uid, reward in zip(index, sequence_rewards.tolist()):
+        id2scores.setdefault(str(uid), []).append(float(reward))
+
+    stds = []
+    ranges = []
+    zero_std = 0
+    singleton = 0
+    for scores in id2scores.values():
+        arr = np.asarray(scores, dtype=np.float32)
+        if arr.size <= 1:
+            singleton += 1
+            std = 0.0
+        else:
+            std = float(arr.std(ddof=1))
+        reward_range = float(arr.max() - arr.min()) if arr.size > 0 else 0.0
+        stds.append(std)
+        ranges.append(reward_range)
+        if std <= 1e-6:
+            zero_std += 1
+
+    if stds:
+        std_arr = np.asarray(stds, dtype=np.float32)
+        range_arr = np.asarray(ranges, dtype=np.float32)
+        group_count = len(stds)
+        metrics.update({
+            'diagnostics/grpo/group_count': group_count,
+            'diagnostics/grpo/group_reward_std_mean': float(std_arr.mean()),
+            'diagnostics/grpo/group_reward_std_min': float(std_arr.min()),
+            'diagnostics/grpo/group_reward_std_max': float(std_arr.max()),
+            'diagnostics/grpo/group_reward_range_mean': float(range_arr.mean()),
+            'diagnostics/grpo/group_reward_range_max': float(range_arr.max()),
+            'diagnostics/grpo/group_reward_zero_std_rate': zero_std / group_count,
+            'diagnostics/grpo/group_singleton_rate': singleton / group_count,
+        })
+
+    return metrics
+
+
 def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty='kl'):
     token_level_scores = data.batch['token_level_scores']
     batch_size = data.batch.batch_size[0]
@@ -335,6 +414,10 @@ class RayAgentTrainer(object):
 
         self._validate_config()
         self._create_dataloader()
+
+    def _diagnostics_enabled(self) -> bool:
+        diagnostics = self.config.get("diagnostics", {})
+        return _config_bool(diagnostics.get("enabled", False))
 
     def _update_early_stopping(self, val_metrics: dict) -> bool:
         cfg = self.config.trainer.get("early_stopping", None)
@@ -1252,6 +1335,8 @@ class RayAgentTrainer(object):
                                                   gamma=self.config.algorithm.gamma,
                                                   lam=self.config.algorithm.lam,
                                                   num_repeat=self.config.actor_rollout_ref.rollout.n)
+                        if self._diagnostics_enabled():
+                            metrics.update(compute_grpo_diagnostics(batch))
                     progress_log(f"step={self.global_steps} adv_done elapsed_s={timing_raw['adv']:.2f}")
 
                     # update critic
@@ -1371,5 +1456,17 @@ class RayAgentTrainer(object):
             'state_tokens/mean': loss_mask.sum().item() / len(responses),
             'state_tokens/coverage': (loss_mask.sum() / response_mask.sum()).item(),
         })
+        if self._diagnostics_enabled():
+            response_tokens = response_mask.detach().float().sum(dim=-1)
+            loss_tokens = loss_mask.detach().float().sum(dim=-1)
+            masked_tokens = response_tokens - loss_tokens
+            metrics.update({
+                'diagnostics/loss_mask/response_tokens_mean': response_tokens.mean().item(),
+                'diagnostics/loss_mask/response_tokens_max': response_tokens.max().item(),
+                'diagnostics/loss_mask/loss_tokens_mean': loss_tokens.mean().item(),
+                'diagnostics/loss_mask/loss_tokens_max': loss_tokens.max().item(),
+                'diagnostics/loss_mask/masked_tokens_mean': masked_tokens.mean().item(),
+                'diagnostics/loss_mask/coverage': (loss_tokens.sum() / response_tokens.sum()).item(),
+            })
         
         return batch, metrics

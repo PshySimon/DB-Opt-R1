@@ -143,6 +143,33 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         response_mask = mocked.call_args.kwargs["response_mask"]
         self.assertTrue(torch.equal(response_mask, explicit_response_mask))
 
+    def test_compute_grpo_diagnostics_reports_group_reward_spread(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        data = trainer_module.DataProto.from_dict(
+            tensors={
+                "token_level_rewards": torch.tensor(
+                    [[0.0, 1.0], [0.0, 3.0], [0.0, 2.0], [0.0, 2.0]],
+                    dtype=torch.float32,
+                ),
+                "advantages": torch.tensor(
+                    [[-1.0, -1.0], [1.0, 1.0], [0.0, 0.0], [0.0, 0.0]],
+                    dtype=torch.float32,
+                ),
+                "responses": torch.ones((4, 2), dtype=torch.long),
+                "response_mask": torch.ones((4, 2), dtype=torch.long),
+                "attention_mask": torch.ones((4, 4), dtype=torch.long),
+            },
+            non_tensors={"uid": np.array(["a", "a", "b", "b"], dtype=object)},
+        )
+
+        metrics = trainer_module.compute_grpo_diagnostics(data)
+
+        self.assertEqual(2, metrics["diagnostics/grpo/group_count"])
+        self.assertAlmostEqual(0.5, metrics["diagnostics/grpo/group_reward_zero_std_rate"])
+        self.assertAlmostEqual(1.0, metrics["diagnostics/grpo/group_reward_range_mean"])
+        self.assertAlmostEqual(0.5, metrics["diagnostics/advantage/abs_mean"])
+
     def test_init_workers_uses_actor_as_ref_for_lora(self):
         from training.verl import agent_ray_trainer as trainer_module
 

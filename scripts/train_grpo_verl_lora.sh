@@ -47,6 +47,7 @@ GRPO_PROGRESS_HEARTBEAT_INTERVAL="${GRPO_PROGRESS_HEARTBEAT_INTERVAL:-5}"
 GPU_EFFICIENCY_MONITOR="${GPU_EFFICIENCY_MONITOR:-0}"
 GPU_EFFICIENCY_INTERVAL="${GPU_EFFICIENCY_INTERVAL:-1}"
 GPU_EFFICIENCY_LOG_FILE="${GPU_EFFICIENCY_LOG_FILE:-$OUTPUT_DIR/gpu_efficiency.log}"
+GRPO_DIAGNOSTICS="${GRPO_DIAGNOSTICS:-False}"
 REWARD_DEBUG_NUM_EXAMINE="${REWARD_DEBUG_NUM_EXAMINE:-0}"
 VAL_REWARD_DEBUG_NUM_EXAMINE="${VAL_REWARD_DEBUG_NUM_EXAMINE:-1}"
 EARLY_STOPPING_ENABLED="${EARLY_STOPPING_ENABLED:-False}"
@@ -241,6 +242,7 @@ write_train_config_json "$TRAIN_CONFIG_JSON" \
   GPU_MEMORY_UTILIZATION UPDATE_WEIGHTS_BUCKET_MEGABYTES FREE_CACHE_ENGINE ATTN_IMPL DEBUG_ROLLOUT_DIR \
   GRPO_PROGRESS_LOG GRPO_PROGRESS_LOG_FILE GRPO_PROGRESS_HEARTBEAT_INTERVAL \
   GPU_EFFICIENCY_MONITOR GPU_EFFICIENCY_INTERVAL GPU_EFFICIENCY_LOG_FILE \
+  GRPO_DIAGNOSTICS \
   REWARD_DEBUG_NUM_EXAMINE VAL_REWARD_DEBUG_NUM_EXAMINE \
   EARLY_STOPPING_ENABLED EARLY_STOPPING_METRIC EARLY_STOPPING_MODE \
   EARLY_STOPPING_PATIENCE EARLY_STOPPING_MIN_DELTA PROJECT_NAME \
@@ -261,6 +263,7 @@ echo "modules:  $TARGET_MODULES"
 echo "max_model_len: $MAX_MODEL_LEN"
 echo "update bucket MB: $UPDATE_WEIGHTS_BUCKET_MEGABYTES"
 echo "attn_impl: $ATTN_IMPL"
+echo "diagnostics: $GRPO_DIAGNOSTICS"
 echo "progress log: $GRPO_PROGRESS_LOG_FILE"
 echo "gpu efficiency monitor: $GPU_EFFICIENCY_MONITOR"
 echo "gpu efficiency log: $GPU_EFFICIENCY_LOG_FILE"
@@ -283,6 +286,7 @@ python3 -m training.verl.main_grpo \
   data.max_start_length=$MAX_START_LENGTH \
   data.max_tool_response_length=$MAX_TOOL_RESPONSE_LENGTH \
   data.use_custom_tool_format_func=True \
+  diagnostics.enabled=$GRPO_DIAGNOSTICS \
   \
   actor_rollout_ref.model.path=$SFT_CHECKPOINT \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
@@ -293,6 +297,7 @@ python3 -m training.verl.main_grpo \
   actor_rollout_ref.actor.optim.lr=$LR \
   actor_rollout_ref.actor.ppo_mini_batch_size=$PPO_MINI_BATCH_SIZE \
   actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=$PPO_MICRO_BATCH_SIZE \
+  actor_rollout_ref.actor.diagnostics_enabled=$GRPO_DIAGNOSTICS \
   actor_rollout_ref.actor.use_kl_loss=True \
   actor_rollout_ref.actor.kl_loss_coef=0.001 \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$REF_LOG_PROB_MICRO_BATCH_SIZE \

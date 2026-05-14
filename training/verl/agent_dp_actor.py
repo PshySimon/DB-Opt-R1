@@ -23,6 +23,26 @@ from flash_attn.bert_padding import pad_input, unpad_input, rearrange, index_fir
 __all__ = ['DataParallelPPOActor']
 
 
+def _config_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _masked_stats(prefix: str, values: torch.Tensor, mask: torch.Tensor) -> dict:
+    valid = torch.masked_select(values.detach().float(), mask.bool())
+    if valid.numel() == 0:
+        return {}
+    return {
+        f'{prefix}/mean': valid.mean().item(),
+        f'{prefix}/std': valid.std(unbiased=False).item(),
+        f'{prefix}/min': valid.min().item(),
+        f'{prefix}/max': valid.max().item(),
+    }
+
+
 class DataParallelPPOActor(BasePPOActor):
 
     def __init__(
@@ -308,6 +328,27 @@ class DataParallelPPOActor(BasePPOActor):
                         'actor/pg_clipfrac': pg_clipfrac.detach().item(),
                         'actor/ppo_kl': ppo_kl.detach().item(),
                     }
+                    if _config_bool(self.config.get('diagnostics_enabled', False)):
+                        with torch.no_grad():
+                            log_ratio = torch.clamp(log_prob.detach() - old_log_prob.detach(), min=-20.0, max=20.0)
+                            ratio = torch.exp(log_ratio)
+                            mask = response_mask.bool()
+                            valid_ratio = torch.masked_select(ratio.float(), mask)
+                            valid_abs_log_ratio = torch.masked_select(log_ratio.abs().float(), mask)
+                            valid_adv = torch.masked_select(advantages.detach().float(), mask)
+                            if valid_ratio.numel() > 0:
+                                data.update(_masked_stats('diagnostics/policy/ratio', ratio, mask))
+                                data.update(_masked_stats('diagnostics/policy/abs_log_ratio', log_ratio.abs(), mask))
+                                data.update({
+                                    'diagnostics/policy/ratio_gt_1p1_rate': (valid_ratio > 1.1).float().mean().item(),
+                                    'diagnostics/policy/ratio_lt_0p9_rate': (valid_ratio < 0.9).float().mean().item(),
+                                    'diagnostics/policy/abs_log_ratio_gt_0p01_rate':
+                                        (valid_abs_log_ratio > 0.01).float().mean().item(),
+                                    'diagnostics/policy/adv_abs_mean': valid_adv.abs().mean().item(),
+                                    'diagnostics/policy/adv_abs_max': valid_adv.abs().max().item(),
+                                    'diagnostics/policy/loss_tokens_mean':
+                                        response_mask.detach().float().sum(dim=-1).mean().item(),
+                                })
                     append_to_dict(metrics, data)
 
                 grad_norm = self._optimizer_step()

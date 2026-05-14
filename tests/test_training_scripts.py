@@ -117,6 +117,9 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
         self.assertIn("write_train_config_json", grpo_lora)
         self.assertIn("trainer.default_local_dir=$OUTPUT_DIR", grpo_lora)
         self.assertIn("data.use_custom_tool_format_func=True", grpo_lora)
+        self.assertIn('GRPO_DIAGNOSTICS="${GRPO_DIAGNOSTICS:-False}"', grpo_lora)
+        self.assertIn("diagnostics.enabled=$GRPO_DIAGNOSTICS", grpo_lora)
+        self.assertIn("actor_rollout_ref.actor.diagnostics_enabled=$GRPO_DIAGNOSTICS", grpo_lora)
 
         grpo_full = (ROOT / "scripts" / "train_grpo_verl_full.sh").read_text()
         self.assertIn('configure_accelerator_visible_devices', grpo_full)
@@ -124,11 +127,16 @@ printf 'cuda=%s\\nhip=%s\\nrocr=%s\\n' "${CUDA_VISIBLE_DEVICES-}" "${HIP_VISIBLE
         self.assertIn("write_train_config_json", grpo_full)
         self.assertIn("trainer.default_local_dir=$OUTPUT_DIR", grpo_full)
         self.assertIn("data.use_custom_tool_format_func=True", grpo_full)
+        self.assertIn('GRPO_DIAGNOSTICS="${GRPO_DIAGNOSTICS:-False}"', grpo_full)
+        self.assertIn("diagnostics.enabled=$GRPO_DIAGNOSTICS", grpo_full)
+        self.assertIn("actor_rollout_ref.actor.diagnostics_enabled=$GRPO_DIAGNOSTICS", grpo_full)
 
     def test_verl_grpo_defaults_use_sft_tool_protocol(self):
         config = OmegaConf.load(ROOT / "configs" / "grpo_trainer.yaml")
 
         self.assertTrue(config.data.use_custom_tool_format_func)
+        self.assertFalse(config.diagnostics.enabled)
+        self.assertFalse(config.actor_rollout_ref.actor.diagnostics_enabled)
         self.assertTrue(config.tool.strip_think_history)
         self.assertEqual(4, config.tool.raw_prompt_history_turns)
         template = config.tool.tool_custom_response_template
