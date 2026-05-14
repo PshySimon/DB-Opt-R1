@@ -239,6 +239,37 @@ def compute_grpo_diagnostics(data: DataProto) -> dict:
     return metrics
 
 
+def compute_policy_drift_diagnostics(data: DataProto,
+                                     post_log_probs: torch.Tensor,
+                                     prefix: str = 'diagnostics/policy_post') -> dict:
+    if 'loss_mask' in data.batch.keys():
+        mask = data.batch['loss_mask'].bool()
+    else:
+        mask = _get_response_mask(data).bool()
+
+    old_log_probs = data.batch['old_log_probs'].detach().float()
+    post_log_probs = post_log_probs.detach().float()
+    log_ratio = torch.clamp(post_log_probs - old_log_probs, min=-20.0, max=20.0)
+    ratio = torch.exp(log_ratio)
+
+    valid_ratio = torch.masked_select(ratio, mask)
+    valid_abs_log_ratio = torch.masked_select(log_ratio.abs(), mask)
+    if valid_ratio.numel() == 0:
+        return {}
+
+    return {
+        f'{prefix}/ratio_mean': valid_ratio.mean().item(),
+        f'{prefix}/ratio_std': valid_ratio.std(unbiased=False).item(),
+        f'{prefix}/ratio_min': valid_ratio.min().item(),
+        f'{prefix}/ratio_max': valid_ratio.max().item(),
+        f'{prefix}/abs_log_ratio_mean': valid_abs_log_ratio.mean().item(),
+        f'{prefix}/abs_log_ratio_max': valid_abs_log_ratio.max().item(),
+        f'{prefix}/ratio_gt_1p1_rate': (valid_ratio > 1.1).float().mean().item(),
+        f'{prefix}/ratio_lt_0p9_rate': (valid_ratio < 0.9).float().mean().item(),
+        f'{prefix}/abs_log_ratio_gt_0p01_rate': (valid_abs_log_ratio > 0.01).float().mean().item(),
+    }
+
+
 def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.AdaptiveKLController, kl_penalty='kl'):
     token_level_scores = data.batch['token_level_scores']
     batch_size = data.batch.batch_size[0]
@@ -1357,6 +1388,15 @@ class RayAgentTrainer(object):
                         actor_output_metrics = reduce_metrics(actor_output.meta_info['metrics'])
                         metrics.update(actor_output_metrics)
                         progress_log(f"step={self.global_steps} update_actor_done elapsed_s={timing_raw['update_actor']:.2f}")
+                        if self._diagnostics_enabled():
+                            progress_log(f"step={self.global_steps} policy_drift_start")
+                            with _timer('policy_drift', timing_raw):
+                                with progress_heartbeat(f"step={self.global_steps} policy_drift"):
+                                    post_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
+                            metrics.update(compute_policy_drift_diagnostics(batch, post_log_prob.batch['old_log_probs']))
+                            progress_log(
+                                f"step={self.global_steps} policy_drift_done elapsed_s={timing_raw['policy_drift']:.2f}"
+                            )
 
                     # validate
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and \

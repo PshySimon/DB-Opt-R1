@@ -170,6 +170,26 @@ class AgentRayTrainerDataloaderTest(unittest.TestCase):
         self.assertAlmostEqual(1.0, metrics["diagnostics/grpo/group_reward_range_mean"])
         self.assertAlmostEqual(0.5, metrics["diagnostics/advantage/abs_mean"])
 
+    def test_compute_policy_drift_diagnostics_reports_post_update_log_ratio(self):
+        from training.verl import agent_ray_trainer as trainer_module
+
+        data = trainer_module.DataProto.from_dict(
+            tensors={
+                "old_log_probs": torch.tensor([[0.0, -1.0], [-2.0, -3.0]], dtype=torch.float32),
+                "responses": torch.ones((2, 2), dtype=torch.long),
+                "response_mask": torch.ones((2, 2), dtype=torch.long),
+                "loss_mask": torch.tensor([[1, 1], [1, 0]], dtype=torch.long),
+                "attention_mask": torch.ones((2, 4), dtype=torch.long),
+            },
+        )
+        post_log_probs = torch.tensor([[0.1, -1.2], [-2.0, -2.0]], dtype=torch.float32)
+
+        metrics = trainer_module.compute_policy_drift_diagnostics(data, post_log_probs)
+
+        self.assertIn("diagnostics/policy_post/abs_log_ratio_mean", metrics)
+        self.assertGreater(metrics["diagnostics/policy_post/abs_log_ratio_mean"], 0)
+        self.assertGreater(metrics["diagnostics/policy_post/ratio_gt_1p1_rate"], 0)
+
     def test_init_workers_uses_actor_as_ref_for_lora(self):
         from training.verl import agent_ray_trainer as trainer_module
 
