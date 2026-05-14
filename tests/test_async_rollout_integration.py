@@ -3,6 +3,7 @@ import io
 import unittest
 from contextlib import redirect_stdout
 
+import numpy as np
 import torch
 
 from core.tool.tool_base import Tool
@@ -51,17 +52,20 @@ class _BudgetTokenizer(_FakeTokenizer):
 
 
 class _FakeSequenceGenerator:
-    def __init__(self):
+    def __init__(self, non_tensors=None):
         self.calls = 0
         self.last_non_tensor_batch = None
+        self.non_tensors = non_tensors
 
     def generate_sequences(self, batch):
         self.calls += 1
         self.last_non_tensor_batch = batch.non_tensor_batch
+        non_tensors = self.non_tensors(batch) if callable(self.non_tensors) else self.non_tensors
         return DataProto.from_dict(
             tensors={
                 "responses": torch.ones((batch.batch["input_ids"].shape[0], 2), dtype=torch.long),
             },
+            non_tensors=non_tensors or {},
             meta_info={},
         )
 
@@ -283,6 +287,69 @@ class AsyncRolloutIntegrationTest(unittest.TestCase):
         self.assertIn("gen_tokens_total=", logs)
         self.assertIn("gen_tok_s=", logs)
         self.assertIn("rollout_token_profile_total", logs)
+
+    def test_tool_generation_manager_logs_rollout_weight_versions(self):
+        tokenizer = _FakeTokenizer()
+
+        def version_payload(batch):
+            size = batch.batch["input_ids"].shape[0]
+            return {
+                "global_steps": np.array([3] * size, dtype=object),
+                "extras": np.array([{"min_global_steps": 3, "max_global_steps": 3}] * size, dtype=object),
+            }
+
+        sequence_generator = _FakeSequenceGenerator(non_tensors=version_payload)
+        manager = ToolGenerationManager(
+            tokenizer=tokenizer,
+            sequence_generator=sequence_generator,
+            config=ToolGenerationConfig(
+                max_turns=1,
+                max_start_length=8,
+                max_prompt_length=8,
+                max_response_length=8,
+                max_tool_response_length=8,
+                num_gpus=1,
+            ),
+        )
+        batch = DataProto.from_dict(
+            tensors={
+                "input_ids": torch.ones((2, 4), dtype=torch.long),
+                "attention_mask": torch.ones((2, 4), dtype=torch.long),
+                "position_ids": torch.arange(4).repeat(2, 1),
+            },
+        )
+
+        with unittest.mock.patch.object(
+            manager,
+            "_postprocess_responses",
+            return_value=(
+                torch.tensor([[11, 12], [21, 22]], dtype=torch.long),
+                ["call-a", "call-b"],
+                torch.tensor([False, False]),
+            ),
+        ), unittest.mock.patch.object(
+            manager,
+            "_execute_tool_calls",
+            return_value=(["tool-a", "tool-b"], [False, False]),
+        ), unittest.mock.patch.object(
+            manager,
+            "_process_tool_responses",
+            return_value=torch.tensor([[31, 32], [41, 42]], dtype=torch.long),
+        ):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                manager.run_llm_loop(
+                    gen_batch=batch,
+                    envs=[_FakeEnv(), _FakeEnv()],
+                    initial_input_ids=batch.batch["input_ids"],
+                )
+
+        logs = stdout.getvalue()
+        self.assertIn("rollout_weight_version turn=1/1 active=2", logs)
+        self.assertIn("global_steps_min=3", logs)
+        self.assertIn("min_global_steps_min=3", logs)
+        self.assertIn("max_global_steps_min=3", logs)
+        self.assertIn("rollout_weight_version_total", logs)
 
     def test_tool_generation_manager_stops_when_env_marks_done(self):
         tokenizer = _FakeTokenizer()

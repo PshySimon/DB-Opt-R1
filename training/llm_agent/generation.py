@@ -60,6 +60,102 @@ class ToolGenerationManager:
             max_start_length=config.max_start_length,
         ))
 
+    @staticmethod
+    def _coerce_optional_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, torch.Tensor):
+            if value.numel() != 1:
+                return None
+            value = value.detach().cpu().item()
+        if isinstance(value, np.generic):
+            value = value.item()
+        if isinstance(value, float) and np.isnan(value):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    @classmethod
+    def _iter_flat_values(cls, value: Any):
+        if value is None:
+            return
+        if isinstance(value, np.ndarray):
+            for item in value.reshape(-1):
+                yield from cls._iter_flat_values(item)
+            return
+        if isinstance(value, torch.Tensor) and value.numel() != 1:
+            for item in value.detach().cpu().reshape(-1):
+                yield from cls._iter_flat_values(item)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                yield from cls._iter_flat_values(item)
+            return
+        yield value
+
+    @classmethod
+    def _iter_dict_values(cls, value: Any):
+        if value is None:
+            return
+        if isinstance(value, np.ndarray):
+            for item in value.reshape(-1):
+                yield from cls._iter_dict_values(item)
+            return
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                yield from cls._iter_dict_values(item)
+            return
+        if isinstance(value, dict):
+            yield value
+
+    @classmethod
+    def _collect_rollout_weight_versions(cls, gen_output: DataProto) -> Dict[str, List[int]]:
+        """Collect rollout weight-version fields returned by async vLLM servers."""
+        non_tensor_batch = getattr(gen_output, "non_tensor_batch", {}) or {}
+        version_keys = ("global_steps", "min_global_steps", "max_global_steps")
+        versions = {}
+        for key in version_keys:
+            values = []
+            if key in non_tensor_batch:
+                for item in cls._iter_flat_values(non_tensor_batch[key]):
+                    coerced = cls._coerce_optional_int(item)
+                    if coerced is not None:
+                        values.append(coerced)
+            for container_key in ("extras", "extra_fields"):
+                for item in cls._iter_dict_values(non_tensor_batch.get(container_key)):
+                    coerced = cls._coerce_optional_int(item.get(key))
+                    if coerced is not None:
+                        values.append(coerced)
+            if values:
+                versions[key] = values
+        return versions
+
+    @staticmethod
+    def _format_int_values(values: List[int]) -> str:
+        unique_values = sorted(set(values))
+        if len(unique_values) <= 8:
+            return ",".join(str(value) for value in unique_values)
+        head = ",".join(str(value) for value in unique_values[:4])
+        tail = ",".join(str(value) for value in unique_values[-2:])
+        return f"{head},...,{tail}"
+
+    @classmethod
+    def _format_rollout_weight_versions(cls, prefix: str, versions: Dict[str, List[int]]) -> str:
+        parts = [prefix]
+        for key in ("global_steps", "min_global_steps", "max_global_steps"):
+            values = versions.get(key)
+            if not values:
+                continue
+            parts.extend([
+                f"{key}_min={min(values)}",
+                f"{key}_max={max(values)}",
+                f"{key}_unique={cls._format_int_values(values)}",
+                f"{key}_count={len(values)}",
+            ])
+        return " ".join(parts)
+
     def _batch_tokenize(self, responses: List[str]) -> torch.Tensor:
         """Tokenize a batch of responses."""
         return self.tokenizer(
@@ -565,6 +661,7 @@ class ToolGenerationManager:
         meta_info = {}
         rollout_profile_totals = defaultdict(float)
         rollout_token_totals = defaultdict(float)
+        rollout_weight_version_totals = defaultdict(list)
 
         progress_log(
             f"rollout_start batch={batch_size} max_turns={self.config.max_turns} "
@@ -598,6 +695,24 @@ class ToolGenerationManager:
                 gen_output = self._generate_with_gpu_padding(rollings_active)
             generate_elapsed = time.perf_counter() - generate_start
             generated_token_lengths = self._token_lengths(gen_output.batch["responses"])
+            rollout_weight_versions = self._collect_rollout_weight_versions(gen_output)
+            if rollout_weight_versions:
+                for key, values in rollout_weight_versions.items():
+                    rollout_weight_version_totals[key].extend(values)
+                progress_log(
+                    self._format_rollout_weight_versions(
+                        f"rollout_weight_version turn={step + 1}/{self.config.max_turns} active={active_count}",
+                        rollout_weight_versions,
+                    )
+                )
+            else:
+                non_tensor_keys = ",".join(
+                    sorted(str(key) for key in (getattr(gen_output, "non_tensor_batch", {}) or {}).keys())
+                ) or "none"
+                progress_log(
+                    f"rollout_weight_version turn={step + 1}/{self.config.max_turns} "
+                    f"active={active_count} missing=1 non_tensor_keys={non_tensor_keys}"
+                )
 
             postprocess_start = time.perf_counter()
             meta_info = gen_output.meta_info
@@ -773,6 +888,13 @@ class ToolGenerationManager:
                 self._format_token_profile(
                     "rollout_token_profile_total",
                     token_summary,
+                )
+            )
+        if rollout_weight_version_totals:
+            progress_log(
+                self._format_rollout_weight_versions(
+                    "rollout_weight_version_total",
+                    dict(rollout_weight_version_totals),
                 )
             )
         
